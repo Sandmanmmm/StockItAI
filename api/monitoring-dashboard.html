@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redis Job Queue Monitor - PO Sync Pro</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .header {
+            background: #2563eb;
+            color: white;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: between;
+            align-items: center;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-healthy { background: #10b981; }
+        .status-warning { background: #f59e0b; }
+        .status-critical { background: #ef4444; }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .card h3 {
+            margin-bottom: 1rem;
+            color: #1f2937;
+            font-size: 1.1rem;
+        }
+
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .metric:last-child {
+            border-bottom: none;
+        }
+
+        .metric-label {
+            font-weight: 500;
+            color: #6b7280;
+        }
+
+        .metric-value {
+            font-weight: 700;
+            color: #1f2937;
+        }
+
+        .metric-value.critical { color: #ef4444; }
+        .metric-value.warning { color: #f59e0b; }
+        .metric-value.success { color: #10b981; }
+
+        .alert {
+            margin: 1rem 0;
+            padding: 1rem;
+            border-radius: 6px;
+            border-left: 4px solid;
+        }
+
+        .alert-warning {
+            background: #fef3c7;
+            border-color: #f59e0b;
+            color: #92400e;
+        }
+
+        .alert-critical {
+            background: #fee2e2;
+            border-color: #ef4444;
+            color: #dc2626;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin-top: 1rem;
+        }
+
+        .refresh-btn {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-left: 1rem;
+        }
+
+        .refresh-btn:hover {
+            background: #1d4ed8;
+        }
+
+        .last-updated {
+            color: #6b7280;
+            font-size: 0.875rem;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .header {
+                padding: 1rem;
+            }
+            
+            .container {
+                padding: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div>
+            <h1>Redis Job Queue Monitor</h1>
+            <span class="last-updated" id="lastUpdated">Loading...</span>
+        </div>
+        <div>
+            <span class="status-indicator" id="statusIndicator"></span>
+            <span id="overallStatus">Checking...</span>
+            <button class="refresh-btn" onclick="refreshDashboard()">Refresh</button>
+        </div>
+    </header>
+
+    <div class="container">
+        <div id="alerts"></div>
+
+        <div class="dashboard-grid">
+            <!-- Queue Status Card -->
+            <div class="card">
+                <h3>Queue Status</h3>
+                <div class="metric">
+                    <span class="metric-label">Waiting Jobs</span>
+                    <span class="metric-value" id="waitingJobs">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Active Jobs</span>
+                    <span class="metric-value" id="activeJobs">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Completed Jobs</span>
+                    <span class="metric-value success" id="completedJobs">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Failed Jobs</span>
+                    <span class="metric-value" id="failedJobs">-</span>
+                </div>
+            </div>
+
+            <!-- Performance Card -->
+            <div class="card">
+                <h3>Performance</h3>
+                <div class="metric">
+                    <span class="metric-label">Failure Rate</span>
+                    <span class="metric-value" id="failureRate">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Throughput</span>
+                    <span class="metric-value" id="throughput">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Redis Memory</span>
+                    <span class="metric-value" id="redisMemory">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Connections</span>
+                    <span class="metric-value" id="redisConnections">-</span>
+                </div>
+            </div>
+
+            <!-- Dead Letter Queue Card -->
+            <div class="card">
+                <h3>Dead Letter Queue</h3>
+                <div class="metric">
+                    <span class="metric-label">Failed Jobs</span>
+                    <span class="metric-value" id="deadLetterCount">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Status</span>
+                    <span class="metric-value" id="deadLetterStatus">-</span>
+                </div>
+            </div>
+
+            <!-- System Health Card -->
+            <div class="card">
+                <h3>System Health</h3>
+                <div class="metric">
+                    <span class="metric-label">Redis</span>
+                    <span class="metric-value" id="redisStatus">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Queues</span>
+                    <span class="metric-value" id="queuesStatus">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Uptime</span>
+                    <span class="metric-value" id="uptime">-</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="card">
+            <h3>Job Processing Trends</h3>
+            <div class="chart-container">
+                <canvas id="jobTrendsChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let dashboardData = null;
+        let chart = null;
+
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeChart();
+            refreshDashboard();
+            
+            // Auto-refresh every 30 seconds
+            setInterval(refreshDashboard, 30000);
+        });
+
+        async function refreshDashboard() {
+            try {
+                console.log('Fetching dashboard data...');
+                const response = await fetch('/api/monitoring/dashboard');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                dashboardData = await response.json();
+                
+                if (dashboardData.success) {
+                    updateDashboard(dashboardData.data);
+                } else {
+                    showError('Failed to load dashboard: ' + dashboardData.error);
+                }
+                
+            } catch (error) {
+                console.error('Dashboard refresh failed:', error);
+                showError('Connection failed: ' + error.message);
+            }
+        }
+
+        function updateDashboard(data) {
+            // Update status indicator
+            const statusIndicator = document.getElementById('statusIndicator');
+            const overallStatus = document.getElementById('overallStatus');
+            
+            statusIndicator.className = 'status-indicator status-' + data.status.overall;
+            overallStatus.textContent = data.status.overall.charAt(0).toUpperCase() + data.status.overall.slice(1);
+            
+            // Update last updated timestamp
+            document.getElementById('lastUpdated').textContent = 
+                'Last updated: ' + new Date(data.timestamp).toLocaleTimeString();
+
+            // Update queue metrics
+            const mainQueue = data.queues.main;
+            document.getElementById('waitingJobs').textContent = mainQueue.waiting || 0;
+            document.getElementById('activeJobs').textContent = mainQueue.active || 0;
+            document.getElementById('completedJobs').textContent = mainQueue.completed || 0;
+            
+            const failedElement = document.getElementById('failedJobs');
+            failedElement.textContent = mainQueue.failed || 0;
+            failedElement.className = 'metric-value ' + (mainQueue.failed > 0 ? 'warning' : '');
+
+            // Update performance metrics
+            const failureRateElement = document.getElementById('failureRate');
+            const failureRate = data.performance.jobs.failureRate;
+            failureRateElement.textContent = failureRate + '%';
+            failureRateElement.className = 'metric-value ' + (failureRate > 5 ? 'critical' : failureRate > 2 ? 'warning' : 'success');
+            
+            document.getElementById('throughput').textContent = mainQueue.throughput + '/hr';
+            document.getElementById('redisMemory').textContent = data.performance.memory.used;
+            document.getElementById('redisConnections').textContent = data.performance.connections;
+
+            // Update dead letter queue
+            document.getElementById('deadLetterCount').textContent = data.queues.deadLetter.count || 0;
+            document.getElementById('deadLetterStatus').textContent = data.queues.deadLetter.enabled ? 'Enabled' : 'Disabled';
+
+            // Update system health
+            document.getElementById('redisStatus').textContent = data.status.redis;
+            document.getElementById('queuesStatus').textContent = data.status.queues;
+            document.getElementById('uptime').textContent = formatUptime(data.performance.uptime);
+
+            // Update alerts
+            displayAlerts(data.alerts);
+            
+            // Update chart
+            updateChart(data);
+        }
+
+        function displayAlerts(alerts) {
+            const alertsContainer = document.getElementById('alerts');
+            alertsContainer.innerHTML = '';
+            
+            alerts.forEach(alert => {
+                const alertDiv = document.createElement('div');
+                alertDiv.className = 'alert alert-' + alert.level;
+                alertDiv.innerHTML = `
+                    <strong>${alert.type.replace(/_/g, ' ').toUpperCase()}:</strong> 
+                    ${alert.message}
+                    <br><small><strong>Action:</strong> ${alert.action}</small>
+                `;
+                alertsContainer.appendChild(alertDiv);
+            });
+        }
+
+        function initializeChart() {
+            const ctx = document.getElementById('jobTrendsChart').getContext('2d');
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Active Jobs',
+                        data: [],
+                        borderColor: '#2563eb',
+                        backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                        tension: 0.3
+                    }, {
+                        label: 'Failed Jobs',
+                        data: [],
+                        borderColor: '#ef4444',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: {
+                                color: '#e5e7eb'
+                            }
+                        },
+                        x: {
+                            grid: {
+                                color: '#e5e7eb'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top'
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateChart(data) {
+            // Mock chart data - in production this would come from the metrics history endpoint
+            const now = new Date();
+            const times = [];
+            const activeData = [];
+            const failedData = [];
+            
+            for (let i = 11; i >= 0; i--) {
+                const time = new Date(now.getTime() - (i * 5 * 60 * 1000)); // 5 minute intervals
+                times.push(time.toLocaleTimeString());
+                activeData.push(Math.max(0, (data.queues.main.active || 0) + Math.floor(Math.random() * 10) - 5));
+                failedData.push(Math.max(0, Math.floor(Math.random() * 3)));
+            }
+            
+            chart.data.labels = times;
+            chart.data.datasets[0].data = activeData;
+            chart.data.datasets[1].data = failedData;
+            chart.update();
+        }
+
+        function formatUptime(seconds) {
+            if (!seconds) return 'N/A';
+            
+            const days = Math.floor(seconds / (24 * 60 * 60));
+            const hours = Math.floor((seconds % (24 * 60 * 60)) / (60 * 60));
+            const minutes = Math.floor((seconds % (60 * 60)) / 60);
+            
+            if (days > 0) return `${days}d ${hours}h`;
+            if (hours > 0) return `${hours}h ${minutes}m`;
+            return `${minutes}m`;
+        }
+
+        function showError(message) {
+            const alertsContainer = document.getElementById('alerts');
+            alertsContainer.innerHTML = `
+                <div class="alert alert-critical">
+                    <strong>CONNECTION ERROR:</strong> ${message}
+                </div>
+            `;
+            
+            // Update status to show error
+            document.getElementById('statusIndicator').className = 'status-indicator status-critical';
+            document.getElementById('overallStatus').textContent = 'Connection Failed';
+        }
+    </script>
+</body>
+</html>

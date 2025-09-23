@@ -22,7 +22,7 @@ import {
   Users,
   Package
 } from '@phosphor-icons/react'
-import { useKV } from '@github/spark/hooks'
+import { useKV } from '../hooks/useKV'
 
 interface ChatMessage {
   id: string

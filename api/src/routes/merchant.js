@@ -1,27 +1,47 @@
 /**
  * Merchant API routes
+ * All routes are protected by Shopify authentication middleware
  */
 
 import express from 'express'
 import { db } from '../lib/db.js'
+import { verifyShopifyRequest, devBypassAuth } from '../lib/auth.js'
 
 const router = express.Router()
+
+// Apply authentication middleware to all routes
+// Use devBypassAuth in development for easier testing
+const authMiddleware = process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest
+router.use(authMiddleware)
 
 // GET /api/merchant - Get current merchant info
 router.get('/', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    
-    if (!merchant) {
-      return res.status(404).json({
+    // req.shop is set by authentication middleware
+    if (!req.shop) {
+      return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Authentication required'
       })
     }
 
     res.json({
       success: true,
-      data: merchant
+      data: {
+        id: req.shop.id,
+        shopDomain: req.shop.shopDomain,
+        name: req.shop.name,
+        email: req.shop.email,
+        phone: req.shop.phone,
+        address: req.shop.address,
+        timezone: req.shop.timezone,
+        currency: req.shop.currency,
+        plan: req.shop.plan,
+        status: req.shop.status,
+        settings: req.shop.settings,
+        createdAt: req.shop.createdAt,
+        updatedAt: req.shop.updatedAt
+      }
     })
   } catch (error) {
     console.error('Get merchant error:', error)
@@ -35,18 +55,25 @@ router.get('/', async (req, res) => {
 // PUT /api/merchant - Update merchant info
 router.put('/', async (req, res) => {
   try {
-    const currentMerchant = await db.getCurrentMerchant()
-    
-    if (!currentMerchant) {
-      return res.status(404).json({
+    if (!req.shop) {
+      return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Authentication required'
       })
     }
 
     const updatedMerchant = await db.client.merchant.update({
-      where: { id: currentMerchant.id },
-      data: req.body
+      where: { id: req.shop.id },
+      data: {
+        name: req.body.name,
+        email: req.body.email,
+        phone: req.body.phone,
+        address: req.body.address,
+        timezone: req.body.timezone,
+        currency: req.body.currency,
+        settings: req.body.settings,
+        updatedAt: new Date()
+      }
     })
 
     res.json({

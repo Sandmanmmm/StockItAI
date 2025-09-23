@@ -1,92 +1,211 @@
-import { useState, useCallback, useRef } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
-import { Progress } from '@/components/ui/progress'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { 
-  Upload,
-  FileText,
-  Check,
-  Warning,
-  X,
-  Eye,
-  Stack,
-  Lightning,
-  Pause,
-  Play,
-  ArrowsClockwise,
-  Download,
-  CloudArrowUp,
-  FolderOpen,
-  Robot,
-  ChartLineUp,
-  Trash,
-  Gear,
-  MagicWand,
-  Target
-} from '@phosphor-icons/react'
-import { cn } from '@/lib/utils'
+import { useState } from 'react'import { useState } from 'react'import { useState } from 'react'
+
+import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+
+import { Button } from '@/components/ui/button'import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+
+import { Gear } from '@phosphor-icons/react'import { Button } from '@/components/ui/button'import { Button } from '@/components/ui/button'
+
 import { toast } from 'sonner'
-import { useKV } from '@github/spark/hooks'
-import { BulkPOConfiguration } from './BulkPOConfiguration'
 
-interface ParsedItem {
-  sku: string
-  name: string
-  quantity: number
-  price: number
-  confidence: number
-}
+import { BulkPOConfiguration } from './BulkPOConfiguration'import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
-interface ParsedPO {
-  supplier: string
-  poNumber: string
-  date: string
-  items: ParsedItem[]
-  totalItems: number
-  totalValue: number
-  averageConfidence: number
-}
+import { ProductionPOUpload } from './ProductionPOUpload'
 
-interface UploadedFile {
-  id: string
-  file: File
-  status: 'pending' | 'processing' | 'completed' | 'failed' | 'paused'
-  progress: number
-  parsedData: ParsedPO | null
-  error?: string
-  selected: boolean
-  processingStarted: number | null
-  processingCompleted: number | null
-}
+import { PurchaseOrder } from '@/lib/apiService'import { Gear } from '@phosphor-icons/react'import { Gear } from '@phosphor-icons/react'
 
-interface BatchStats {
-  total: number
-  pending: number
-  processing: number
-  completed: number
-  failed: number
-  totalValue: number
-  totalItems: number
-  averageConfidence: number
-}
 
-export function POUpload() {
-  const [isDragOver, setIsDragOver] = useState(false)
-  const [uploadedFiles, setUploadedFiles] = useKV<UploadedFile[]>('bulk-po-uploads', [])
-  const [isProcessing, setIsProcessing] = useState(false)
-  const [isPaused, setIsPaused] = useState(false)
-  const [activeTab, setActiveTab] = useState('upload')
-  const [selectedFiles, setSelectedFiles] = useState<string[]>([])
+
+/**import { toast } from 'sonner'import { toast } from 'sonner'
+
+ * Main Purchase Order Upload Component
+
+ * Production-ready file upload with real-time processingimport { BulkPOConfiguration } from './BulkPOConfiguration'import { BulkPOConfiguration } from './BulkPOConfiguration'
+
+ */
+
+export function POUpload() {import { ProductionPOUpload } from './ProductionPOUpload'import { ProductionPOUpload } from './ProductionPOUpload'
+
   const [isConfigOpen, setIsConfigOpen] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const processingRef = useRef<NodeJS.Timeout | null>(null)
+
+import { PurchaseOrder } from '@/lib/apiService'import { PurchaseOrder } from '@/lib/apiService'
+
+  const handleUploadComplete = (purchaseOrder: PurchaseOrder) => {
+
+    toast.success(`Successfully processed PO: ${purchaseOrder.number}`)
+
+  }
+
+/**/**
+
+  const handleUploadError = (error: string) => {
+
+    toast.error(`Upload failed: ${error}`) * Main Purchase Order Upload Component * Main Purchase Order Upload Component
+
+  }
+
+ * Production-ready file upload with real-time processing * Production-ready file upload with real-time processing
+
+  return (
+
+    <div className="space-y-6"> */ */
+
+      <Card>
+
+        <CardHeader>export function POUpload() {export function POUpload() {
+
+          <div className="flex items-center justify-between">
+
+            <div>  const [isConfigOpen, setIsConfigOpen] = useState(false)  const [isConfigOpen, setIsConfigOpen] = useState(false)
+
+              <CardTitle>Purchase Order Upload</CardTitle>
+
+              <CardDescription>
+
+                Upload and process purchase order files with AI-powered extraction
+
+              </CardDescription>  const handleUploadComplete = (purchaseOrder: PurchaseOrder) => {  const handleUploadComplete = (purchaseOrder: PurchaseOrder) => {
+
+            </div>
+
+            <Button    toast.success(`Successfully processed PO: ${purchaseOrder.number}`)    toast.success(`Successfully processed PO: ${purchaseOrder.number}`)
+
+              variant="outline"
+
+              size="sm"  }  }
+
+              onClick={() => setIsConfigOpen(true)}
+
+            >
+
+              <Gear className="w-4 h-4 mr-1" />
+
+              Configure  const handleUploadError = (error: string) => {  const handleUploadError = (error: string) => {
+
+            </Button>
+
+          </div>    toast.error(`Upload failed: ${error}`)    toast.error(`Upload failed: ${error}`)
+
+        </CardHeader>
+
+      </Card>  }  }
+
+      
+
+      <ProductionPOUpload
+
+        onUploadComplete={handleUploadComplete}
+
+        onUploadError={handleUploadError}  return (  return (
+
+        autoProcess={true}
+
+        confidenceThreshold={0.8}    <div className="space-y-6">    <div className="space-y-6">
+
+      />
+
+      <Card>      <Card>
+
+      {/* Configuration Dialog */}
+
+      <Dialog open={isConfigOpen} onOpenChange={setIsConfigOpen}>        <CardHeader>        <CardHeader>
+
+        <DialogContent className="max-w-4xl">
+
+          <DialogHeader>          <div className="flex items-center justify-between">          <div className="flex items-center justify-between">
+
+            <DialogTitle>Upload Configuration</DialogTitle>
+
+            <DialogDescription>            <div>            <div>
+
+              Configure AI processing settings and upload options
+
+            </DialogDescription>              <CardTitle>Purchase Order Upload</CardTitle>              <CardTitle>Purchase Order Upload</CardTitle>
+
+          </DialogHeader>
+
+          <BulkPOConfiguration />              <CardDescription>              <CardDescription>
+
+        </DialogContent>
+
+      </Dialog>                Upload and process purchase order files with AI-powered extraction                Upload and process purchase order files with AI-powered extraction
+
+    </div>
+
+  )              </CardDescription>              </CardDescription>
+
+}
+            </div>            </div>
+
+            <Button            <Button
+
+              variant="outline"              variant="outline"
+
+              size="sm"              size="sm"
+
+              onClick={() => setIsConfigOpen(true)}              onClick={() => setIsConfigOpen(true)}
+
+            >            >
+
+              <Gear className="w-4 h-4 mr-1" />              <Gear className="w-4 h-4 mr-1" />
+
+              Configure              Configure
+
+            </Button>            </Button>
+
+          </div>          </div>
+
+        </CardHeader>        </CardHeader>
+
+      </Card>      </Card>
+
+            
+
+      <ProductionPOUpload      <ProductionPOUpload
+
+        onUploadComplete={handleUploadComplete}        onUploadComplete={handleUploadComplete}
+
+        onUploadError={handleUploadError}        onUploadError={handleUploadError}
+
+        autoProcess={true}        autoProcess={true}
+
+        confidenceThreshold={0.8}        confidenceThreshold={0.8}
+
+      />      />
+
+
+
+      {/* Configuration Dialog */}      {/* Configuration Dialog */}
+
+      <Dialog open={isConfigOpen} onOpenChange={setIsConfigOpen}>      <Dialog open={isConfigOpen} onOpenChange={setIsConfigOpen}>
+
+        <DialogContent className="max-w-4xl">        <DialogContent className="max-w-4xl">
+
+          <DialogHeader>          <DialogHeader>
+
+            <DialogTitle>Upload Configuration</DialogTitle>            <DialogTitle>Upload Configuration</DialogTitle>
+
+            <DialogDescription>            <DialogDescription>
+
+              Configure AI processing settings and upload options              Configure AI processing settings and upload options
+
+            </DialogDescription>            </DialogDescription>
+
+          </DialogHeader>          </DialogHeader>
+
+          <BulkPOConfiguration />          <BulkPOConfiguration />
+
+        </DialogContent>        </DialogContent>
+
+      </Dialog>      </Dialog>
+
+    </div>    </div>
+
+  )  )
+
+}}
 
   // Calculate batch statistics
   const batchStats: BatchStats = uploadedFiles?.reduce((stats, file) => {

@@ -1,4 +1,37 @@
 import { useState, useEffect } from 'react'
+import {
+  Package,
+  TrendUp,
+  Clock,
+  CheckCircle,
+  X,
+  MagnifyingGlass,
+  FunnelSimple,
+  DownloadSimple,
+  Eye,
+  Calendar,
+  Hash,
+  FileText,
+  Truck,
+  MapPin,
+  Phone,
+  EnvelopeSimple,
+  CaretDown,
+  CaretUp,
+  CaretLeft,
+  CaretRight,
+  DotsThreeOutline,
+  PencilSimple,
+  Trash,
+  ArrowsClockwise,
+  ChartLineUp,
+  SortAscending,
+  SortDescending,
+  Warning,
+  Check,
+  ArrowLeft,
+  WarningCircle
+} from '@phosphor-icons/react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -10,62 +43,53 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
-import { 
-  ArrowLeft, 
-  MagnifyingGlass, 
-  FunnelSimple,
-  DownloadSimple,
-  Eye,
-  Calendar,
-  Check,
-  Clock,
-  Warning,
-  X,
-  FileText,
-  Package,
-  TrendUp,
-  Robot,
-  Lightning,
-  ChartLineUp,
-  CaretDown,
-  CaretUp,
-  SortAscending,
-  SortDescending,
-  ArrowsClockwise
-} from '@phosphor-icons/react'
-import { useKV } from '@github/spark/hooks'
+import { usePurchaseOrders } from '../hooks/useMerchantData'
 import { PurchaseOrderDetails } from './PurchaseOrderDetails'
 
 interface PurchaseOrderItem {
   id: string
   sku: string
-  name: string
+  productName: string
+  description?: string
   quantity: number
   unitCost: number
   totalCost: number
   confidence: number
-  status: 'matched' | 'new' | 'updated' | 'error' | 'review_needed'
+  status: 'matched' | 'new' | 'updated' | 'error' | 'review_needed' | 'pending'
+  shopifyProductId?: string
+  shopifyVariantId?: string
+  aiNotes?: string
 }
 
 interface PurchaseOrder {
   id: string
-  poNumber: string
-  supplier: string
-  uploadDate: string
-  processedDate?: string
-  status: 'processing' | 'completed' | 'failed' | 'review_needed'
-  totalItems: number
-  totalValue: number
+  number: string                // PO number from API
+  supplierName: string         // Supplier name from API
+  orderDate?: string
+  dueDate?: string
+  totalAmount: number
+  currency: string
+  status: 'processing' | 'completed' | 'failed' | 'review_needed' | 'pending'
   confidence: number
-  items: PurchaseOrderItem[]
-  fileName: string
-  fileSize: number
-  aiAnalysis?: {
-    detectedFields: number
-    extractionAccuracy: number
-    suggestedMappings: number
-    flaggedItems: number
+  fileName?: string
+  fileSize?: number
+  processingNotes?: string
+  createdAt: string
+  updatedAt: string
+  
+  // Related data from API includes
+  supplier?: {
+    id: string
+    name: string
+    status: string
   }
+  lineItems?: PurchaseOrderItem[]
+  _count?: {
+    lineItems: number
+  }
+  
+  // Computed fields for compatibility
+  totalItems?: number
 }
 
 interface AllPurchaseOrdersProps {
@@ -74,96 +98,58 @@ interface AllPurchaseOrdersProps {
 
 export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
-  const [purchaseOrders] = useKV<PurchaseOrder[]>('all-purchase-orders', [
-    {
-      id: '1',
-      poNumber: 'PO-2024-001',
-      supplier: 'TechnoSupply Co.',
-      uploadDate: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-      processedDate: new Date(Date.now() - 1.5 * 60 * 60 * 1000).toISOString(),
-      status: 'completed',
-      totalItems: 24,
-      totalValue: 4850.00,
-      confidence: 95,
-      fileName: 'techno-supply-po-001.pdf',
-      fileSize: 2400000,
-      items: [
-        { id: '1-1', sku: 'TS-001', name: 'Wireless Headphones Pro', quantity: 12, unitCost: 85.00, totalCost: 1020.00, confidence: 98, status: 'matched' },
-        { id: '1-2', sku: 'TS-002', name: 'Bluetooth Speaker X1', quantity: 8, unitCost: 125.50, totalCost: 1004.00, confidence: 94, status: 'updated' },
-        { id: '1-3', sku: 'TS-003', name: 'Smart Watch Elite', quantity: 4, unitCost: 199.99, totalCost: 799.96, confidence: 96, status: 'matched' }
-      ],
-      aiAnalysis: {
-        detectedFields: 18,
-        extractionAccuracy: 95,
-        suggestedMappings: 24,
-        flaggedItems: 1
-      }
-    },
-    {
-      id: '2',
-      poNumber: 'PO-2024-002',
-      supplier: 'Premier Wholesale',
-      uploadDate: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
-      status: 'processing',
-      totalItems: 16,
-      totalValue: 2340.50,
-      confidence: 87,
-      fileName: 'premier-wholesale-batch-02.xlsx',
-      fileSize: 850000,
-      items: [
-        { id: '2-1', sku: 'PW-101', name: 'Gaming Mouse RGB', quantity: 15, unitCost: 45.00, totalCost: 675.00, confidence: 91, status: 'matched' },
-        { id: '2-2', sku: 'PW-102', name: 'Mechanical Keyboard', quantity: 8, unitCost: 89.99, totalCost: 719.92, confidence: 83, status: 'review_needed' }
-      ],
-      aiAnalysis: {
-        detectedFields: 14,
-        extractionAccuracy: 87,
-        suggestedMappings: 16,
-        flaggedItems: 3
-      }
-    },
-    {
-      id: '3',
-      poNumber: 'PO-2024-003',
-      supplier: 'Global Electronics',
-      uploadDate: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-      processedDate: new Date(Date.now() - 2.8 * 24 * 60 * 60 * 1000).toISOString(),
-      status: 'failed',
-      totalItems: 0,
-      totalValue: 0,
-      confidence: 0,
-      fileName: 'global-electronics-corrupted.pdf',
-      fileSize: 1200000,
-      items: [],
-      aiAnalysis: {
-        detectedFields: 2,
-        extractionAccuracy: 15,
-        suggestedMappings: 0,
-        flaggedItems: 0
-      }
-    }
-  ])
-
   const [searchTerm, setSearchTerm] = useState('')
-  const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [supplierFilter, setSupplierFilter] = useState<string>('all')
-  const [sortField, setSortField] = useState<string>('uploadDate')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [supplierFilter, setSupplierFilter] = useState('all')
+  const [sortField, setSortField] = useState<'number' | 'supplierName' | 'createdAt' | 'totalAmount'>('createdAt')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
+  const [currentPage, setCurrentPage] = useState(1)
+  const ordersPerPage = 10
+
+  // Use authenticated hook for purchase orders
+  const { purchaseOrders, total, loading, error, refetch } = usePurchaseOrders({
+    limit: ordersPerPage,
+    offset: (currentPage - 1) * ordersPerPage
+  })
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <ArrowsClockwise className="w-8 h-8 animate-spin" />
+        <span className="ml-2">Loading purchase orders...</span>
+      </div>
+    )
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center p-8 text-center">
+        <WarningCircle className="w-12 h-12 text-destructive mb-4" />
+        <h3 className="text-lg font-semibold mb-2">Failed to Load Purchase Orders</h3>
+        <p className="text-muted-foreground mb-4">{error}</p>
+        <Button onClick={() => refetch()} variant="outline">
+          Try Again
+        </Button>
+      </div>
+    )
+  }
 
   // Filter and sort purchase orders
   const filteredAndSortedPOs = (purchaseOrders || [])
     .filter(po => {
-      const matchesSearch = po.poNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           po.supplier.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           po.fileName.toLowerCase().includes(searchTerm.toLowerCase())
+      const matchesSearch = po.number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                           po.supplierName.toLowerCase().includes(searchTerm.toLowerCase())
       const matchesStatus = statusFilter === 'all' || po.status === statusFilter
-      const matchesSupplier = supplierFilter === 'all' || po.supplier === supplierFilter
+      const matchesSupplier = supplierFilter === 'all' || po.supplierName === supplierFilter
       return matchesSearch && matchesStatus && matchesSupplier
     })
     .sort((a, b) => {
       let aValue: any = a[sortField as keyof PurchaseOrder]
       let bValue: any = b[sortField as keyof PurchaseOrder]
       
-      if (sortField === 'uploadDate' || sortField === 'processedDate') {
+      if (sortField === 'createdAt') {
         aValue = new Date(aValue || 0).getTime()
         bValue = new Date(bValue || 0).getTime()
       }
@@ -175,7 +161,7 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
     })
 
   // Get unique suppliers for filter
-  const uniqueSuppliers = Array.from(new Set((purchaseOrders || []).map(po => po.supplier)))
+  const uniqueSuppliers = Array.from(new Set((purchaseOrders || []).map(po => po.supplierName)))
 
   const getStatusBadge = (status: PurchaseOrder['status']) => {
     switch (status) {
@@ -216,7 +202,7 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
     })
   }
 
-  const handleSort = (field: string) => {
+  const handleSort = (field: 'number' | 'supplierName' | 'createdAt' | 'totalAmount') => {
     if (sortField === field) {
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
     } else {
@@ -235,7 +221,7 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
     const completed = filteredAndSortedPOs.filter(po => po.status === 'completed').length
     const processing = filteredAndSortedPOs.filter(po => po.status === 'processing').length
     const failed = filteredAndSortedPOs.filter(po => po.status === 'failed').length
-    const totalValue = filteredAndSortedPOs.reduce((sum, po) => sum + po.totalValue, 0)
+    const totalValue = filteredAndSortedPOs.reduce((sum, po) => sum + (po.totalAmount || 0), 0)
     const avgConfidence = filteredAndSortedPOs.reduce((sum, po) => sum + po.confidence, 0) / (total || 1)
 
     return { total, completed, processing, failed, totalValue, avgConfidence }
@@ -356,7 +342,7 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Suppliers</SelectItem>
-              {uniqueSuppliers.map(supplier => (
+              {uniqueSuppliers.map((supplier: string) => (
                 <SelectItem key={supplier} value={supplier}>{supplier}</SelectItem>
               ))}
             </SelectContent>
@@ -380,42 +366,36 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="cursor-pointer" onClick={() => handleSort('poNumber')}>
+                  <TableHead className="cursor-pointer" onClick={() => handleSort('number')}>
                     <div className="flex items-center gap-2">
                       PO Number
-                      {getSortIcon('poNumber')}
+                      {getSortIcon('number')}
                     </div>
                   </TableHead>
-                  <TableHead className="cursor-pointer" onClick={() => handleSort('supplier')}>
+                  <TableHead className="cursor-pointer" onClick={() => handleSort('supplierName')}>
                     <div className="flex items-center gap-2">
                       Supplier
-                      {getSortIcon('supplier')}
+                      {getSortIcon('supplierName')}
                     </div>
                   </TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="cursor-pointer" onClick={() => handleSort('uploadDate')}>
+                  <TableHead className="cursor-pointer" onClick={() => handleSort('createdAt')}>
                     <div className="flex items-center gap-2">
-                      Upload Date
-                      {getSortIcon('uploadDate')}
+                      Created Date
+                      {getSortIcon('createdAt')}
                     </div>
                   </TableHead>
-                  <TableHead className="cursor-pointer text-right" onClick={() => handleSort('totalItems')}>
-                    <div className="flex items-center gap-2 justify-end">
-                      Items
-                      {getSortIcon('totalItems')}
-                    </div>
+                  <TableHead className="text-right">
+                    Items
                   </TableHead>
-                  <TableHead className="cursor-pointer text-right" onClick={() => handleSort('totalValue')}>
+                  <TableHead className="cursor-pointer text-right" onClick={() => handleSort('totalAmount')}>
                     <div className="flex items-center gap-2 justify-end">
                       Value
-                      {getSortIcon('totalValue')}
+                      {getSortIcon('totalAmount')}
                     </div>
                   </TableHead>
-                  <TableHead className="cursor-pointer text-right" onClick={() => handleSort('confidence')}>
-                    <div className="flex items-center gap-2 justify-end">
-                      AI Confidence
-                      {getSortIcon('confidence')}
-                    </div>
+                  <TableHead className="text-right">
+                    AI Confidence
                   </TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -427,31 +407,31 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
                     className="cursor-pointer hover:bg-muted/50"
                     onClick={() => setSelectedOrderId(po.id)}
                   >
-                    <TableCell className="font-medium">{po.poNumber}</TableCell>
+                    <TableCell className="font-medium">{po.number}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
                           <Package className="w-4 h-4 text-primary" />
                         </div>
-                        {po.supplier}
+                        {po.supplierName}
                       </div>
                     </TableCell>
                     <TableCell>{getStatusBadge(po.status)}</TableCell>
-                    <TableCell>{formatDate(po.uploadDate)}</TableCell>
-                    <TableCell className="text-right">{po.totalItems}</TableCell>
-                    <TableCell className="text-right font-mono">{formatCurrency(po.totalValue)}</TableCell>
+                    <TableCell>{formatDate(po.createdAt)}</TableCell>
+                    <TableCell className="text-right">{po._count?.lineItems || 0}</TableCell>
+                    <TableCell className="text-right font-mono">{formatCurrency(po.totalAmount || 0)}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center gap-2 justify-end">
                         <div className="w-16 bg-muted rounded-full h-2">
                           <div 
                             className={`h-2 rounded-full transition-all ${
-                              po.confidence >= 90 ? 'bg-success' :
-                              po.confidence >= 70 ? 'bg-warning' : 'bg-destructive'
+                              (po.confidence || 0) >= 90 ? 'bg-success' :
+                              (po.confidence || 0) >= 70 ? 'bg-warning' : 'bg-destructive'
                             }`}
-                            style={{ width: `${po.confidence}%` }}
+                            style={{ width: `${po.confidence || 0}%` }}
                           />
                         </div>
-                        <span className="text-sm font-medium">{po.confidence}%</span>
+                        <span className="text-sm font-medium">{po.confidence || 0}%</span>
                       </div>
                     </TableCell>
                     <TableCell className="text-right">

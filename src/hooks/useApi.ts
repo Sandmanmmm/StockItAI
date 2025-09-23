@@ -1,10 +1,12 @@
 /**
- * Custom React hooks for data management with the API service
+ * Custom React hooks for data management with authenticated API service
  * Provides loading states, error handling, and data caching
+ * Now uses production-ready Shopify authentication
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { apiService, APIResponse, PurchaseOrder, Supplier, POLineItem, AISettings } from '@/lib/apiService'
+import { authenticatedRequest, isShopifyEnvironment } from '@/lib/shopifyApiService'
 
 // Generic hook for API calls with loading and error states
 export function useApi<T>(
@@ -48,7 +50,8 @@ export function useApi<T>(
     loading,
     error,
     lastFetch,
-    refetch
+    refetch,
+    isAuthenticated: isShopifyEnvironment()
   }
 }
 

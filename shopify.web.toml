@@ -1,0 +1,11 @@
+# Shopify App - Single backend server with embedded Polaris UI
+# No separate frontend - everything served from Express API server
+
+[commands]
+dev = "cd api && npm run dev"
+
+[roles.backend]
+url = "http://localhost:3003"
+
+[roles.frontend]
+url = "http://localhost:3003"

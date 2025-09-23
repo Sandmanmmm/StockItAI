@@ -19,7 +19,7 @@ import {
   CheckFat,
   Clock
 } from '@phosphor-icons/react'
-import { useKV } from '@github/spark/hooks'
+import { useKV } from '../hooks/useKV'
 import { formatRelativeTime } from '@/lib/utils'
 
 interface NotificationItem {

@@ -1,11 +1,12 @@
 /**
  * API Service for Shopify PO Sync Pro
- * Handles all communication with backend database and Shopify API
+ * Uses authenticated requests for production-ready Shopify integration
  */
 
+import { authenticatedRequest, isShopifyEnvironment } from './shopifyApiService'
+
 // Base configuration
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api'
-const SHOPIFY_API_BASE = import.meta.env.VITE_SHOPIFY_API_BASE_URL
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3003/api'
 
 // Types for API responses
 export interface Merchant {
@@ -114,33 +115,50 @@ export interface APIResponse<T> {
 }
 
 class ApiService {
+  /**
+   * Make authenticated API request using Shopify session tokens
+   */
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<APIResponse<T>> {
-    try {
-      const url = `${API_BASE_URL}${endpoint}`
-      const config: RequestInit = {
-        headers: {
-          'Content-Type': 'application/json',
-          ...options.headers,
-        },
-        ...options,
+    if (isShopifyEnvironment()) {
+      // Use authenticated request in Shopify environment
+      const result = await authenticatedRequest<T>(endpoint, options)
+      return {
+        success: result.success,
+        data: result.data,
+        error: result.error
       }
+    } else {
+      // Development mode - direct API calls
+      try {
+        const url = `${API_BASE_URL}${endpoint}`
+        const config: RequestInit = {
+          headers: {
+            'Content-Type': 'application/json',
+            ...options.headers,
+          },
+          ...options,
+        }
 
-      const response = await fetch(url, config)
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
+        const response = await fetch(url, config)
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
 
-      const data = await response.json()
-      return { success: true, data }
-    } catch (error) {
-      console.error(`API request failed:`, error)
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+        const data = await response.json()
+        return { 
+          success: true, 
+          data: data.data || data 
+        }
+      } catch (error) {
+        console.error(`API request failed:`, error)
+        return { 
+          success: false, 
+          error: error instanceof Error ? error.message : 'Unknown error' 
+        }
       }
     }
   }
@@ -260,7 +278,17 @@ class ApiService {
   async uploadPOFile(file: File, options?: {
     autoProcess?: boolean
     supplierId?: string
-  }): Promise<APIResponse<{ uploadId: string; fileName: string }>> {
+    confidenceThreshold?: number
+    customRules?: any
+  }): Promise<APIResponse<{ 
+    poId: string
+    uploadId: string
+    fileName: string
+    fileSize: number
+    status: string
+    estimatedProcessingTime: number
+    fileUrl: string
+  }>> {
     const formData = new FormData()
     formData.append('file', file)
     if (options?.autoProcess) {
@@ -269,41 +297,97 @@ class ApiService {
     if (options?.supplierId) {
       formData.append('supplierId', options.supplierId)
     }
+    if (options?.confidenceThreshold) {
+      formData.append('confidenceThreshold', options.confidenceThreshold.toString())
+    }
+    if (options?.customRules) {
+      formData.append('customRules', JSON.stringify(options.customRules))
+    }
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/upload/po-file`, {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!response.ok) {
-        throw new Error(`Upload failed: ${response.status}`)
+    if (isShopifyEnvironment()) {
+      // Use authenticated request in Shopify environment
+      try {
+        const result = await authenticatedRequest<any>('/upload/po-file', {
+          method: 'POST',
+          body: formData
+        })
+        return {
+          success: result.success,
+          data: result.data,
+          error: result.error
+        }
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Upload failed'
+        }
       }
+    } else {
+      // Development mode - direct API calls
+      try {
+        const response = await fetch(`${API_BASE_URL}/upload/po-file`, {
+          method: 'POST',
+          body: formData,
+        })
 
-      const data = await response.json()
-      return { success: true, data }
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Upload failed'
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}))
+          throw new Error(errorData.error || `Upload failed: ${response.status}`)
+        }
+
+        const data = await response.json()
+        return { 
+          success: true, 
+          data: data.data 
+        }
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Upload failed'
+        }
       }
     }
   }
 
-  // Processing API methods
-  async processPOFile(uploadId: string): Promise<APIResponse<PurchaseOrder>> {
-    return this.request<PurchaseOrder>(`/process/po-file/${uploadId}`, {
+  async getUploadStatus(poId: string): Promise<APIResponse<{
+    poId: string
+    uploadId: string
+    fileName: string
+    fileSize: number
+    fileUrl?: string
+    uploadedAt: string
+    status: string
+    progress: number
+    message: string
+    processingTime?: number
+    confidence?: number
+    purchaseOrder?: PurchaseOrder
+    jobError?: string
+  }>> {
+    return this.request(`/upload/${poId}/status`)
+  }
+
+  async triggerProcessing(poId: string, options?: {
+    confidenceThreshold?: number
+    customRules?: any
+  }): Promise<APIResponse<{
+    poId: string
+    jobId: string
+    status: string
+    estimatedTime: number
+  }>> {
+    return this.request(`/upload/${poId}/process`, {
       method: 'POST',
+      body: JSON.stringify(options || {}),
     })
   }
 
-  async getProcessingStatus(uploadId: string): Promise<APIResponse<{
-    status: 'pending' | 'processing' | 'completed' | 'failed'
-    progress: number
-    message?: string
-    result?: PurchaseOrder
+  async downloadPOFile(poId: string): Promise<APIResponse<{
+    downloadUrl: string
+    fileName: string
+    fileSize: number
   }>> {
-    return this.request(`/process/status/${uploadId}`)
+    return this.request(`/upload/${poId}/download`)
   }
 
   // Analytics API methods

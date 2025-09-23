@@ -21,7 +21,7 @@ import {
   Trash,
   Bell
 } from '@phosphor-icons/react'
-import { useKV } from '@github/spark/hooks'
+import { useKV } from '../hooks/useKV'
 import { toast } from 'sonner'
 import { safeFormatDateTime } from '@/lib/utils'
 import { NotificationSettings } from './NotificationSettings'

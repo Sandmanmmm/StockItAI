@@ -39,7 +39,7 @@ import {
   TrendUp,
   ShoppingCart
 } from '@phosphor-icons/react'
-import { useKV } from '@github/spark/hooks'
+import { useKV } from '../hooks/useKV'
 import { notificationService } from '@/lib/notificationService'
 
 interface PurchaseOrder {

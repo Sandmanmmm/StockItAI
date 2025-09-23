@@ -24,6 +24,7 @@ const defaultTheme = {
       pwa: { raw: "(display-mode: standalone)" },
     },
     colors: {
+      // Keep existing color system for backward compatibility
       neutral: {
         1: "var(--color-neutral-1)",
         2: "var(--color-neutral-2)",
@@ -52,6 +53,7 @@ const defaultTheme = {
         contrast: "var(--color-neutral-contrast)",
       },
       accent: {
+        // Existing system
         1: "var(--color-accent-1)",
         2: "var(--color-accent-2)",
         3: "var(--color-accent-3)",
@@ -65,6 +67,9 @@ const defaultTheme = {
         11: "var(--color-accent-11)",
         12: "var(--color-accent-12)",
         contrast: "var(--color-accent-contrast)",
+        // shadcn/ui system
+        DEFAULT: "hsl(var(--accent))",
+        foreground: "hsl(var(--accent-foreground))",
       },
       "accent-secondary": {
         1: "var(--color-accent-secondary-1)",
@@ -91,6 +96,39 @@ const defaultTheme = {
         overlay: "var(--color-bg-overlay)",
       },
       "focus-ring": "var(--color-focus-ring)",
+      // Add shadcn/ui color system
+      border: "hsl(var(--border))",
+      input: "hsl(var(--input))",
+      ring: "hsl(var(--ring))",
+      background: "hsl(var(--background))",
+      foreground: "hsl(var(--foreground))",
+      primary: {
+        DEFAULT: "hsl(var(--primary))",
+        foreground: "hsl(var(--primary-foreground))",
+      },
+      secondary: {
+        DEFAULT: "hsl(var(--secondary))",
+        foreground: "hsl(var(--secondary-foreground))",
+      },
+      destructive: {
+        DEFAULT: "hsl(var(--destructive))",
+        foreground: "hsl(var(--destructive-foreground))",
+      },
+      muted: {
+        DEFAULT: "hsl(var(--muted))",
+        foreground: "hsl(var(--muted-foreground))",
+      },
+      popover: {
+        DEFAULT: "hsl(var(--popover))",
+        foreground: "hsl(var(--popover-foreground))",
+      },
+      card: {
+        DEFAULT: "hsl(var(--card))",
+        foreground: "hsl(var(--card-foreground))",
+      },
+    },
+    borderColor: {
+      DEFAULT: "hsl(var(--border))",
     },
     borderRadius: {
       sm: "var(--radius-sm)",

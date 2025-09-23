@@ -1,0 +1,29 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "484def5b3b4823489f8ebff0d2e9cadd"
+name = "orderflow-ai"
+application_url = "https://clear-ontario-awesome-track.trycloudflare.com"
+embedded = true
+handle = "orderflow-ai"
+
+[build]
+automatically_update_urls_on_dev = false
+dev_store_url = ""
+include_config_on_deploy = true
+
+[webhooks]
+api_version = "2025-07"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_customers,read_inventory,read_orders,read_products,write_customers,write_inventory,write_orders,write_products"
+
+[auth]
+redirect_urls = [
+  "https://clear-ontario-awesome-track.trycloudflare.com/auth/callback",
+  "https://clear-ontario-awesome-track.trycloudflare.com/auth/shopify/callback",
+  "https://clear-ontario-awesome-track.trycloudflare.com/api/auth/callback"
+]
+
+[pos]
+embedded = false

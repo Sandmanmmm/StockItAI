@@ -24,7 +24,7 @@ import {
   ChartLine,
   Shield
 } from '@phosphor-icons/react'
-import { useKV } from '@github/spark/hooks'
+import { useKV } from '../hooks/useKV'
 
 interface SyncStep {
   id: string

@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Separator } from '@/components/ui/separator'
 import { 
@@ -31,7 +32,7 @@ import {
   ArrowsClockwise
 } from '@phosphor-icons/react'
 import { DashboardOverview } from './components/DashboardOverview'
-import { POUpload } from './components/POUpload'
+import { ProductionPOUpload } from './components/ProductionPOUpload'
 import { SyncScheduler } from './components/SyncScheduler'
 import { SettingsPanel } from './components/SettingsPanel'
 import { BulkPOConfiguration } from './components/BulkPOConfiguration'
@@ -41,8 +42,10 @@ import { ActiveSuppliers } from './components/ActiveSuppliers'
 import { AllPurchaseOrders } from './components/AllPurchaseOrders'
 import { PurchaseOrderDetails } from './components/PurchaseOrderDetails'
 import { AIChatbot } from './components/AIChatbot'
-import { useKV } from '@github/spark/hooks'
+import { useKV } from './hooks/useKV'
 import { safeFormatTime } from '@/lib/utils'
+import { ShopifyLayoutWrapper } from './components/ShopifyLayoutWrapper'
+import { ShopifyHeader } from './components/ShopifyHeader'
 import { notificationService } from '@/lib/notificationService'
 
 interface NotificationItem {
@@ -58,10 +61,11 @@ function App() {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [showQuickSync, setShowQuickSync] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const [showActiveSuppliers, setShowActiveSuppliers] = useState(false)
   const [showAllPurchaseOrders, setShowAllPurchaseOrders] = useState(false)
   const [selectedPurchaseOrderId, setSelectedPurchaseOrderId] = useState<string | null>(null)
-  const [unreadNotifications, setUnreadNotifications] = useState(0)
+  const [unreadNotifications, setUnreadNotifications] = useState(3)
   const [showAIChatbot, setShowAIChatbot] = useState(false)
   const [isAIChatbotMinimized, setIsAIChatbotMinimized] = useState(false)
   const [notifications] = useKV<NotificationItem[]>('notifications', [
@@ -154,227 +158,46 @@ function App() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Advanced Header */}
-      <motion.header 
-        className="sticky top-0 z-50 border-b border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80"
-        initial={{ y: -20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.3 }}
-      >
-        <div className="container mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            {/* Brand & Status */}
-            <div className="flex items-center gap-4">
-              <motion.div 
-                className="relative"
-                whileHover={{ scale: 1.05 }}
-                transition={{ type: "spring", stiffness: 400, damping: 10 }}
-              >
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-lg">
-                  <Package className="w-7 h-7 text-primary-foreground" />
-                </div>
-                <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-success border-2 border-card animate-pulse" />
-              </motion.div>
-              <div>
-                <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
-                  PO Manager Pro
-                </h1>
-                <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <Robot className="w-4 h-4" />
-                    AI-Powered Automation
-                  </span>
-                  <Separator orientation="vertical" className="h-4" />
-                  <span className="flex items-center gap-1">
-                    <Lightning className="w-4 h-4" />
-                    Real-time Processing
-                  </span>
-                </div>
-              </div>
-            </div>
+    <ShopifyLayoutWrapper className="bg-background">
+      {/* Production-Ready Shopify Header */}
+      <ShopifyHeader
+        currentPage={
+          showActiveSuppliers ? "Active Suppliers" :
+          showAllPurchaseOrders ? "All Purchase Orders" :
+          selectedPurchaseOrderId ? "Purchase Order Details" :
+          "Dashboard"
+        }
+        breadcrumbs={
+          showActiveSuppliers ? [{ label: "Suppliers", href: "#" }, { label: "Active Suppliers" }] :
+          showAllPurchaseOrders ? [{ label: "Purchase Orders", href: "#" }, { label: "All Orders" }] :
+          selectedPurchaseOrderId ? [{ label: "Purchase Orders", href: "#" }, { label: "Order Details" }] :
+          [{ label: "Home" }]
+        }
+        onNotificationsClick={() => setShowNotifications(!showNotifications)}
+        onSettingsClick={() => setShowSettings(!showSettings)}
+        unreadNotifications={unreadNotifications}
+      />
 
-            {/* Advanced Status & Controls */}
-            <div className="flex items-center gap-4">
-              {/* Live Clock */}
-              <Card className="px-3 py-1.5 bg-muted/50">
-                <div className="text-sm font-mono">
-                  {safeFormatTime(currentTime)}
-                </div>
-              </Card>
-
-              {/* System Status */}
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="gap-2 bg-success/10 border-success/20 text-success">
-                  <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
-                  All Systems Operational
-                </Badge>
-                <Badge variant="outline" className="gap-2">
-                  <ArrowsClockwise className="w-3 h-3" />
-                  8 Active Syncs
-                </Badge>
-              </div>
-
-              {/* Notifications */}
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="relative"
-                onClick={() => setShowNotifications(!showNotifications)}
-              >
-                <Bell className="w-4 h-4" />
-                {unreadNotifications > 0 && (
-                  <Badge className="absolute -top-2 -right-2 h-5 w-5 rounded-full p-0 text-xs">
-                    {unreadNotifications}
-                  </Badge>
-                )}
-              </Button>
-
-              {/* User Avatar */}
-              <Avatar className="h-8 w-8">
-                <AvatarImage src="" />
-                <AvatarFallback className="bg-primary text-primary-foreground text-sm font-medium">
-                  AD
-                </AvatarFallback>
-              </Avatar>
-            </div>
-          </div>
-        </div>
-      </motion.header>
-
-      {/* Enhanced Navigation */}
-      <div className="container mx-auto px-6 py-8">
-        {/* Quick Stats Bar */}
-        <motion.div 
-          className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8"
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.1, duration: 0.4 }}
-        >
-          <Card className="relative overflow-hidden bg-gradient-to-br from-primary/5 to-accent/5 border-primary/10">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-primary/10">
-                  <ChartLine className="w-5 h-5 text-primary" />
-                </div>
-                <div>
-                  <div className="text-2xl font-bold">94.2%</div>
-                  <div className="text-xs text-muted-foreground">AI Accuracy</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="relative overflow-hidden bg-gradient-to-br from-success/5 to-success/10 border-success/10">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-success/10">
-                  <FileText className="w-5 h-5 text-success" />
-                </div>
-                <div>
-                  <div className="text-2xl font-bold">24</div>
-                  <div className="text-xs text-muted-foreground">POs Today</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="relative overflow-hidden bg-gradient-to-br from-accent/5 to-warning/5 border-accent/10">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-accent/10">
-                  <Users className="w-5 h-5 text-accent" />
-                </div>
-                <div>
-                  <div className="text-2xl font-bold">8</div>
-                  <div className="text-xs text-muted-foreground">Suppliers</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="relative overflow-hidden bg-gradient-to-br from-muted/50 to-muted border-muted">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-muted">
-                  <Database className="w-5 h-5 text-foreground" />
-                </div>
-                <div>
-                  <div className="text-2xl font-bold">1.2K</div>
-                  <div className="text-xs text-muted-foreground">Items Updated</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
-          {/* Enhanced Tab Navigation */}
-          {!showActiveSuppliers && !showAllPurchaseOrders && !selectedPurchaseOrderId && (
-            <div className="flex items-center justify-between">
-              <TabsList className="grid grid-cols-4 lg:w-[700px] h-12 bg-muted/30 p-1">
-                <TabsTrigger 
-                  value="dashboard" 
-                  className="flex items-center gap-2 h-10 data-[state=active]:bg-card data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border transition-all"
-                >
-                  <TrendUp className="w-4 h-4" />
-                  <span className="hidden sm:inline">Analytics Dashboard</span>
-                  <span className="sm:hidden">Dashboard</span>
-                </TabsTrigger>
-                <TabsTrigger 
-                  value="upload" 
-                  className="flex items-center gap-2 h-10 data-[state=active]:bg-card data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border transition-all"
-                >
-                  <Upload className="w-4 h-4" />
-                  <span className="hidden sm:inline">PO Upload</span>
-                  <span className="sm:hidden">Upload</span>
-                </TabsTrigger>
-                <TabsTrigger 
-                  value="scheduler" 
-                  className="flex items-center gap-2 h-10 data-[state=active]:bg-card data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border transition-all"
-                >
-                  <Calendar className="w-4 h-4" />
-                  <span className="hidden sm:inline">Auto Scheduler</span>
-                  <span className="sm:hidden">Scheduler</span>
-                </TabsTrigger>
-                <TabsTrigger 
-                  value="settings" 
-                  className="flex items-center gap-2 h-10 data-[state=active]:bg-card data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border transition-all"
-                >
-                  <Gear className="w-4 h-4" />
-                  <span className="hidden sm:inline">Configuration</span>
-                  <span className="sm:hidden">Settings</span>
-                </TabsTrigger>
+      {/* Production-Ready Dashboard Layout */}
+      <div className="w-full">
+        {/* Main Content Container - Optimized for Shopify */}
+        <div className="max-w-[1800px] mx-auto px-1 sm:px-2 md:px-3 lg:px-5 space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4">
+          {/* Navigation Tabs */}
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            {!showActiveSuppliers && !showAllPurchaseOrders && !selectedPurchaseOrderId && (
+              <TabsList className="grid w-full grid-cols-4 h-9 md:h-10">
+                <TabsTrigger value="dashboard" className="text-sm">Dashboard</TabsTrigger>
+                <TabsTrigger value="sync" className="text-sm">Quick Sync</TabsTrigger>
+                <TabsTrigger value="upload" className="text-sm">Upload PO</TabsTrigger>
+                <TabsTrigger value="settings" className="text-sm">Settings</TabsTrigger>
               </TabsList>
+            )}
 
-              {/* Quick Actions */}
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm">
-                  <MagnifyingGlass className="w-4 h-4" />
-                </Button>
-                <Button size="sm" className="bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90" onClick={() => {
-                  setShowQuickSync(true)
-                  // Demo notification
-                  setTimeout(() => {
-                    notificationService.showSuccess(
-                      'Quick Sync Initiated', 
-                      'Syncing 3 suppliers with latest purchase orders',
-                      { category: 'sync', priority: 'medium' }
-                    )
-                  }, 1000)
-                }}>
-                  <Lightning className="w-4 h-4 mr-2" />
-                  Quick Sync
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Enhanced Tab Content with Transitions */}
-          <AnimatePresence mode="wait">
+            {/* Content based on navigation state */}
             {!showActiveSuppliers && !showAllPurchaseOrders && !selectedPurchaseOrderId ? (
-              <>
-                <TabsContent value="dashboard" className="space-y-6 mt-6">
+              <AnimatePresence mode="wait">
+                <>
+                <TabsContent value="dashboard" className="space-y-4 md:space-y-6 mt-4 md:mt-6">
                   <motion.div
                     key="dashboard"
                     initial={{ opacity: 0, x: 20 }}
@@ -390,7 +213,19 @@ function App() {
                   </motion.div>
                 </TabsContent>
 
-                <TabsContent value="upload" className="space-y-6 mt-6">
+                <TabsContent value="sync" className="space-y-4 md:space-y-6 mt-4 md:mt-6">
+                  <motion.div
+                    key="sync"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <QuickSync onClose={() => {}} />
+                  </motion.div>
+                </TabsContent>
+
+                <TabsContent value="upload" className="space-y-4 md:space-y-6 mt-4 md:mt-6">
                   <motion.div
                     key="upload"
                     initial={{ opacity: 0, x: 20 }}
@@ -398,23 +233,20 @@ function App() {
                     exit={{ opacity: 0, x: -20 }}
                     transition={{ duration: 0.3 }}
                   >
-                    <POUpload />
+                    <ProductionPOUpload 
+                      onUploadComplete={(purchaseOrder) => {
+                        console.log('Upload completed:', purchaseOrder)
+                      }}
+                      onUploadError={(error) => {
+                        console.error('Upload error:', error)
+                      }}
+                      autoProcess={true}
+                      confidenceThreshold={0.8}
+                    />
                   </motion.div>
                 </TabsContent>
 
-                <TabsContent value="scheduler" className="space-y-6 mt-6">
-                  <motion.div
-                    key="scheduler"
-                    initial={{ opacity: 0, x: 20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -20 }}
-                    transition={{ duration: 0.3 }}
-                  >
-                    <SyncScheduler />
-                  </motion.div>
-                </TabsContent>
-
-                <TabsContent value="settings" className="space-y-6 mt-6">
+                <TabsContent value="settings" className="space-y-4 md:space-y-6 mt-4 md:mt-6">
                   <motion.div
                     key="settings"
                     initial={{ opacity: 0, x: 20 }}
@@ -425,7 +257,8 @@ function App() {
                     <SettingsPanel />
                   </motion.div>
                 </TabsContent>
-              </>
+                </>
+              </AnimatePresence>
             ) : showActiveSuppliers ? (
               <motion.div
                 key="active-suppliers"
@@ -458,13 +291,13 @@ function App() {
                 className="mt-6"
               >
                 <PurchaseOrderDetails 
-                  orderId={selectedPurchaseOrderId}
+                  orderId={selectedPurchaseOrderId!}
                   onBack={() => setSelectedPurchaseOrderId(null)}
                 />
               </motion.div>
             ) : null}
-          </AnimatePresence>
         </Tabs>
+        </div>
       </div>
 
       {/* Notifications Panel */}
@@ -477,6 +310,18 @@ function App() {
           // In the future, could also set a specific tab within settings
         }}
       />
+
+      {/* Settings Panel */}
+      <Sheet open={showSettings} onOpenChange={setShowSettings}>
+        <SheetContent className="w-96">
+          <SheetHeader>
+            <SheetTitle>Settings</SheetTitle>
+          </SheetHeader>
+          <div className="mt-6">
+            <SettingsPanel />
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* Quick Sync Modal */}
       <AnimatePresence>
@@ -496,7 +341,7 @@ function App() {
           setIsAIChatbotMinimized(false)
         }}
       />
-    </div>
+    </ShopifyLayoutWrapper>
   )
 }
 

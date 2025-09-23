@@ -81,6 +81,16 @@ model PurchaseOrder {
   processingNotes   String?     // AI processing notes
   fileName          String?     // Original uploaded file name
   fileSize          Int?        // File size in bytes
+  fileUrl           String?     // URL/path to stored file in Supabase Storage
+  
+  // Job tracking fields for async processing
+  analysisJobId     String?     // Redis job ID for PO analysis processing
+  syncJobId         String?     // Redis job ID for Shopify sync operations
+  jobStatus         String      @default("pending") // pending, processing, completed, failed
+  jobStartedAt      DateTime?   // Timestamp when job processing started
+  jobCompletedAt    DateTime?   // Timestamp when job processing completed
+  jobError          String?     // Error message if job failed
+  
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
   
@@ -99,6 +109,9 @@ model PurchaseOrder {
   @@index([supplierId])
   @@index([status])
   @@index([number])
+  @@index([analysisJobId])
+  @@index([syncJobId])
+  @@index([jobStatus])
   @@unique([merchantId, number]) // Ensure unique PO numbers per merchant
 }
 
@@ -190,9 +203,9 @@ model AISettings {
   preferredVendors      String[] @default([])         // Preferred supplier names
   
   // AI Model Configuration
-  primaryModel          String   @default("gpt-4o-mini")  // Primary AI model
-  fallbackModel         String   @default("gpt-3.5-turbo") // Fallback model
-  maxRetries            Int      @default(3)              // Max retry attempts
+  primaryModel          String   @default("gpt-5-nano")       // Latest nano model for efficiency
+  fallbackModel         String   @default("gpt-4o-mini")      // Proven fallback model
+  maxRetries            Int      @default(3)                  // Max retry attempts
   
   // Processing Features
   enableOCR             Boolean  @default(true)       // Enable OCR for images/PDFs

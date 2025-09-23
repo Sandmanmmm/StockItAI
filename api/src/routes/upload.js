@@ -1,10 +1,12 @@
 /**
- * File Upload API routes
+ * File Upload API routes with production AI processing and Supabase Storage
  */
 
 import express from 'express'
 import multer from 'multer'
 import { db } from '../lib/db.js'
+import { storageService } from '../lib/storageService.js'
+import { fileProcessingJobService } from '../lib/fileProcessingJobService.js'
 import path from 'path'
 
 const router = express.Router()
@@ -14,7 +16,7 @@ const storage = multer.memoryStorage()
 const upload = multer({
   storage,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
+    fileSize: 25 * 1024 * 1024, // 25MB limit for high-quality scans
   },
   fileFilter: (req, file, cb) => {
     const allowedTypes = [
@@ -22,6 +24,7 @@ const upload = multer({
       'image/jpeg',
       'image/png',
       'image/jpg',
+      'image/webp',
       'text/csv',
       'application/vnd.ms-excel',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -30,12 +33,12 @@ const upload = multer({
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true)
     } else {
-      cb(new Error('Invalid file type. Only PDF, images, and Excel files are allowed.'))
+      cb(new Error('Invalid file type. Only PDF, images, CSV, and Excel files are allowed.'))
     }
   }
 })
 
-// POST /api/upload/po-file - Upload PO file
+// POST /api/upload/po-file - Upload PO file with AI processing
 router.post('/po-file', upload.single('file'), async (req, res) => {
   try {
     const merchant = await db.getCurrentMerchant()
@@ -53,63 +56,170 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
       })
     }
 
-    const { autoProcess = 'true', supplierId } = req.body
+    const { 
+      autoProcess = 'true', 
+      supplierId,
+      confidenceThreshold,
+      customRules 
+    } = req.body
     
-    // Generate upload ID
-    const uploadId = `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    
-    // In a real implementation, you would:
-    // 1. Save file to storage (S3, local filesystem, etc.)
-    // 2. Store file metadata in database
-    // 3. Queue for processing if autoProcess is true
-    
-    // For now, we'll simulate this
-    const fileInfo = {
-      uploadId,
-      fileName: req.file.originalname,
-      fileSize: req.file.size,
-      mimeType: req.file.mimetype,
-      merchantId: merchant.id,
-      supplierId: supplierId || null,
-      status: 'uploaded',
-      uploadedAt: new Date()
+    try {
+      // Create initial PO record in database
+      const purchaseOrder = await db.client.purchaseOrder.create({
+        data: {
+          number: `PO-${Date.now()}`, // Temporary number, will be updated by AI processing
+          supplierName: 'Processing...', // Will be updated by AI processing
+          orderDate: null,
+          dueDate: null,
+          totalAmount: 0, // Will be updated by AI processing
+          currency: 'USD',
+          status: 'pending',
+          confidence: 0.0,
+          fileName: req.file.originalname,
+          fileSize: req.file.size,
+          jobStatus: autoProcess === 'true' ? 'pending' : 'uploaded',
+          merchantId: merchant.id,
+          supplierId: supplierId || null
+        }
+      })
+
+      // Upload file to Supabase Storage
+      const uploadResult = await storageService.uploadFile(
+        req.file.buffer,
+        req.file.originalname,
+        merchant.id,
+        purchaseOrder.id,
+        req.file.mimetype
+      )
+
+      if (!uploadResult.success) {
+        // If storage upload fails, delete the database record
+        await db.client.purchaseOrder.delete({
+          where: { id: purchaseOrder.id }
+        })
+        
+        return res.status(500).json({
+          success: false,
+          error: 'File storage failed: ' + uploadResult.error
+        })
+      }
+
+      // Update PO record with file URL
+      const updatedPO = await db.client.purchaseOrder.update({
+        where: { id: purchaseOrder.id },
+        data: {
+          fileUrl: uploadResult.filePath // Store the storage path, not the signed URL
+        }
+      })
+
+      // Get merchant AI settings
+      const aiSettings = await db.client.aiSettings.findUnique({
+        where: { merchantId: merchant.id }
+      })
+
+      const processingOptions = {
+        autoProcess: autoProcess === 'true',
+        aiSettings: {
+          ...aiSettings,
+          confidenceThreshold: confidenceThreshold ? parseFloat(confidenceThreshold) : aiSettings?.confidenceThreshold || 0.8,
+          customRules: customRules ? JSON.parse(customRules) : aiSettings?.customRules || []
+        }
+      }
+
+      // Queue file for processing if auto-process is enabled
+      if (processingOptions.autoProcess) {
+        try {
+          const jobId = await fileProcessingJobService.addFileProcessingJob(
+            purchaseOrder.id,
+            {
+              uploadId: purchaseOrder.id,
+              fileName: req.file.originalname,
+              fileSize: req.file.size,
+              mimeType: req.file.mimetype,
+              merchantId: merchant.id,
+              supplierId: supplierId || null,
+              filePath: uploadResult.filePath
+            },
+            processingOptions
+          )
+
+          // Update PO with job ID
+          await db.client.purchaseOrder.update({
+            where: { id: purchaseOrder.id },
+            data: {
+              analysisJobId: jobId,
+              jobStatus: 'processing',
+              jobStartedAt: new Date()
+            }
+          })
+
+          console.log(`File queued for processing: ${purchaseOrder.id} (Job: ${jobId})`)
+        } catch (jobError) {
+          console.error(`Failed to queue processing job: ${purchaseOrder.id}`, jobError)
+          
+          // Update job status to failed
+          await db.client.purchaseOrder.update({
+            where: { id: purchaseOrder.id },
+            data: {
+              jobStatus: 'failed',
+              jobError: jobError.message
+            }
+          })
+        }
+      }
+
+      res.json({
+        success: true,
+        data: {
+          poId: purchaseOrder.id,
+          uploadId: purchaseOrder.id, // For backward compatibility
+          fileName: req.file.originalname,
+          fileSize: req.file.size,
+          status: processingOptions.autoProcess ? 'processing' : 'uploaded',
+          estimatedProcessingTime: estimateProcessingTime(req.file.size, req.file.mimetype),
+          fileUrl: uploadResult.fileUrl // Signed URL for immediate access
+        },
+        message: processingOptions.autoProcess ? 
+          'File uploaded successfully and queued for AI processing' : 
+          'File uploaded successfully'
+      })
+
+    } catch (dbError) {
+      console.error('Database error during upload:', dbError)
+      res.status(500).json({
+        success: false,
+        error: 'Database error during upload',
+        details: process.env.NODE_ENV === 'development' ? dbError.message : undefined
+      })
     }
 
-    // Store in a temporary storage simulation
-    // In production, this would go to a proper queue/database
-    global.uploadStorage = global.uploadStorage || {}
-    global.uploadStorage[uploadId] = {
-      ...fileInfo,
-      buffer: req.file.buffer
-    }
-
-    res.json({
-      success: true,
-      data: {
-        uploadId,
-        fileName: req.file.originalname,
-        fileSize: req.file.size,
-        status: 'uploaded'
-      },
-      message: 'File uploaded successfully'
-    })
   } catch (error) {
     console.error('Upload error:', error)
+    
     if (error.code === 'LIMIT_FILE_SIZE') {
       return res.status(400).json({
         success: false,
-        error: 'File too large. Maximum size is 10MB'
+        error: 'File too large. Maximum size is 25MB'
       })
     }
+    
+    if (error.message.includes('Invalid file type')) {
+      return res.status(400).json({
+        success: false,
+        error: error.message
+      })
+    }
+    
     res.status(500).json({
       success: false,
-      error: 'File upload failed'
+      error: 'File upload failed',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     })
   }
 })
 
-// GET /api/upload/:uploadId/status - Get upload status
-router.get('/:uploadId/status', async (req, res) => {
+// GET /api/upload/:poId/status - Get upload and processing status
+router.get('/:poId/status', async (req, res) => {
   try {
     const merchant = await db.getCurrentMerchant()
     if (!merchant) {
@@ -119,29 +229,81 @@ router.get('/:uploadId/status', async (req, res) => {
       })
     }
 
-    const { uploadId } = req.params
+    const { poId } = req.params
     
-    // Check temporary storage
-    global.uploadStorage = global.uploadStorage || {}
-    const upload = global.uploadStorage[uploadId]
+    // Get PO record from database
+    const purchaseOrder = await db.client.purchaseOrder.findFirst({
+      where: {
+        id: poId,
+        merchantId: merchant.id
+      },
+      include: {
+        lineItems: true,
+        supplier: true
+      }
+    })
     
-    if (!upload || upload.merchantId !== merchant.id) {
+    if (!purchaseOrder) {
       return res.status(404).json({
         success: false,
-        error: 'Upload not found'
+        error: 'Purchase order not found'
       })
+    }
+
+    // Check job queue status if there's an active job
+    let jobStatus = null
+    if (purchaseOrder.analysisJobId) {
+      try {
+        jobStatus = await fileProcessingJobService.getJobStatus(purchaseOrder.analysisJobId)
+      } catch (error) {
+        console.error('Error getting job status:', error)
+        jobStatus = { status: 'unknown', error: error.message }
+      }
+    }
+
+    // Get fresh signed URL if file exists
+    let fileUrl = null
+    if (purchaseOrder.fileUrl) {
+      try {
+        const urlResult = await storageService.getSignedUrl(purchaseOrder.fileUrl)
+        if (urlResult.success) {
+          fileUrl = urlResult.signedUrl
+        }
+      } catch (error) {
+        console.error('Error generating signed URL:', error)
+      }
+    }
+
+    const response = {
+      poId: purchaseOrder.id,
+      uploadId: purchaseOrder.id, // For backward compatibility
+      fileName: purchaseOrder.fileName,
+      fileSize: purchaseOrder.fileSize,
+      fileUrl: fileUrl,
+      uploadedAt: purchaseOrder.createdAt,
+      status: jobStatus?.status || purchaseOrder.jobStatus,
+      progress: jobStatus?.progress || 0,
+      message: jobStatus?.message || 'Processing...',
+      processingTime: jobStatus?.result?.processingTime,
+      confidence: purchaseOrder.confidence,
+      purchaseOrder: {
+        id: purchaseOrder.id,
+        number: purchaseOrder.number,
+        supplierName: purchaseOrder.supplierName,
+        totalAmount: purchaseOrder.totalAmount,
+        currency: purchaseOrder.currency,
+        status: purchaseOrder.status,
+        lineItems: purchaseOrder.lineItems,
+        supplier: purchaseOrder.supplier
+      },
+      jobError: purchaseOrder.jobError || jobStatus?.error
     }
 
     res.json({
       success: true,
-      data: {
-        uploadId,
-        fileName: upload.fileName,
-        fileSize: upload.fileSize,
-        status: upload.status,
-        uploadedAt: upload.uploadedAt
-      }
+      data: response
     })
+    
   } catch (error) {
     console.error('Get upload status error:', error)
     res.status(500).json({
@@ -150,5 +312,183 @@ router.get('/:uploadId/status', async (req, res) => {
     })
   }
 })
+
+// POST /api/upload/:poId/process - Manually trigger processing
+router.post('/:poId/process', async (req, res) => {
+  try {
+    const merchant = await db.getCurrentMerchant()
+    if (!merchant) {
+      return res.status(401).json({
+        success: false,
+        error: 'Merchant not found'
+      })
+    }
+
+    const { poId } = req.params
+    const { confidenceThreshold, customRules } = req.body
+    
+    // Get PO record
+    const purchaseOrder = await db.client.purchaseOrder.findFirst({
+      where: {
+        id: poId,
+        merchantId: merchant.id
+      }
+    })
+    
+    if (!purchaseOrder) {
+      return res.status(404).json({
+        success: false,
+        error: 'Purchase order not found'
+      })
+    }
+
+    // Check if already processing
+    if (purchaseOrder.analysisJobId) {
+      const existingJobStatus = await fileProcessingJobService.getJobStatus(purchaseOrder.analysisJobId)
+      if (existingJobStatus.status === 'active' || existingJobStatus.status === 'waiting') {
+        return res.status(409).json({
+          success: false,
+          error: 'File is already being processed'
+        })
+      }
+    }
+
+    // Get merchant AI settings
+    const aiSettings = await db.client.aiSettings.findUnique({
+      where: { merchantId: merchant.id }
+    })
+
+    const processingOptions = {
+      autoProcess: true,
+      aiSettings: {
+        ...aiSettings,
+        confidenceThreshold: confidenceThreshold || aiSettings?.confidenceThreshold || 0.8,
+        customRules: customRules || aiSettings?.customRules || []
+      }
+    }
+
+    // Queue for processing
+    const jobId = await fileProcessingJobService.addFileProcessingJob(
+      purchaseOrder.id,
+      {
+        uploadId: purchaseOrder.id,
+        fileName: purchaseOrder.fileName,
+        fileSize: purchaseOrder.fileSize,
+        merchantId: merchant.id,
+        supplierId: purchaseOrder.supplierId,
+        filePath: purchaseOrder.fileUrl
+      },
+      processingOptions
+    )
+    
+    // Update PO status
+    await db.client.purchaseOrder.update({
+      where: { id: purchaseOrder.id },
+      data: {
+        analysisJobId: jobId,
+        jobStatus: 'processing',
+        jobStartedAt: new Date(),
+        jobError: null
+      }
+    })
+
+    res.json({
+      success: true,
+      message: 'File queued for processing',
+      data: {
+        poId: purchaseOrder.id,
+        jobId: jobId,
+        status: 'processing',
+        estimatedTime: estimateProcessingTime(purchaseOrder.fileSize, 'application/pdf')
+      }
+    })
+
+  } catch (error) {
+    console.error('Manual processing trigger error:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to start processing'
+    })
+  }
+})
+
+// GET /api/upload/:poId/download - Download original file
+router.get('/:poId/download', async (req, res) => {
+  try {
+    const merchant = await db.getCurrentMerchant()
+    if (!merchant) {
+      return res.status(401).json({
+        success: false,
+        error: 'Merchant not found'
+      })
+    }
+
+    const { poId } = req.params
+    
+    // Get PO record
+    const purchaseOrder = await db.client.purchaseOrder.findFirst({
+      where: {
+        id: poId,
+        merchantId: merchant.id
+      }
+    })
+    
+    if (!purchaseOrder || !purchaseOrder.fileUrl) {
+      return res.status(404).json({
+        success: false,
+        error: 'File not found'
+      })
+    }
+
+    // Generate signed URL for download
+    const urlResult = await storageService.getSignedUrl(purchaseOrder.fileUrl, 60) // 1 minute expiry for downloads
+    
+    if (!urlResult.success) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to generate download URL'
+      })
+    }
+
+    res.json({
+      success: true,
+      data: {
+        downloadUrl: urlResult.signedUrl,
+        fileName: purchaseOrder.fileName,
+        fileSize: purchaseOrder.fileSize
+      }
+    })
+
+  } catch (error) {
+    console.error('Download error:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate download link'
+    })
+  }
+})
+
+// Helper function to estimate processing time
+function estimateProcessingTime(fileSize, mimeType) {
+  // Base processing times in seconds
+  const baseTimes = {
+    'application/pdf': 15,
+    'image/jpeg': 20,
+    'image/png': 20,
+    'image/jpg': 20,
+    'image/webp': 22,
+    'text/csv': 5,
+    'application/vnd.ms-excel': 8,
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 8
+  }
+
+  const baseTime = baseTimes[mimeType] || 15
+  
+  // Adjust for file size (MB)
+  const sizeMB = fileSize / (1024 * 1024)
+  const sizeMultiplier = Math.max(1, sizeMB / 5) // Add time for larger files
+  
+  return Math.round(baseTime * sizeMultiplier)
+}
 
 export default router

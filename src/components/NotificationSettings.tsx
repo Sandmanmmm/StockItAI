@@ -22,7 +22,7 @@ import {
   SpeakerSimpleHigh,
   Clock
 } from '@phosphor-icons/react'
-import { useKV } from '@github/spark/hooks'
+import { useKV } from '../hooks/useKV'
 import { toast } from 'sonner'
 import { notificationService, NotificationSettings as INotificationSettings } from '@/lib/notificationService'
 

@@ -24,30 +24,33 @@ import {
   Calendar,
   Gauge,
   ShieldCheck,
-  WarningCircle
+  WarningCircle,
+  Spinner
 } from '@phosphor-icons/react'
-import { useKV } from '@github/spark/hooks'
-import { safeFormatDate, safeFormatTime } from '@/lib/utils'
+import { useDashboardSummary, useSupplierMetrics } from '../hooks/useMerchantData'
+import { safeFormatDate, safeFormatTime, cn } from '@/lib/utils'
 
 interface POSummary {
   id: string
-  supplier: string
-  status: 'processed' | 'pending' | 'error'
-  confidence: number
+  poNumber: string
+  supplierName: string
+  amount: number
+  currency: string
+  status: string
   itemCount: number
-  timestamp: string // ISO string timestamp
-  value: number
-  priority: 'low' | 'medium' | 'high'
+  uploadedAt: string
+  fileName?: string
 }
 
-interface SupplierMetrics {
+interface SupplierMetric {
+  id: string
   name: string
-  accuracy: number
-  avgProcessingTime: number
-  totalPOs: number
-  trend: 'up' | 'down' | 'stable'
-  lastSync: string // ISO string timestamp
-  status: 'online' | 'offline' | 'syncing'
+  ordersCount: number
+  totalAmount: number
+  currency: string
+  onTimeRate: number
+  averageOrderValue: number
+  status: string
 }
 
 const containerVariants = {
@@ -72,99 +75,69 @@ interface DashboardOverviewProps {
 }
 
 export function DashboardOverview({ onShowActiveSuppliers, onShowAllPurchaseOrders, onShowPurchaseOrderDetails }: DashboardOverviewProps) {
-  const [recentPOs] = useKV<POSummary[]>('recent-pos', [
-    {
-      id: 'PO-2024-001',
-      supplier: 'TechnoSupply Co.',
-      status: 'processed',
-      confidence: 95,
-      itemCount: 24,
-      value: 15420,
-      priority: 'high',
-      timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
-    },
-    {
-      id: 'PO-2024-002', 
-      supplier: 'Global Parts Ltd.',
-      status: 'processed',
-      confidence: 87,
-      itemCount: 12,
-      value: 8750,
-      priority: 'medium',
-      timestamp: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString()
-    },
-    {
-      id: 'PO-2024-003',
-      supplier: 'Premier Wholesale',
-      status: 'pending',
-      confidence: 0,
-      itemCount: 8,
-      value: 5200,
-      priority: 'low',
-      timestamp: new Date(Date.now() - 10 * 60 * 1000).toISOString()
-    },
-    {
-      id: 'PO-2024-004',
-      supplier: 'Alpha Electronics',
-      status: 'error',
-      confidence: 45,
-      itemCount: 18,
-      value: 12300,
-      priority: 'high',
-      timestamp: new Date(Date.now() - 30 * 60 * 1000).toISOString()
-    }
-  ])
+  // Use authenticated hooks instead of placeholder data
+  const { recentPOs, metrics, loading: dashboardLoading, error: dashboardError, refetch: refetchDashboard } = useDashboardSummary()
+  const { supplierMetrics, loading: metricsLoading, error: metricsError, refetch: refetchMetrics } = useSupplierMetrics()
 
-  const [supplierMetrics] = useKV<SupplierMetrics[]>('supplier-metrics', [
-    {
-      name: 'TechnoSupply Co.',
-      accuracy: 96,
-      avgProcessingTime: 2.3,
-      totalPOs: 156,
-      trend: 'up',
-      lastSync: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-      status: 'online'
-    },
-    {
-      name: 'Global Parts Ltd.',
-      accuracy: 89,
-      avgProcessingTime: 3.1,
-      totalPOs: 98,
-      trend: 'stable',
-      lastSync: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-      status: 'syncing'
-    },
-    {
-      name: 'Premier Wholesale',
-      accuracy: 78,
-      avgProcessingTime: 4.2,
-      totalPOs: 67,
-      trend: 'down',
-      lastSync: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-      status: 'offline'
-    }
-  ])
+  const loading = dashboardLoading || metricsLoading
+  const error = dashboardError || metricsError
+  // Show loading state
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <Spinner className="w-8 h-8 animate-spin" />
+        <span className="ml-2">Loading dashboard data...</span>
+      </div>
+    )
+  }
 
-  const getStatusBadge = (status: string, confidence: number) => {
+  // Show error state
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center p-8 text-center">
+        <WarningCircle className="w-12 h-12 text-destructive mb-4" />
+        <h3 className="text-lg font-semibold mb-2">Failed to Load Dashboard</h3>
+        <p className="text-muted-foreground mb-4">{error}</p>
+        <Button onClick={() => { refetchDashboard(); refetchMetrics(); }} variant="outline">
+          Try Again
+        </Button>
+      </div>
+    )
+  }
+
+  const getStatusBadge = (status: string, confidence?: number) => {
     switch (status) {
       case 'processed':
+      case 'completed':
         return (
-          <Badge variant={confidence > 90 ? 'default' : 'secondary'} className="gap-1 font-medium">
+          <Badge 
+            variant={(confidence && confidence > 90) ? 'success' : 'secondary'} 
+            className={cn(
+              "gap-1.5 font-medium shadow-modern",
+              (confidence && confidence > 90) && "animate-pulse"
+            )}
+          >
             <Check className="w-3 h-3" />
-            Processed ({confidence}%)
+            Processed {confidence ? `(${confidence}%)` : ''}
           </Badge>
         )
       case 'pending':
         return (
-          <Badge variant="outline" className="gap-1 border-warning/50 text-warning bg-warning/10">
-            <Clock className="w-3 h-3" />
+          <Badge 
+            variant="warning" 
+            className="gap-1.5 shadow-modern animate-pulse"
+          >
+            <Clock className="w-3 h-3 animate-spin" />
             Processing
           </Badge>
         )
       case 'error':
         return (
-          <Badge variant="destructive" className="gap-1">
-            <Warning className="w-3 h-3" />
+          <Badge 
+            variant="destructive" 
+            className="gap-1.5 shadow-modern hover-glow"
+          >
+            <Warning className="w-3 h-3 animate-bounce" />
             Needs Review
           </Badge>
         )
@@ -176,11 +149,32 @@ export function DashboardOverview({ onShowActiveSuppliers, onShowAllPurchaseOrde
   const getPriorityBadge = (priority: string) => {
     switch (priority) {
       case 'high':
-        return <Badge className="bg-destructive text-destructive-foreground">High</Badge>
+        return (
+          <Badge 
+            variant="destructive" 
+            className="shadow-modern hover-glow animate-pulse"
+          >
+            High Priority
+          </Badge>
+        )
       case 'medium':
-        return <Badge className="bg-warning text-warning-foreground">Medium</Badge>
+        return (
+          <Badge 
+            variant="warning" 
+            className="shadow-modern"
+          >
+            Medium
+          </Badge>
+        )
       case 'low':
-        return <Badge variant="outline">Low</Badge>
+        return (
+          <Badge 
+            variant="outline" 
+            className="shadow-modern"
+          >
+            Low
+          </Badge>
+        )
       default:
         return null
     }
@@ -189,9 +183,9 @@ export function DashboardOverview({ onShowActiveSuppliers, onShowAllPurchaseOrde
   const getTrendIcon = (trend: string) => {
     switch (trend) {
       case 'up':
-        return <TrendUp className="w-4 h-4 text-success" />
+        return <TrendUp className="w-4 h-4 text-green-500 animate-bounce" />
       case 'down':
-        return <TrendDown className="w-4 h-4 text-destructive" />
+        return <TrendDown className="w-4 h-4 text-red-500 animate-bounce" />
       default:
         return <Minus className="w-4 h-4 text-muted-foreground" />
     }
@@ -201,22 +195,31 @@ export function DashboardOverview({ onShowActiveSuppliers, onShowAllPurchaseOrde
     switch (status) {
       case 'online':
         return (
-          <Badge className="bg-success/10 text-success border-success/20">
-            <div className="w-2 h-2 rounded-full bg-success mr-1" />
+          <Badge 
+            variant="success" 
+            className="gap-1.5 shadow-modern"
+          >
+            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
             Online
           </Badge>
         )
       case 'syncing':
         return (
-          <Badge className="bg-warning/10 text-warning border-warning/20">
-            <div className="w-2 h-2 rounded-full bg-warning animate-pulse mr-1" />
+          <Badge 
+            variant="warning" 
+            className="gap-1.5 shadow-modern"
+          >
+            <div className="w-2 h-2 bg-yellow-400 rounded-full animate-ping" />
             Syncing
           </Badge>
         )
       case 'offline':
         return (
-          <Badge variant="outline" className="text-muted-foreground">
-            <div className="w-2 h-2 rounded-full bg-muted-foreground mr-1" />
+          <Badge 
+            variant="outline" 
+            className="gap-1.5 shadow-modern"
+          >
+            <div className="w-2 h-2 bg-gray-400 rounded-full" />
             Offline
           </Badge>
         )
@@ -232,52 +235,57 @@ export function DashboardOverview({ onShowActiveSuppliers, onShowAllPurchaseOrde
       animate="visible"
       className="space-y-8"
     >
-      {/* Enhanced Stats Overview */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+      {/* Enhanced Stats Overview with Modern Glass Cards - Full Width Responsive */}
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-4">
         <motion.div variants={cardVariants}>
-          <Card className="relative overflow-hidden bg-gradient-to-br from-primary/5 to-primary/10 border-primary/20">
+          <Card className="relative overflow-hidden glass shadow-modern hover-lift border-panel bg-gradient-to-br from-primary/10 to-primary/5">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total POs Today</CardTitle>
-              <div className="p-2 rounded-lg bg-primary/10">
-                <FileText className="h-4 w-4 text-primary" />
+              <CardTitle className="text-sm font-medium">Total POs</CardTitle>
+              <div className="p-3 rounded-xl bg-gradient-to-br from-primary to-primary/80 shadow-lg">
+                <FileText className="h-5 w-5 text-primary-foreground" />
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">24</div>
+              <div className="text-3xl font-bold gradient-text">{metrics.totalPOs || 0}</div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-                <TrendUp className="w-3 h-3 text-success" />
-                +12% from yesterday
+                <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-primary/10 text-primary">
+                  <Database className="w-3 h-3" />
+                  All time
+                </div>
               </div>
-              <Progress value={75} className="h-1 mt-3" />
-              <div className="text-xs text-muted-foreground mt-1">Target: 32 POs</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                {metrics.pendingPOs || 0} pending • {metrics.processingPOs || 0} processing • {metrics.completedPOs || 0} completed
+              </div>
             </CardContent>
-            <div className="absolute top-0 right-0 w-20 h-20 bg-primary/5 rounded-full -mr-10 -mt-10" />
+            <div className="absolute top-0 right-0 w-20 h-20 bg-primary/5 rounded-full -mr-10 -mt-10 blur-xl" />
           </Card>
         </motion.div>
 
         <motion.div variants={cardVariants}>
-          <Card className="relative overflow-hidden bg-gradient-to-br from-success/5 to-success/10 border-success/20">
+          <Card className="relative overflow-hidden glass shadow-modern hover-lift border-panel bg-gradient-to-br from-green-500/10 to-green-500/5">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">AI Accuracy</CardTitle>
-              <div className="p-2 rounded-lg bg-success/10">
-                <Robot className="h-4 w-4 text-success" />
+              <CardTitle className="text-sm font-medium">Total Value</CardTitle>
+              <div className="p-3 rounded-xl bg-gradient-to-br from-green-500 to-green-600 shadow-lg">
+                <Database className="h-5 w-5 text-white" />
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">94.2%</div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-                <TrendUp className="w-3 h-3 text-success" />
-                +2.1% this week
+              <div className="text-3xl font-bold text-green-600">
+                {metrics.currency} {metrics.totalAmount?.toLocaleString() || '0'}
               </div>
-              <Progress value={94.2} className="h-1 mt-3" />
-              <div className="text-xs text-muted-foreground mt-1">Industry avg: 89%</div>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-green-500/10 text-green-600">
+                  <Lightning className="w-3 h-3" />
+                  Total processed
+                </div>
+              </div>
             </CardContent>
-            <div className="absolute top-0 right-0 w-20 h-20 bg-success/5 rounded-full -mr-10 -mt-10" />
+            <div className="absolute top-0 right-0 w-20 h-20 bg-green-500/5 rounded-full -mr-10 -mt-10 blur-xl" />
           </Card>
         </motion.div>
 
         <motion.div variants={cardVariants}>
-          <Card className="group relative overflow-hidden bg-gradient-to-br from-accent/5 to-accent/10 border-accent/20 cursor-pointer hover:shadow-lg transition-all duration-200"
+          <Card className="group relative overflow-hidden glass shadow-modern hover-lift border-panel bg-gradient-to-br from-blue-500/10 to-blue-500/5 cursor-pointer transition-all duration-300"
                 onClick={() => {
                   onShowActiveSuppliers?.()
                   // Show notification when accessing detailed view
@@ -288,57 +296,57 @@ export function DashboardOverview({ onShowActiveSuppliers, onShowAllPurchaseOrde
                 }}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Active Suppliers</CardTitle>
-              <div className="p-2 rounded-lg bg-accent/10">
-                <Globe className="h-4 w-4 text-accent" />
+              <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg">
+                <Globe className="h-5 w-5 text-white" />
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">8</div>
+              <div className="text-3xl font-bold text-blue-600">{metrics.activeSuppliers || 0}</div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-                <Lightning className="w-3 h-3 text-warning" />
-                3 syncing now
+                <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-blue-500/10 text-blue-600">
+                  <Users className="w-3 h-3" />
+                  of {metrics.totalSuppliers || 0} total
+                </div>
               </div>
-              <div className="flex gap-1 mt-3">
-                {[1,2,3,4,5,6,7,8].map((i) => (
-                  <div key={i} className={`w-4 h-1 rounded-full ${i <= 6 ? 'bg-success' : i === 7 ? 'bg-warning' : 'bg-muted'}`} />
-                ))}
-              </div>
-              <div className="text-xs text-muted-foreground mt-1">6 online, 1 syncing, 1 offline</div>
-              <div className="flex items-center justify-center mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                <span className="text-xs text-accent font-medium flex items-center gap-1">
+              <div className="text-xs text-muted-foreground mt-1">Click to manage suppliers</div>
+              <div className="flex items-center justify-center mt-3 opacity-0 group-hover:opacity-100 transition-all duration-300">
+                <span className="text-xs text-blue-600 font-medium flex items-center gap-1 px-3 py-1 rounded-full bg-blue-500/10">
                   View Details <ArrowRight className="w-3 h-3" />
                 </span>
               </div>
             </CardContent>
-            <div className="absolute top-0 right-0 w-20 h-20 bg-accent/5 rounded-full -mr-10 -mt-10" />
+            <div className="absolute top-0 right-0 w-20 h-20 bg-blue-500/5 rounded-full -mr-10 -mt-10 blur-xl" />
           </Card>
         </motion.div>
 
         <motion.div variants={cardVariants}>
-          <Card className="relative overflow-hidden bg-gradient-to-br from-muted/50 to-muted border-muted">
+          <Card className="relative overflow-hidden glass shadow-modern hover-lift border-panel bg-gradient-to-br from-purple-500/10 to-purple-500/5">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Items Updated</CardTitle>
-              <div className="p-2 rounded-lg bg-muted">
-                <Database className="h-4 w-4 text-foreground" />
+              <CardTitle className="text-sm font-medium">Processing Status</CardTitle>
+              <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 shadow-lg">
+                <Clock className="h-5 w-5 text-white" />
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">1,247</div>
+              <div className="text-3xl font-bold text-purple-600">{metrics.processingPOs || 0}</div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-                <Clock className="w-3 h-3" />
-                In the last hour
+                <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-purple-500/10 text-purple-600">
+                  <Clock className="w-3 h-3" />
+                  In progress
+                </div>
               </div>
-              <Progress value={82} className="h-1 mt-3" />
-              <div className="text-xs text-muted-foreground mt-1">Processing rate: 21/min</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                {metrics.pendingPOs || 0} pending analysis
+              </div>
             </CardContent>
-            <div className="absolute top-0 right-0 w-20 h-20 bg-muted/20 rounded-full -mr-10 -mt-10" />
+            <div className="absolute top-0 right-0 w-20 h-20 bg-purple-500/5 rounded-full -mr-10 -mt-10 blur-xl" />
           </Card>
         </motion.div>
       </div>
 
       {/* Enhanced Recent PO Activity */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        <motion.div variants={cardVariants} className="lg:col-span-2">
+      <div className="grid md:grid-cols-2 lg:grid-cols-5 border-2 border-blue-500">
+        <motion.div variants={cardVariants} className="md:col-span-1 lg:col-span-3 border-2 border-red-500 pr-4 md:pr-6 lg:pr-8">
           <Card className="h-full">
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -389,18 +397,16 @@ export function DashboardOverview({ onShowActiveSuppliers, onShowAllPurchaseOrde
                             po.status === 'error' ? 'text-destructive' : 'text-warning'
                           }`} />
                         </div>
-                        {po.priority === 'high' && (
-                          <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive border-2 border-card" />
-                        )}
+                        {/* Remove priority indicator since it's not in new data */}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-3 mb-1">
-                          <div className="font-semibold">{po.id}</div>
-                          {getPriorityBadge(po.priority)}
+                          <div className="font-semibold">{po.poNumber}</div>
+                          {/* Remove priority badge since priority not in new data */}
                         </div>
-                        <div className="text-sm text-muted-foreground">{po.supplier}</div>
+                        <div className="text-sm text-muted-foreground">{po.supplierName}</div>
                         <div className="text-xs text-muted-foreground mt-1">
-                          ${po.value?.toLocaleString?.() || '0'} • {po.itemCount || 0} items
+                          {po.currency} {po.amount?.toLocaleString?.() || '0'} • {po.itemCount || 0} items
                         </div>
                       </div>
                     </div>
@@ -408,14 +414,14 @@ export function DashboardOverview({ onShowActiveSuppliers, onShowAllPurchaseOrde
                     <div className="flex items-center gap-4">
                       <div className="text-right">
                         <div className="text-sm font-medium">
-                          {safeFormatDate(po.timestamp)}
+                          {safeFormatDate(po.uploadedAt)}
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          {safeFormatTime(po.timestamp)}
+                          {safeFormatTime(po.uploadedAt)}
                         </div>
                       </div>
                       <div className="flex flex-col gap-2">
-                        {getStatusBadge(po.status, po.confidence)}
+                        {getStatusBadge(po.status)}
                       </div>
                       <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                     </div>
@@ -427,7 +433,7 @@ export function DashboardOverview({ onShowActiveSuppliers, onShowAllPurchaseOrde
         </motion.div>
 
         {/* Supplier Performance */}
-        <motion.div variants={cardVariants}>
+        <motion.div variants={cardVariants} className="md:col-span-1 lg:col-span-2 border-2 border-green-500 pl-4 md:pl-6 lg:pl-8">
           <Card className="h-full">
             <CardHeader>
               <CardTitle className="text-xl">Supplier Performance</CardTitle>
@@ -454,19 +460,19 @@ export function DashboardOverview({ onShowActiveSuppliers, onShowAllPurchaseOrde
                       <div className="flex items-center justify-between text-xs">
                         <span className="flex items-center gap-1">
                           <Gauge className="w-3 h-3" />
-                          Accuracy
+                          On-Time Rate
                         </span>
                         <span className="flex items-center gap-1 font-medium">
-                          {supplier.accuracy}%
-                          {getTrendIcon(supplier.trend)}
+                          {supplier.onTimeRate}%
+                          {/* Remove trend icon as it's not in new data structure */}
                         </span>
                       </div>
-                      <Progress value={supplier.accuracy} className="h-1.5" />
+                      <Progress value={supplier.onTimeRate} className="h-1.5" />
                     </div>
 
                     <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>{supplier.totalPOs} POs</span>
-                      <span>{supplier.avgProcessingTime}s avg</span>
+                      <span>{supplier.ordersCount} Orders</span>
+                      <span>{supplier.currency} {supplier.averageOrderValue.toFixed(0)} avg</span>
                     </div>
 
                     {index < supplierMetrics.length - 1 && (

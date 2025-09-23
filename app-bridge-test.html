@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>App Bridge Test - Shopify PO Sync Pro</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .card {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .button {
+            background: #1976d2;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .button:hover {
+            background: #1565c0;
+        }
+        .success { border-left: 4px solid #4caf50; }
+        .info { border-left: 4px solid #2196f3; }
+        .warning { border-left: 4px solid #ff9800; }
+    </style>
+</head>
+<body>
+    <h1>🛒 Shopify PO Sync Pro - App Bridge Test</h1>
+    
+    <div class="card info">
+        <h2>App Bridge Integration Test</h2>
+        <p>This page provides different ways to test the Shopify App Bridge integration:</p>
+    </div>
+
+    <div class="card">
+        <h3>1. Development Mode (Current)</h3>
+        <p>Currently running in development mode without Shopify parameters.</p>
+        <a href="http://localhost:3002" class="button">Open App (Development Mode)</a>
+    </div>
+
+    <div class="card">
+        <h3>2. Mock Shopify Environment (Updated)</h3>
+        <p>Test with simulated Shopify parameters that won't trigger redirects:</p>
+        <a href="http://localhost:3002?shop=dev-store.myshopify.com&host=ZGV2LXN0b3JlLm15c2hvcGlmeS5jb20&embedded=1&dev=1" class="button">
+            Test with Dev Shop Parameters
+        </a>
+        <p><small>Note: Using 'dev-store' to avoid redirect issues with 'test-store'</small></p>
+    </div>
+
+    <div class="card">
+        <h3>3. Pure Development Mode</h3>
+        <p>Test without any Shopify parameters (recommended for development):</p>
+        <a href="http://localhost:3002" class="button">Open App (Pure Development)</a>
+    </div>
+
+    <div class="card">
+        <h3>4. Shopify CLI Integration</h3>
+        <p>To test with real Shopify CLI integration:</p>
+        <ol>
+            <li>Make sure you have the Shopify CLI installed</li>
+            <li>Run <code>shopify app dev</code> in the project directory</li>
+            <li>The CLI will provide a URL with proper authentication parameters</li>
+        </ol>
+    </div>
+
+    <div class="card warning">
+        <h3>App Bridge Features to Test</h3>
+        <ul>
+            <li><strong>Connection Status:</strong> Check if App Bridge initializes properly</li>
+            <li><strong>Toast Notifications:</strong> Test the "Test Toast" button</li>
+            <li><strong>Navigation:</strong> Try navigation to Shopify admin (only works in embedded mode)</li>
+            <li><strong>External Links:</strong> Test opening external URLs</li>
+            <li><strong>Context Detection:</strong> Verify shop and host parameter detection</li>
+        </ul>
+    </div>
+
+    <div class="card success">
+        <h3>✅ What's Working</h3>
+        <ul>
+            <li>Express server serving React app from <code>/api/dist</code></li>
+            <li>App Bridge provider wrapper with fallback handling</li>
+            <li>Development mode detection and graceful fallbacks</li>
+            <li>App Bridge status component showing connection state</li>
+            <li>Test actions for toasts, navigation, and external links</li>
+        </ul>
+    </div>
+
+    <script>
+        // Simple analytics to track which mode is being used
+        console.log('🚀 Shopify PO Sync Pro - App Bridge Test Page Loaded')
+        console.log('🔧 Current URL:', window.location.href)
+        
+        // Check if we have Shopify parameters
+        const urlParams = new URLSearchParams(window.location.search)
+        const shop = urlParams.get('shop')
+        const host = urlParams.get('host')
+        
+        if (shop && host) {
+            console.log('✅ Shopify parameters detected:', { shop, host })
+        } else {
+            console.log('ℹ️  No Shopify parameters - running in development mode')
+        }
+    </script>
+</body>
+</html>

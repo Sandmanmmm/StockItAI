@@ -22,60 +22,47 @@ import {
   Plus,
   Gear as Settings,
   Eye,
-  Pencil as Edit,
-  Trash as Trash2,
+  PencilSimple as Edit,
+  Trash,
   Clock,
   Calendar,
   Gauge,
   ShieldCheck,
   Warning,
   CheckCircle,
-  XCircle,
+  X,
   ArrowLeft,
-  Download,
-  Upload,
-  Funnel as Filter,
+  WarningCircle,
+  DownloadSimple as Download,
+  UploadSimple as Upload,
+  FunnelSimple as Filter,
   DotsThreeVertical as MoreVertical,
   Link,
   Key,
   Bell,
-  Activity,
+  Pulse,
   Lightning as Zap,
   Database as Server,
   WifiHigh as Wifi,
   WifiSlash as WifiOff,
-  WarningCircle as AlertTriangle,
-  ArrowsClockwise as RefreshCw
+  ArrowsClockwise
 } from '@phosphor-icons/react'
-import { useKV } from '@github/spark/hooks'
+import { useSuppliers } from '../hooks/useMerchantData'
 import { safeFormatDate, safeFormatTime } from '@/lib/utils'
 
 interface Supplier {
   id: string
   name: string
-  company: string
-  email: string
-  phone: string
-  status: 'online' | 'offline' | 'syncing' | 'error'
-  accuracy: number
-  avgProcessingTime: number
-  totalPOs: number
-  trend: 'up' | 'down' | 'stable'
-  lastSync: string
-  nextSync: string
-  apiEndpoint: string
-  apiKey: string
-  syncFrequency: 'realtime' | 'hourly' | 'daily' | 'weekly'
-  priority: 'high' | 'medium' | 'low'
-  country: string
-  timezone: string
+  contactEmail?: string
+  contactPhone?: string
+  status: string
+  totalOrders: number
+  totalSpent: number
+  currency: string
+  lastOrderDate?: string
+  paymentTerms?: string
   categories: string[]
-  notes: string
   createdAt: string
-  lastActivity: string
-  totalValue: number
-  avgOrderValue: number
-  reliability: number
 }
 
 interface ActiveSuppliersProps {
@@ -104,116 +91,32 @@ export function ActiveSuppliers({ onBack }: ActiveSuppliersProps) {
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [sortBy, setSortBy] = useState<string>('name')
 
-  const [suppliers, setSuppliers] = useKV<Supplier[]>('suppliers', [
-    {
-      id: '1',
-      name: 'TechnoSupply Co.',
-      company: 'TechnoSupply Corporation',
-      email: 'orders@technosupply.com',
-      phone: '+1 (555) 123-4567',
-      status: 'online',
-      accuracy: 96,
-      avgProcessingTime: 2.3,
-      totalPOs: 156,
-      trend: 'up',
-      lastSync: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-      nextSync: new Date(Date.now() + 55 * 60 * 1000).toISOString(),
-      apiEndpoint: 'https://api.technosupply.com/v2/orders',
-      apiKey: 'ts_***************4567',
-      syncFrequency: 'hourly',
-      priority: 'high',
-      country: 'USA',
-      timezone: 'EST',
-      categories: ['Electronics', 'Components', 'Accessories'],
-      notes: 'Primary supplier for electronic components. Excellent reliability and fast processing.',
-      createdAt: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString(),
-      lastActivity: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-      totalValue: 1245000,
-      avgOrderValue: 7980,
-      reliability: 98
-    },
-    {
-      id: '2',
-      name: 'Global Parts Ltd.',
-      company: 'Global Parts Limited',
-      email: 'procurement@globalparts.co.uk',
-      phone: '+44 20 1234 5678',
-      status: 'syncing',
-      accuracy: 89,
-      avgProcessingTime: 3.1,
-      totalPOs: 98,
-      trend: 'stable',
-      lastSync: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-      nextSync: new Date(Date.now() + 45 * 60 * 1000).toISOString(),
-      apiEndpoint: 'https://globalparts.co.uk/api/orders',
-      apiKey: 'gp_***************8901',
-      syncFrequency: 'hourly',
-      priority: 'high',
-      country: 'UK',
-      timezone: 'GMT',
-      categories: ['Auto Parts', 'Industrial'],
-      notes: 'Reliable UK supplier with good processing times. Occasional API timeouts during peak hours.',
-      createdAt: new Date(Date.now() - 120 * 24 * 60 * 60 * 1000).toISOString(),
-      lastActivity: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-      totalValue: 892000,
-      avgOrderValue: 9100,
-      reliability: 94
-    },
-    {
-      id: '3',
-      name: 'Premier Wholesale',
-      company: 'Premier Wholesale Distribution',
-      email: 'orders@premierwd.com',
-      phone: '+1 (555) 987-6543',
-      status: 'offline',
-      accuracy: 78,
-      avgProcessingTime: 4.2,
-      totalPOs: 67,
-      trend: 'down',
-      lastSync: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-      nextSync: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-      apiEndpoint: 'https://api.premierwd.com/orders',
-      apiKey: 'pw_***************2345',
-      syncFrequency: 'daily',
-      priority: 'medium',
-      country: 'USA',
-      timezone: 'PST',
-      categories: ['General Merchandise', 'Office Supplies'],
-      notes: 'Currently experiencing connection issues. API endpoint returning 503 errors.',
-      createdAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
-      lastActivity: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-      totalValue: 345000,
-      avgOrderValue: 5150,
-      reliability: 85
-    },
-    {
-      id: '4',
-      name: 'Alpha Electronics',
-      company: 'Alpha Electronics Inc.',
-      email: 'api@alphaelec.com',
-      phone: '+1 (555) 456-7890',
-      status: 'error',
-      accuracy: 92,
-      avgProcessingTime: 2.8,
-      totalPOs: 134,
-      trend: 'up',
-      lastSync: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-      nextSync: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-      apiEndpoint: 'https://api.alphaelec.com/v1/pos',
-      apiKey: 'ae_***************6789',
-      syncFrequency: 'hourly',
-      priority: 'high',
-      country: 'USA',
-      timezone: 'CST',
-      categories: ['Electronics', 'Semiconductors'],
-      notes: 'Authentication error detected. API key may have expired.',
-      createdAt: new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString(),
-      lastActivity: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-      totalValue: 1890000,
-      avgOrderValue: 14100,
-      reliability: 96
-    }
-  ])
+  // Use authenticated hook for suppliers data
+  const { suppliers, total, loading, error, refetch } = useSuppliers()
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <ArrowsClockwise className="w-8 h-8 animate-spin" />
+        <span className="ml-2">Loading suppliers...</span>
+      </div>
+    )
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center p-8 text-center">
+        <WarningCircle className="w-12 h-12 text-destructive mb-4" />
+        <h3 className="text-lg font-semibold mb-2">Failed to Load Suppliers</h3>
+        <p className="text-muted-foreground mb-4">{error}</p>
+        <Button onClick={() => refetch()} variant="outline">
+          Try Again
+        </Button>
+      </div>
+    )
+  }
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -222,9 +125,9 @@ export function ActiveSuppliers({ onBack }: ActiveSuppliersProps) {
       case 'offline':
         return <WifiOff className="w-4 h-4 text-muted-foreground" />
       case 'syncing':
-        return <RefreshCw className="w-4 h-4 text-warning animate-spin" />
+        return <ArrowsClockwise className="w-4 h-4 text-warning animate-spin" />
       case 'error':
-        return <AlertTriangle className="w-4 h-4 text-destructive" />
+        return <WarningCircle className="w-4 h-4 text-destructive" />
       default:
         return <Server className="w-4 h-4 text-muted-foreground" />
     }
@@ -294,7 +197,7 @@ export function ActiveSuppliers({ onBack }: ActiveSuppliersProps) {
       (filterStatus === 'all' || supplier.status === filterStatus) &&
       (searchTerm === '' || 
         supplier.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        supplier.company.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (supplier.contactEmail && supplier.contactEmail.toLowerCase().includes(searchTerm.toLowerCase())) ||
         supplier.categories.some(cat => cat.toLowerCase().includes(searchTerm.toLowerCase()))
       )
     )
@@ -302,12 +205,12 @@ export function ActiveSuppliers({ onBack }: ActiveSuppliersProps) {
       switch (sortBy) {
         case 'name':
           return a.name.localeCompare(b.name)
-        case 'accuracy':
-          return b.accuracy - a.accuracy
-        case 'lastSync':
-          return new Date(b.lastSync).getTime() - new Date(a.lastSync).getTime()
-        case 'totalPOs':
-          return b.totalPOs - a.totalPOs
+        case 'totalSpent':
+          return b.totalSpent - a.totalSpent
+        case 'lastOrder':
+          return new Date(b.lastOrderDate || 0).getTime() - new Date(a.lastOrderDate || 0).getTime()
+        case 'totalOrders':
+          return b.totalOrders - a.totalOrders
         default:
           return 0
       }
@@ -384,7 +287,7 @@ export function ActiveSuppliers({ onBack }: ActiveSuppliersProps) {
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-warning/10">
-                  <Activity className="w-5 h-5 text-warning" />
+                  <Pulse className="w-5 h-5 text-warning" />
                 </div>
                 <div>
                   <div className="text-2xl font-bold">
@@ -402,7 +305,7 @@ export function ActiveSuppliers({ onBack }: ActiveSuppliersProps) {
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-muted">
-                  <XCircle className="w-5 h-5 text-muted-foreground" />
+                  <X className="w-5 h-5 text-muted-foreground" />
                 </div>
                 <div>
                   <div className="text-2xl font-bold">
@@ -424,9 +327,9 @@ export function ActiveSuppliers({ onBack }: ActiveSuppliersProps) {
                 </div>
                 <div>
                   <div className="text-2xl font-bold">
-                    {Math.round((suppliers || []).reduce((acc, s) => acc + s.accuracy, 0) / (suppliers || []).length) || 0}%
+                    {Math.round((suppliers || []).reduce((acc, s) => acc + s.totalSpent, 0) / (suppliers || []).length) || 0}
                   </div>
-                  <div className="text-xs text-muted-foreground">Avg Accuracy</div>
+                  <div className="text-xs text-muted-foreground">Avg Order Value</div>
                 </div>
               </div>
             </CardContent>
@@ -501,11 +404,11 @@ export function ActiveSuppliers({ onBack }: ActiveSuppliersProps) {
                     </div>
                     <div>
                       <div className="font-semibold text-lg">{supplier.name}</div>
-                      <div className="text-sm text-muted-foreground">{supplier.company}</div>
+                      <div className="text-sm text-muted-foreground">{supplier.contactEmail || 'No email'}</div>
                       <div className="flex items-center gap-2 mt-1">
                         {getStatusBadge(supplier.status)}
-                        <Badge className={getPriorityColor(supplier.priority)} variant="outline">
-                          {supplier.priority.toUpperCase()}
+                        <Badge variant="outline">
+                          {supplier.totalOrders} Orders
                         </Badge>
                       </div>
                     </div>
@@ -533,19 +436,18 @@ export function ActiveSuppliers({ onBack }: ActiveSuppliersProps) {
                 {/* Performance Metrics */}
                 <div className="grid grid-cols-3 gap-4">
                   <div className="text-center">
-                    <div className="text-2xl font-bold">{supplier.accuracy}%</div>
-                    <div className="text-xs text-muted-foreground flex items-center justify-center gap-1">
-                      Accuracy
-                      {getTrendIcon(supplier.trend)}
+                    <div className="text-2xl font-bold">${supplier.totalSpent.toLocaleString()}</div>
+                    <div className="text-xs text-muted-foreground">
+                      Total Spent
                     </div>
                   </div>
                   <div className="text-center">
-                    <div className="text-2xl font-bold">{supplier.totalPOs}</div>
-                    <div className="text-xs text-muted-foreground">Total POs</div>
+                    <div className="text-2xl font-bold">{supplier.totalOrders}</div>
+                    <div className="text-xs text-muted-foreground">Total Orders</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-2xl font-bold">{supplier.avgProcessingTime}s</div>
-                    <div className="text-xs text-muted-foreground">Avg Time</div>
+                    <div className="text-2xl font-bold">${Math.round(supplier.totalSpent / (supplier.totalOrders || 1)).toLocaleString()}</div>
+                    <div className="text-xs text-muted-foreground">Avg Order</div>
                   </div>
                 </div>
 
@@ -561,18 +463,17 @@ export function ActiveSuppliers({ onBack }: ActiveSuppliersProps) {
                     ))}
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    Last sync: {safeFormatTime(supplier.lastSync)} • 
-                    Next sync: {safeFormatTime(supplier.nextSync)}
+                    {supplier.lastOrderDate ? `Last order: ${safeFormatDate(supplier.lastOrderDate)}` : 'No recent orders'}
                   </div>
                 </div>
 
-                {/* Progress Bar for Reliability */}
+                {/* Progress Bar for Order Activity */}
                 <div className="space-y-1">
                   <div className="flex justify-between text-sm">
-                    <span>Reliability</span>
-                    <span>{supplier.reliability}%</span>
+                    <span>Order Activity</span>
+                    <span>{supplier.totalOrders > 0 ? 'Active' : 'Inactive'}</span>
                   </div>
-                  <Progress value={supplier.reliability} className="h-2" />
+                  <Progress value={Math.min(supplier.totalOrders * 10, 100)} className="h-2" />
                 </div>
               </CardContent>
             </Card>
@@ -646,7 +547,7 @@ function SupplierDetailView({ supplier }: { supplier: Supplier }) {
           <div>
             <DialogTitle className="text-2xl">{supplier.name}</DialogTitle>
             <DialogDescription className="mt-1">
-              {supplier.company} • {supplier.country} • {supplier.timezone}
+              {supplier.contactEmail || 'No contact email'} • {supplier.categories.join(', ') || 'No categories'}
             </DialogDescription>
           </div>
           {getStatusBadge(supplier.status)}
@@ -670,11 +571,11 @@ function SupplierDetailView({ supplier }: { supplier: Supplier }) {
               <CardContent className="space-y-3">
                 <div>
                   <Label className="text-sm font-medium">Email</Label>
-                  <div className="text-sm text-muted-foreground">{supplier.email}</div>
+                  <div className="text-sm text-muted-foreground">{supplier.contactEmail || 'Not provided'}</div>
                 </div>
                 <div>
                   <Label className="text-sm font-medium">Phone</Label>
-                  <div className="text-sm text-muted-foreground">{supplier.phone}</div>
+                  <div className="text-sm text-muted-foreground">{supplier.contactPhone || 'Not provided'}</div>
                 </div>
                 <div>
                   <Label className="text-sm font-medium">Categories</Label>
@@ -695,16 +596,16 @@ function SupplierDetailView({ supplier }: { supplier: Supplier }) {
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="flex justify-between">
-                  <span className="text-sm">Total Value</span>
-                  <span className="font-medium">${supplier.totalValue.toLocaleString()}</span>
+                  <span className="text-sm">Total Spent</span>
+                  <span className="font-medium">${supplier.totalSpent.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm">Avg Order Value</span>
-                  <span className="font-medium">${supplier.avgOrderValue.toLocaleString()}</span>
+                  <span className="font-medium">${Math.round(supplier.totalSpent / (supplier.totalOrders || 1)).toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm">Total Orders</span>
-                  <span className="font-medium">{supplier.totalPOs}</span>
+                  <span className="font-medium">{supplier.totalOrders}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm">Member Since</span>
@@ -714,13 +615,13 @@ function SupplierDetailView({ supplier }: { supplier: Supplier }) {
             </Card>
           </div>
 
-          {supplier.notes && (
+          {supplier.paymentTerms && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">Notes</CardTitle>
+                <CardTitle className="text-lg">Payment Terms</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-muted-foreground">{supplier.notes}</p>
+                <p className="text-sm text-muted-foreground">{supplier.paymentTerms}</p>
               </CardContent>
             </Card>
           )}
@@ -731,28 +632,27 @@ function SupplierDetailView({ supplier }: { supplier: Supplier }) {
             <div className="grid grid-cols-3 gap-4">
               <Card>
                 <CardContent className="p-4 text-center">
-                  <div className="text-3xl font-bold">{supplier.accuracy}%</div>
-                  <div className="text-sm text-muted-foreground flex items-center justify-center gap-1">
-                    AI Accuracy
-                    {getTrendIcon(supplier.trend)}
+                  <div className="text-3xl font-bold">{supplier.totalOrders}</div>
+                  <div className="text-sm text-muted-foreground">
+                    Total Orders
                   </div>
-                  <Progress value={supplier.accuracy} className="h-2 mt-2" />
+                  <Progress value={Math.min(supplier.totalOrders * 2, 100)} className="h-2 mt-2" />
                 </CardContent>
               </Card>
 
               <Card>
                 <CardContent className="p-4 text-center">
-                  <div className="text-3xl font-bold">{supplier.avgProcessingTime}s</div>
-                  <div className="text-sm text-muted-foreground">Avg Processing</div>
-                  <div className="text-xs text-muted-foreground mt-2">Industry: 4.2s</div>
+                  <div className="text-3xl font-bold">${Math.round(supplier.totalSpent / (supplier.totalOrders || 1)).toLocaleString()}</div>
+                  <div className="text-sm text-muted-foreground">Avg Order Value</div>
+                  <div className="text-xs text-muted-foreground mt-2">Per order</div>
                 </CardContent>
               </Card>
 
               <Card>
                 <CardContent className="p-4 text-center">
-                  <div className="text-3xl font-bold">{supplier.reliability}%</div>
-                  <div className="text-sm text-muted-foreground">Reliability</div>
-                  <Progress value={supplier.reliability} className="h-2 mt-2" />
+                  <div className="text-3xl font-bold">{supplier.status === 'active' ? '100' : '50'}%</div>
+                  <div className="text-sm text-muted-foreground">Activity Level</div>
+                  <Progress value={supplier.status === 'active' ? 100 : 50} className="h-2 mt-2" />
                 </CardContent>
               </Card>
             </div>
@@ -798,54 +698,41 @@ function SupplierConfigForm({ supplier }: { supplier?: Supplier }) {
             <Input id="name" defaultValue={supplier?.name || ''} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="company">Company</Label>
-            <Input id="company" defaultValue={supplier?.company || ''} />
+            <Label htmlFor="contactEmail">Contact Email</Label>
+            <Input id="contactEmail" type="email" defaultValue={supplier?.contactEmail || ''} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
-            <Input id="email" type="email" defaultValue={supplier?.email || ''} />
+            <Label htmlFor="contactPhone">Contact Phone</Label>
+            <Input id="contactPhone" defaultValue={supplier?.contactPhone || ''} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="phone">Phone</Label>
-            <Input id="phone" defaultValue={supplier?.phone || ''} />
+            <Label htmlFor="status">Status</Label>
+            <Input id="status" defaultValue={supplier?.status || ''} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="country">Country</Label>
-            <Input id="country" defaultValue={supplier?.country || ''} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="timezone">Timezone</Label>
-            <Input id="timezone" defaultValue={supplier?.timezone || ''} />
+            <Label htmlFor="paymentTerms">Payment Terms</Label>
+            <Input id="paymentTerms" defaultValue={supplier?.paymentTerms || ''} />
           </div>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="notes">Notes</Label>
-          <Textarea id="notes" defaultValue={supplier?.notes || ''} />
+          <Label htmlFor="categories">Categories</Label>
+          <Input id="categories" defaultValue={supplier?.categories.join(', ') || ''} placeholder="Electronics, Components, etc." />
         </div>
       </TabsContent>
 
       <TabsContent value="api" className="space-y-4 mt-4">
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="apiEndpoint">API Endpoint</Label>
-            <Input id="apiEndpoint" defaultValue={supplier?.apiEndpoint || ''} />
+            <Label htmlFor="totalSpent">Total Spent</Label>
+            <Input id="totalSpent" value={`$${supplier?.totalSpent.toLocaleString()}`} readOnly />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="apiKey">API Key</Label>
-            <Input id="apiKey" type="password" defaultValue={supplier?.apiKey || ''} />
+            <Label htmlFor="totalOrders">Total Orders</Label>
+            <Input id="totalOrders" value={supplier?.totalOrders.toString()} readOnly />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="priority">Priority Level</Label>
-            <Select defaultValue={supplier?.priority || 'medium'}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="low">Low</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-              </SelectContent>
-            </Select>
+            <Label htmlFor="currency">Currency</Label>
+            <Input id="currency" value={supplier?.currency || 'USD'} readOnly />
           </div>
         </div>
       </TabsContent>
@@ -853,26 +740,12 @@ function SupplierConfigForm({ supplier }: { supplier?: Supplier }) {
       <TabsContent value="sync" className="space-y-4 mt-4">
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="syncFrequency">Sync Frequency</Label>
-            <Select defaultValue={supplier?.syncFrequency || 'hourly'}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="realtime">Real-time</SelectItem>
-                <SelectItem value="hourly">Every Hour</SelectItem>
-                <SelectItem value="daily">Daily</SelectItem>
-                <SelectItem value="weekly">Weekly</SelectItem>
-              </SelectContent>
-            </Select>
+            <Label htmlFor="lastOrderDate">Last Order Date</Label>
+            <Input id="lastOrderDate" value={supplier?.lastOrderDate ? safeFormatDate(supplier.lastOrderDate) : 'No orders yet'} readOnly />
           </div>
-          <div className="flex items-center space-x-2">
-            <Switch id="notifications" />
-            <Label htmlFor="notifications">Enable sync notifications</Label>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Switch id="autoRetry" />
-            <Label htmlFor="autoRetry">Auto-retry failed syncs</Label>
+          <div className="space-y-2">
+            <Label htmlFor="createdAt">Member Since</Label>
+            <Input id="createdAt" value={safeFormatDate(supplier?.createdAt)} readOnly />
           </div>
         </div>
       </TabsContent>

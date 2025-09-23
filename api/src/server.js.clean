@@ -1,0 +1,116 @@
+/**
+ * API Server for Shopify PO Sync Pro
+ * Provides REST endpoints for the React frontend to communicate with the database
+ */
+import express from 'express'
+import cors from 'cors'
+import helmet from 'helmet'
+import morgan from 'morgan'
+import dotenv from 'dotenv'
+import path from 'path'
+import { fileURLToPath } from 'url'
+// Load environment variables
+dotenv.config({ path: '../orderflow-ai/.env' })
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const app = express()
+const PORT = process.env.API_PORT || 3002
+// Middleware
+app.use(helmet())
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  credentials: true
+}))
+app.use(morgan('combined'))
+app.use(express.json({ limit: '10mb' }))
+app.use(express.urlencoded({ extended: true, limit: '10mb' }))
+// Import routes
+import merchantRoutes from './routes/merchant.js'
+import supplierRoutes from './routes/suppliers.js'
+import purchaseOrderRoutes from './routes/purchaseOrders.js'
+import lineItemRoutes from './routes/lineItems.js'
+import aiSettingsRoutes from './routes/aiSettings.js'
+import uploadRoutes from './routes/upload.js'
+import analyticsRoutes from './routes/analytics.js'
+import shopifyRoutes from './routes/shopify.js'
+// API Routes
+app.use('/api/merchant', merchantRoutes)
+app.use('/api/suppliers', supplierRoutes)
+app.use('/api/purchase-orders', purchaseOrderRoutes)
+app.use('/api/line-items', lineItemRoutes)
+app.use('/api/ai-settings', aiSettingsRoutes)
+app.use('/api/upload', uploadRoutes)
+app.use('/api/analytics', analyticsRoutes)
+app.use('/api/shopify', shopifyRoutes)
+// Serve static files from React build
+app.use(express.static(path.join(__dirname, '../dist')))
+// Shopify App routes - serve the React app
+app.get('/', (req, res) => {
+  // In development, check if build exists, otherwise show dev message
+  const indexPath = path.join(__dirname, '../dist/index.html')
+  // Check if the built React app exists
+  try {
+    res.sendFile(indexPath)
+  } catch (error) {
+    // Fallback for when React app isn't built yet
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>PO Manager Pro - Building...</title>
+        <link rel="stylesheet" href="https://unpkg.com/@shopify/polaris@12.0.0/build/esm/styles.css">
+      </head>
+      <body>
+        <div style="padding: 40px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, 'San Francisco', 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;">
+          <h1>🚀 PO Manager Pro</h1>
+          <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 16px; border-radius: 8px; margin: 20px auto; max-width: 500px;">
+            <h3>⚠️ React App Not Built</h3>
+            <p>Please run <code>npm run build</code> in the root directory to build the React application.</p>
+            <p>Current API server is running on port ${PORT}</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `)
+  }
+})
+// Auth callback route for Shopify OAuth
+app.get('/auth/callback', (req, res) => {
+  res.send('<h1>OAuth Callback - Authentication successful!</h1>')
+})
+app.get('/auth/shopify/callback', (req, res) => {
+  res.send('<h1>Shopify OAuth Callback - Authentication successful!</h1>')
+})
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  })
+})
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: 'Endpoint not found',
+    message: `${req.method} ${req.originalUrl} not found`
+  })
+})
+// Global error handler
+app.use((error, req, res, next) => {
+  console.error('API Error:', error)
+  res.status(error.status || 500).json({
+    success: false,
+    error: error.message || 'Internal server error',
+    ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
+  })
+})
+// Start server
+app.listen(PORT, () => {
+  console.log('API Server running on port', PORT)
+  console.log('Health check: http://localhost:' + PORT + '/api/health')
+  console.log('Environment:', process.env.NODE_ENV || 'development')
+})

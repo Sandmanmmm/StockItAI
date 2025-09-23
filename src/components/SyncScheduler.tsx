@@ -15,7 +15,7 @@ import {
   Pause,
   Gear
 } from '@phosphor-icons/react'
-import { useKV } from '@github/spark/hooks'
+import { useKV } from '../hooks/useKV'
 import { toast } from 'sonner'
 import { ScheduleConfigDialog } from './ScheduleConfigDialog'
 import { safeFormatDateTime, safeFormatDate } from '@/lib/utils'

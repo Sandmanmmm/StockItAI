@@ -1,0 +1,41 @@
+/* Border visibility enhancement - MUST BE LOADED AFTER ALL OTHER STYLES */
+
+/* Override the theme border variables with more visible colors */
+:root {
+  --border: 220 13% 75% !important; /* Much darker border - oklch(0.75 0.02 250) */
+  --input: 220 13% 70% !important;  /* Darker input borders */
+}
+
+/* Force stronger borders on common UI components */
+[data-theme] {
+  --border: 220 13% 75% !important;
+  --input: 220 13% 70% !important;
+}
+
+html {
+  --border: 220 13% 75% !important;
+  --input: 220 13% 70% !important;
+}
+
+/* Direct CSS overrides with high specificity */
+.border,
+[class*="border"]:not([class*="border-none"]):not([class*="border-0"]) {
+  border-color: hsl(220 13% 65%) !important;
+}
+
+/* Specific component overrides */
+.card,
+[role="tablist"],
+.tabs-list,
+input:not([type="checkbox"]):not([type="radio"]),
+textarea,
+select {
+  border-color: hsl(220 13% 65%) !important;
+  border-width: 1px !important;
+  border-style: solid !important;
+}
+
+/* Test override - very visible red borders for debugging */
+body * {
+  border-color: #ff0000 !important;
+}

@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  redis-production:
+    image: redis:7-alpine
+    container_name: redis-po-sync-prod
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - ./data/redis:/data
+      - ./config/redis/redis.conf:/etc/redis/redis.conf:ro
+      - ./logs/redis:/var/log/redis
+    command: redis-server /etc/redis/redis.conf
+    environment:
+      - REDIS_REPLICATION_MODE=master
+    networks:
+      - po-sync-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    sysctls:
+      - net.core.somaxconn=1024
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+
+  redis-sentinel:
+    image: redis:7-alpine
+    container_name: redis-sentinel-po-sync
+    restart: unless-stopped
+    depends_on:
+      - redis-production
+    ports:
+      - "26379:26379"
+    volumes:
+      - ./config/redis/sentinel.conf:/etc/redis/sentinel.conf:ro
+      - ./logs/redis:/var/log/redis
+    command: redis-sentinel /etc/redis/sentinel.conf
+    networks:
+      - po-sync-network
+
+networks:
+  po-sync-network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  redis-data:
+    driver: local
