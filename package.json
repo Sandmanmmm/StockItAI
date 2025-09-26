@@ -39,7 +39,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "form-data": "^4.0.4",
-    "framer-motion": "^11.11.17",
+    "framer-motion": "^12.23.22",
     "lucide-react": "^0.460.0",
     "node-fetch": "^3.3.2",
     "react": "^18.3.1",
