@@ -6,7 +6,7 @@
 import { authenticatedRequest, isShopifyEnvironment } from './shopifyApiService'
 
 // Base configuration
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3003/api'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3005'
 
 // Types for API responses
 export interface Merchant {
@@ -54,7 +54,7 @@ export interface PurchaseOrder {
   dueDate?: string
   totalAmount: number
   currency: string
-  status: 'pending' | 'processing' | 'completed' | 'failed' | 'review_needed'
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'review_needed' | 'denied'
   confidence: number
   rawData?: any
   processingNotes?: string
@@ -304,7 +304,9 @@ class ApiService {
       formData.append('customRules', JSON.stringify(options.customRules))
     }
 
-    if (isShopifyEnvironment()) {
+    // TEMPORARY DEBUG: Force direct API calls for now
+    // if (isShopifyEnvironment()) {
+    if (false) {
       // Use authenticated request in Shopify environment
       try {
         const result = await authenticatedRequest<any>('/upload/po-file', {
@@ -325,22 +327,34 @@ class ApiService {
     } else {
       // Development mode - direct API calls
       try {
-        const response = await fetch(`${API_BASE_URL}/upload/po-file`, {
+        console.log('🔄 Making direct API call to:', `${API_BASE_URL}/api/upload/po-file`)
+        const response = await fetch(`${API_BASE_URL}/api/upload/po-file`, {
           method: 'POST',
           body: formData,
         })
 
+        console.log('📡 Response status:', response.status, response.statusText)
+
         if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}))
+          const errorText = await response.text()
+          console.error('❌ Error response:', errorText)
+          let errorData
+          try {
+            errorData = JSON.parse(errorText)
+          } catch {
+            errorData = { error: errorText }
+          }
           throw new Error(errorData.error || `Upload failed: ${response.status}`)
         }
 
         const data = await response.json()
+        console.log('✅ Upload success:', data)
         return { 
           success: true, 
           data: data.data 
         }
       } catch (error) {
+        console.error('❌ Upload error:', error)
         return {
           success: false,
           error: error instanceof Error ? error.message : 'Upload failed'
@@ -349,22 +363,24 @@ class ApiService {
     }
   }
 
-  async getUploadStatus(poId: string): Promise<APIResponse<{
-    poId: string
-    uploadId: string
-    fileName: string
-    fileSize: number
-    fileUrl?: string
-    uploadedAt: string
-    status: string
-    progress: number
-    message: string
-    processingTime?: number
-    confidence?: number
-    purchaseOrder?: PurchaseOrder
-    jobError?: string
+  async getUploadStatus(uploadId: string): Promise<APIResponse<{
+    upload: {
+      id: string
+      fileName: string
+      status: string
+      createdAt: string
+    }
+    workflow: {
+      status: string
+      progress: number
+      message: string
+      processingTime?: number
+      confidence?: number
+      purchaseOrder?: PurchaseOrder
+      jobError?: string
+    }
   }>> {
-    return this.request(`/upload/${poId}/status`)
+    return this.request(`/api/workflow/upload/${uploadId}/status`)
   }
 
   async triggerProcessing(poId: string, options?: {
@@ -376,7 +392,7 @@ class ApiService {
     status: string
     estimatedTime: number
   }>> {
-    return this.request(`/upload/${poId}/process`, {
+    return this.request(`/api/upload/${poId}/process`, {
       method: 'POST',
       body: JSON.stringify(options || {}),
     })
@@ -387,7 +403,7 @@ class ApiService {
     fileName: string
     fileSize: number
   }>> {
-    return this.request(`/upload/${poId}/download`)
+    return this.request(`/api/upload/${poId}/download`)
   }
 
   // Analytics API methods

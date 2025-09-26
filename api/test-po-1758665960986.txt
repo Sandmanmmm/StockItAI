@@ -1,0 +1,22 @@
+PURCHASE ORDER: PO-TEST-1758665960968
+Date: 9/23/2025
+
+Supplier: ABC Office Supplies
+123 Supply Street
+Business City, CA 90210
+
+Bill To: Test Store
+456 Commerce Ave
+Commerce City, CA 90211
+
+ITEMS:
+- Desk Chair (Qty: 2, Price: $150.00 each) = $300.00
+- Monitor Stand (Qty: 1, Price: $75.00 each) = $75.00
+- USB Cables (Qty: 5, Price: $12.00 each) = $60.00
+
+Subtotal: $435.00
+Tax: $34.80
+Total: $469.80
+
+Terms: Net 30
+Delivery: 9/30/2025

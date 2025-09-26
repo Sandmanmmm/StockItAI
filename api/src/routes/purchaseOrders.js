@@ -4,6 +4,7 @@
 
 import express from 'express'
 import { db } from '../lib/db.js'
+import { workflowOrchestrator } from '../lib/workflowOrchestrator.js'
 
 const router = express.Router()
 
@@ -105,6 +106,7 @@ router.get('/', async (req, res) => {
           fileName: true,
           fileSize: true,
           processingNotes: true,
+          rawData: true, // Include AI analysis data
           createdAt: true,
           updatedAt: true,
           supplierId: true,
@@ -183,6 +185,9 @@ router.get('/:id', async (req, res) => {
       include: {
         supplier: true,
         lineItems: {
+          orderBy: { createdAt: 'asc' }
+        },
+        aiAuditTrail: {
           orderBy: { createdAt: 'asc' }
         }
       }
@@ -339,6 +344,308 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to delete purchase order'
+    })
+  }
+})
+
+// POST /api/purchase-orders/:id/deny - Deny a purchase order
+router.post('/:id/deny', async (req, res) => {
+  try {
+    const merchant = await db.getCurrentMerchant()
+    if (!merchant) {
+      return res.status(401).json({
+        success: false,
+        error: 'Merchant not found'
+      })
+    }
+
+    const { reason } = req.body
+
+    // Update the purchase order status to denied
+    const updatedOrder = await db.client.purchaseOrder.update({
+      where: { 
+        id: req.params.id,
+        merchantId: merchant.id 
+      },
+      data: {
+        status: 'denied',
+        processingNotes: reason || 'Denied by merchant',
+        jobStatus: 'completed',
+        jobCompletedAt: new Date(),
+        updatedAt: new Date()
+      }
+    })
+
+    console.log(`Purchase order ${req.params.id} denied by merchant: ${reason || 'No reason provided'}`)
+
+    res.json({
+      success: true,
+      message: 'Purchase order denied successfully',
+      data: updatedOrder
+    })
+  } catch (error) {
+    console.error('Deny purchase order error:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to deny purchase order'
+    })
+  }
+})
+
+// POST /api/purchase-orders/:id/approve - Approve and sync to Shopify
+router.post('/:id/approve', async (req, res) => {
+  try {
+    const merchant = await db.getCurrentMerchant()
+    if (!merchant) {
+      return res.status(401).json({
+        success: false,
+        error: 'Merchant not found'
+      })
+    }
+
+    const { editedData } = req.body
+
+    // Update the purchase order with any edited data
+    const updateData = {
+      status: 'completed', // Change from 'approved' to 'completed' - the final successful state
+      jobStatus: 'processing',
+      jobStartedAt: new Date(),
+      updatedAt: new Date()
+    }
+
+    // Apply any edited data
+    if (editedData) {
+      if (editedData.supplierName) updateData.supplierName = editedData.supplierName
+      if (editedData.totalAmount) updateData.totalAmount = editedData.totalAmount
+      if (editedData.orderDate) updateData.orderDate = new Date(editedData.orderDate)
+      if (editedData.dueDate) updateData.dueDate = new Date(editedData.dueDate)
+      if (editedData.processingNotes) updateData.processingNotes = editedData.processingNotes
+    }
+
+    const updatedOrder = await db.client.purchaseOrder.update({
+      where: { 
+        id: req.params.id,
+        merchantId: merchant.id 
+      },
+      data: updateData
+    })
+
+    console.log(`Purchase order ${req.params.id} approved by merchant - initiating Shopify sync`)
+
+    // TODO: Trigger Shopify sync workflow here
+    // For now, just mark as completed (approved and ready)
+    await db.client.purchaseOrder.update({
+      where: { id: req.params.id },
+      data: {
+        status: 'completed', // Final successful state after approval
+        jobStatus: 'completed',
+        jobCompletedAt: new Date(),
+        processingNotes: (updateData.processingNotes || '') + ' (Approved by merchant, Shopify sync pending)'
+      }
+    })
+
+    res.json({
+      success: true,
+      message: 'Purchase order approved successfully',
+      data: updatedOrder
+    })
+  } catch (error) {
+    console.error('Approve purchase order error:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to approve purchase order'
+    })
+  }
+})
+
+// POST /api/purchase-orders/:id/edit - Save edited purchase order data
+router.post('/:id/edit', async (req, res) => {
+  try {
+    const merchant = await db.getCurrentMerchant()
+    if (!merchant) {
+      return res.status(401).json({
+        success: false,
+        error: 'Merchant not found'
+      })
+    }
+
+    const { editedData } = req.body
+
+    if (!editedData) {
+      return res.status(400).json({
+        success: false,
+        error: 'No edited data provided'
+      })
+    }
+
+    // Update the purchase order with edited data
+    const updateData = {
+      updatedAt: new Date()
+    }
+
+    // Apply edited fields
+    if (editedData.supplierName) updateData.supplierName = editedData.supplierName
+    if (editedData.totalAmount !== undefined) updateData.totalAmount = editedData.totalAmount
+    if (editedData.orderDate) updateData.orderDate = new Date(editedData.orderDate)
+    if (editedData.dueDate) updateData.dueDate = new Date(editedData.dueDate)
+    if (editedData.processingNotes) updateData.processingNotes = editedData.processingNotes
+    if (editedData.status) updateData.status = editedData.status
+
+    const updatedOrder = await db.client.purchaseOrder.update({
+      where: { 
+        id: req.params.id,
+        merchantId: merchant.id 
+      },
+      data: updateData,
+      include: {
+        supplier: true,
+        lineItems: {
+          orderBy: { createdAt: 'asc' }
+        },
+        aiAuditTrail: {
+          orderBy: { createdAt: 'asc' }
+        }
+      }
+    })
+
+    // Handle line items updates if provided
+    if (editedData.lineItems && Array.isArray(editedData.lineItems)) {
+      console.log(`Updating ${editedData.lineItems.length} line items for PO ${req.params.id}`)
+      
+      // For now, we'll just update existing line items
+      // In a full implementation, you'd handle create/update/delete operations
+      for (const item of editedData.lineItems) {
+        if (item.id) {
+          await db.client.pOLineItem.update({
+            where: { id: item.id },
+            data: {
+              sku: item.sku,
+              productName: item.productName,
+              description: item.description,
+              quantity: item.quantity,
+              unitCost: item.unitCost,
+              totalCost: item.totalCost,
+              updatedAt: new Date()
+            }
+          })
+        }
+      }
+    }
+
+    console.log(`Purchase order ${req.params.id} edited by merchant`)
+
+    res.json({
+      success: true,
+      message: 'Purchase order updated successfully',
+      data: updatedOrder
+    })
+  } catch (error) {
+    console.error('Edit purchase order error:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update purchase order'
+    })
+  }
+})
+
+
+
+// POST /api/purchase-orders/:id/reject - Reject a purchase order
+router.post('/:id/reject', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { reason } = req.body
+    
+    // Update PO status to rejected with reason
+    const updatedPO = await db.client.purchaseOrder.update({
+      where: { id },
+      data: {
+        status: 'rejected',
+        aiResponse: {
+          ...updatedPO?.aiResponse || {},
+          rejectionReason: reason,
+          rejectedAt: new Date().toISOString()
+        },
+        updatedAt: new Date()
+      }
+    })
+    
+    console.log(`Purchase order ${id} rejected: ${reason}`)
+    
+    res.json({
+      success: true,
+      message: 'Purchase order rejected successfully',
+      data: updatedPO
+    })
+  } catch (error) {
+    console.error('Reject purchase order error:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to reject purchase order'
+    })
+  }
+})
+
+// POST /api/purchase-orders/:id/reprocess - Reprocess a purchase order with AI
+router.post('/:id/reprocess', async (req, res) => {
+  try {
+    const { id } = req.params
+    
+    // Get the PO with upload information
+    const po = await db.client.purchaseOrder.findUnique({
+      where: { id },
+      include: {
+        upload: true
+      }
+    })
+    
+    if (!po || !po.upload) {
+      return res.status(404).json({
+        success: false,
+        error: 'Purchase order or associated upload not found'
+      })
+    }
+    
+    // Use the singleton workflowOrchestrator instance
+    // (Already imported at the top of the file)
+    
+    // Create a new workflow for reprocessing
+    // const workflowId = `reprocess_${Date.now()}` // Will be generated by startWorkflow
+    
+    // Update PO status to processing
+    await db.client.purchaseOrder.update({
+      where: { id },
+      data: {
+        status: 'processing',
+        updatedAt: new Date()
+      }
+    })
+    
+    // Queue AI reprocessing job using the correct orchestrator method
+    const workflowId = await workflowOrchestrator.startWorkflow({
+      uploadId: po.upload.id,
+      fileBuffer: null, // Will be downloaded from storage
+      fileName: po.upload.originalFileName,
+      merchantId: po.merchantId || 'default',
+      options: {
+        confidenceThreshold: 0.85,
+        strictMatching: true,
+        reprocessing: true
+      }
+    })
+    
+    console.log(`Purchase order ${id} queued for reprocessing with workflow ${workflowId}`)
+    
+    res.json({
+      success: true,
+      message: 'Purchase order queued for reprocessing',
+      workflowId
+    })
+  } catch (error) {
+    console.error('Reprocess purchase order error:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to reprocess purchase order'
     })
   }
 })

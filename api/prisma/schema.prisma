@@ -54,6 +54,11 @@ model Merchant {
   plan          String   @default("basic")
   status        String   @default("active") // active, suspended, cancelled
   settings      Json     @default("{}")
+  
+  // Shopify connection details
+  accessToken   String?  // Shopify access token
+  scope         String?  // Shopify API scope
+  
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   
@@ -62,6 +67,8 @@ model Merchant {
   purchaseOrders PurchaseOrder[]
   suppliers      Supplier[]
   aiSettings     AISettings?
+  uploads        Upload[]
+  workflows      WorkflowExecution[]
   
   @@index([shopDomain])
   @@index([status])
@@ -75,13 +82,19 @@ model PurchaseOrder {
   dueDate           DateTime?
   totalAmount       Float
   currency          String      @default("USD")
-  status            String      @default("pending") // pending, processing, completed, failed, review_needed
+  status            String      @default("pending") // pending, processing, completed, failed, review_needed, syncing, synced, sync_error
   confidence        Float       @default(0.0)      // AI processing confidence (0-1)
   rawData           Json?       // Original parsed data from document
   processingNotes   String?     // AI processing notes
   fileName          String?     // Original uploaded file name
   fileSize          Int?        // File size in bytes
   fileUrl           String?     // URL/path to stored file in Supabase Storage
+  
+  // Shopify sync tracking
+  syncStartedAt     DateTime?   // When Shopify sync started
+  syncCompletedAt   DateTime?   // When Shopify sync completed
+  syncResults       Json?       // Detailed sync results
+  totalProcessingTime Int?      // Total processing time including sync
   
   // Job tracking fields for async processing
   analysisJobId     String?     // Redis job ID for PO analysis processing
@@ -102,8 +115,11 @@ model PurchaseOrder {
   supplierId        String?
   supplier          Supplier?   @relation(fields: [supplierId], references: [id])
   
-  // Line items
+  // Line items and AI audit trail
   lineItems         POLineItem[]
+  aiAuditTrail      AIProcessingAudit[]
+  syncJobs          SyncJob[]
+  syncAudits        ShopifySyncAudit[]
   
   @@index([merchantId])
   @@index([supplierId])
@@ -129,6 +145,9 @@ model POLineItem {
   // Shopify integration fields
   shopifyProductId  String?       // Matched Shopify product ID
   shopifyVariantId  String?       // Matched Shopify variant ID
+  shopifySync       String?       // created, updated, error, pending
+  shopifySyncAt     DateTime?     // Last sync timestamp
+  syncError         String?       // Sync error message if any
   
   // Processing metadata
   aiNotes           String?       // AI processing notes for this item
@@ -182,6 +201,7 @@ model Supplier {
   
   // Purchase orders from this supplier
   purchaseOrders    PurchaseOrder[]
+  uploads           Upload[]
   
   @@index([merchantId])
   @@index([status])
@@ -230,4 +250,245 @@ model AISettings {
   merchant              Merchant @relation(fields: [merchantId], references: [id])
   
   @@index([merchantId])
+}
+
+model AIProcessingAudit {
+  id                    String   @id @default(cuid())
+  
+  // Processing metadata
+  model                 String                  // AI model used (gpt-5-nano, gpt-4o-mini)
+  tokenCount            Int                     // Total tokens used
+  processingTime        Int                     // Processing time in milliseconds
+  confidence            Float                   // Overall confidence score (0-1)
+  processingMethod      String                  // Method used (text-gpt5, text-gpt4-mini-fallback, etc.)
+  
+  // Input data
+  inputType             String                  // text, pdf, image
+  inputSize             Int?                    // Input size in bytes/characters
+  fileName              String?                 // Original file name
+  
+  // Results data
+  documentType          String?                 // purchase_order, invoice, etc.
+  industry              String?                 // retail, manufacturing, etc.
+  extractedFields       Json                    // Fields extracted by AI
+  confidenceBreakdown   Json                    // Confidence scores per field
+  dataQuality           String?                 // excellent, good, fair, poor
+  
+  // Processing status
+  status                String                  // success, failure, partial
+  errorMessage          String?                 // Error message if failed
+  warningMessages       String[]  @default([]) // Warning messages
+  
+  // Audit trail
+  createdAt             DateTime @default(now())
+  
+  // Relationships
+  purchaseOrderId       String
+  purchaseOrder         PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  
+  @@index([purchaseOrderId])
+  @@index([model])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model SyncJob {
+  id                String   @id @default(cuid())
+  
+  // Job details
+  type              String                  // shopify_sync, inventory_update, etc.
+  status            String   @default("queued") // queued, processing, completed, failed
+  priority          String   @default("normal") // low, normal, high, critical
+  
+  // Timing
+  queuedAt          DateTime @default(now())
+  startedAt         DateTime?
+  completedAt       DateTime?
+  
+  // Retry logic
+  retryCount        Int      @default(0)
+  maxRetries        Int      @default(3)
+  lastFailedAt      DateTime?
+  
+  // Results
+  results           Json?
+  errorMessage      String?
+  
+  // Relationships
+  purchaseOrderId   String
+  purchaseOrder     PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  
+  @@index([type])
+  @@index([status])
+  @@index([priority])
+  @@index([queuedAt])
+  @@index([purchaseOrderId])
+}
+
+model ShopifySyncAudit {
+  id                String   @id @default(cuid())
+  
+  // Sync session details
+  syncStartTime     DateTime
+  syncEndTime       DateTime
+  processingTime    Int                     // Total processing time in milliseconds
+  
+  // Results summary
+  success           Boolean
+  itemsProcessed    Int
+  itemsCreated      Int
+  itemsUpdated      Int
+  itemsErrored      Int
+  
+  // Detailed results
+  syncResults       Json                    // Full sync results with item details
+  errorMessage      String?                 // Error message if sync failed
+  
+  // Audit trail
+  createdAt         DateTime @default(now())
+  
+  // Relationships
+  purchaseOrderId   String
+  purchaseOrder     PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  
+  @@index([purchaseOrderId])
+  @@index([success])
+  @@index([syncStartTime])
+  @@index([createdAt])
+}
+
+model Upload {
+  id                String   @id @default(cuid())
+  
+  // File details
+  fileName          String
+  originalFileName  String
+  fileSize          Int
+  mimeType          String
+  fileUrl           String?  // Storage URL/path
+  
+  // Processing status
+  status            String   @default("uploaded") // uploaded, parsing, parsed, processing, completed, failed
+  errorMessage      String?
+  
+  // Workflow tracking
+  workflowId        String?  // Reference to workflow in Redis
+  
+  // Upload context
+  merchantId        String
+  supplierId        String?
+  
+  // Metadata
+  metadata          Json     @default("{}")
+  
+  // Timestamps
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  // Relationships
+  merchant          Merchant @relation(fields: [merchantId], references: [id])
+  supplier          Supplier? @relation(fields: [supplierId], references: [id])
+  
+  @@index([merchantId])
+  @@index([workflowId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model WorkflowExecution {
+  id                String   @id @default(cuid())
+  
+  // Workflow identification
+  workflowId        String   @unique // Redis workflow ID
+  type              String   @default("purchase_order_processing") // Workflow type
+  
+  // Current status
+  status            String   @default("pending") // pending, running, completed, failed, cancelled
+  currentStage      String?  // Current stage being processed
+  
+  // Timing
+  startedAt         DateTime @default(now())
+  completedAt       DateTime?
+  totalDuration     Int?     // Total duration in milliseconds
+  
+  // Progress tracking
+  stagesCompleted   Int      @default(0)
+  stagesTotal       Int      @default(4) // AI, DB, Shopify, Status
+  progressPercent   Int      @default(0)
+  
+  // Input data
+  inputData         Json     // Original workflow input
+  
+  // Stage results
+  stageResults      Json     @default("{}") // Results from each stage
+  
+  // Error handling
+  errorMessage      String?
+  failedStage       String?
+  retryCount        Int      @default(0)
+  
+  // Context
+  merchantId        String
+  uploadId          String?
+  purchaseOrderId   String?
+  
+  // Metadata
+  metadata          Json     @default("{}")
+  
+  // Timestamps
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  // Relationships
+  merchant          Merchant @relation(fields: [merchantId], references: [id])
+  stages            WorkflowStageExecution[]
+  
+  @@index([workflowId])
+  @@index([merchantId])
+  @@index([status])
+  @@index([currentStage])
+  @@index([startedAt])
+}
+
+model WorkflowStageExecution {
+  id                String   @id @default(cuid())
+  
+  // Stage identification
+  workflowId        String   // References WorkflowExecution.workflowId
+  stageName         String   // ai_parsing, database_save, shopify_sync, status_update
+  stageOrder        Int      // 1, 2, 3, 4...
+  
+  // Status
+  status            String   @default("pending") // pending, running, completed, failed, skipped
+  
+  // Timing
+  startedAt         DateTime?
+  completedAt       DateTime?
+  duration          Int?     // Duration in milliseconds
+  
+  // Progress
+  progress          Int      @default(0) // 0-100
+  
+  // Results
+  result            Json?    // Stage-specific results
+  errorMessage      String?
+  
+  // Job tracking
+  jobId             String?  // Bull queue job ID
+  retryCount        Int      @default(0)
+  
+  // Metadata
+  metadata          Json     @default("{}")
+  
+  // Timestamps
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  // Relationships
+  workflow          WorkflowExecution @relation(fields: [workflowId], references: [workflowId], onDelete: Cascade)
+  
+  @@unique([workflowId, stageName])
+  @@index([workflowId])
+  @@index([status])
+  @@index([startedAt])
 }

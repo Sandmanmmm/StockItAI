@@ -5,14 +5,21 @@
 
 // Base configuration - automatically use current origin when running through tunnel
 function getApiBaseUrl(): string {
-  // If running through Cloudflare tunnel (https), use the same origin for API calls
+  // Force use of environment variable for API calls to ensure correct tunnel URL
+  const envUrl = import.meta.env.VITE_API_BASE_URL
+  if (envUrl) {
+    console.log('🌐 Using configured API URL:', envUrl)
+    return envUrl
+  }
+  
+  // Fallback: If running through Cloudflare tunnel (https), use the same origin for API calls
   if (window.location.origin.includes('trycloudflare.com')) {
     console.log('🌐 Using tunnel origin for API calls:', window.location.origin)
     return window.location.origin
   }
   
-  // Otherwise use environment variable or localhost default
-  return import.meta.env.VITE_API_BASE_URL || 'http://localhost:3003'
+  // Otherwise use localhost default
+  return 'http://localhost:3003'
 }
 
 const API_BASE_URL = getApiBaseUrl()

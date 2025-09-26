@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 
 export interface UploadProgress {
   poId?: string
+  uploadId?: string
   fileName: string
   fileSize: number
   status: 'pending' | 'uploading' | 'processing' | 'completed' | 'failed'
@@ -64,7 +65,7 @@ export function useFileUpload(options: UseFileUploadOptions = {}) {
     })
   }, [options.onStatusChange])
 
-  const startStatusPolling = useCallback((poId: string) => {
+  const startStatusPolling = useCallback((uploadId: string) => {
     // Clear any existing interval
     if (intervalRef.current) {
       clearInterval(intervalRef.current)
@@ -72,14 +73,15 @@ export function useFileUpload(options: UseFileUploadOptions = {}) {
 
     const pollStatus = async () => {
       try {
-        const response = await apiService.getUploadStatus(poId)
+        const response = await apiService.getUploadStatus(uploadId)
         
         if (response.success && response.data) {
-          const { status, progress, purchaseOrder, jobError } = response.data
+          const { workflow } = response.data
+          const { status, progress, purchaseOrder, jobError } = workflow
           
           updateProgress({
             status: status as any,
-            progress: Math.min(progress, 100),
+            progress: Math.min(progress || 0, 100),
             error: jobError || undefined,
             purchaseOrder
           })
@@ -159,12 +161,13 @@ export function useFileUpload(options: UseFileUploadOptions = {}) {
         throw new Error(uploadResponse.error || 'Upload failed')
       }
 
-      const { poId, status, estimatedProcessingTime } = uploadResponse.data
+      const { poId, uploadId, status, estimatedProcessingTime } = uploadResponse.data
 
       setIsUploading(false)
       
       updateProgress({
         poId,
+        uploadId,
         status: status as any,
         progress: status === 'processing' ? 10 : 100,
         estimatedTime: estimatedProcessingTime
@@ -173,7 +176,7 @@ export function useFileUpload(options: UseFileUploadOptions = {}) {
       // If auto-processing is enabled, start polling for status
       if (status === 'processing') {
         setIsProcessing(true)
-        startStatusPolling(poId)
+        startStatusPolling(uploadId) // Use uploadId instead of poId
         toast.success(`File uploaded successfully. Processing started...`)
       } else {
         toast.success(`File uploaded successfully`)

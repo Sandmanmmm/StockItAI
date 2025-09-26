@@ -47,8 +47,11 @@ export class FileParsingService {
    */
   async parsePDF(buffer) {
     try {
+      // Convert Buffer to Uint8Array for PDF.js compatibility
+      const uint8Array = new Uint8Array(buffer)
+      
       // Load PDF document
-      const loadingTask = pdfjsLib.getDocument({ data: buffer })
+      const loadingTask = pdfjsLib.getDocument({ data: uint8Array })
       const pdf = await loadingTask.promise
       
       let fullText = ''

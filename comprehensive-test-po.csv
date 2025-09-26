@@ -1,0 +1,4 @@
+PO Number,Supplier Name,Supplier Address,Product Code,Product Description,Quantity,Unit Price,Line Total,Order Date,Expected Delivery,Contact Email,Contact Phone
+PO-2025-001,ABC Supply Company,123 Business St New York NY 10001,WID001,Professional Widget Type A Premium Quality,50,25.99,1299.50,2025-09-24,2025-10-01,orders@abcsupply.com,555-0123
+PO-2025-001,ABC Supply Company,123 Business St New York NY 10001,GAD002,Advanced Gadget Model B Industrial Grade,25,45.75,1143.75,2025-09-24,2025-10-01,orders@abcsupply.com,555-0123
+PO-2025-001,ABC Supply Company,123 Business St New York NY 10001,TOO003,Professional Tool Set Complete Kit,10,89.99,899.90,2025-09-24,2025-10-01,orders@abcsupply.com,555-0123

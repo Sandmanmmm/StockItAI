@@ -121,11 +121,13 @@ export async function devBypassAuth(req, res, next) {
     // Try to use database if available
     let merchant
     try {
+      // Use the Test Shop merchant that has our real data
       merchant = await db.client.merchant.findFirst({
-        where: { email: 'dev-test@shopify.com' }
+        where: { email: 'test@example.com' }
       })
 
       if (!merchant) {
+        // Fallback to creating development merchant
         merchant = await db.client.merchant.create({
           data: {
             name: 'Development Test Store',
@@ -265,6 +267,56 @@ export async function handleAuthCallback(req, res) {
       error: 'OAuth callback failed',
       code: 'OAUTH_CALLBACK_ERROR',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    })
+  }
+}
+
+/**
+ * Admin authentication middleware for sensitive operations
+ * Validates admin API keys for monitoring, analytics, and DLQ access
+ */
+export function adminAuth(req, res, next) {
+  try {
+    const adminKey = req.headers['x-admin-key']
+    const validAdminKey = process.env.ADMIN_API_KEY
+    
+    if (!validAdminKey) {
+      console.error('ADMIN_API_KEY not configured in environment')
+      return res.status(500).json({
+        success: false,
+        error: 'Admin authentication not configured',
+        code: 'ADMIN_NOT_CONFIGURED'
+      })
+    }
+    
+    if (!adminKey) {
+      return res.status(401).json({
+        success: false,
+        error: 'Admin API key required',
+        code: 'ADMIN_KEY_MISSING'
+      })
+    }
+    
+    if (adminKey !== validAdminKey) {
+      return res.status(403).json({
+        success: false,
+        error: 'Invalid admin API key',
+        code: 'ADMIN_KEY_INVALID'
+      })
+    }
+    
+    // Add admin context to request
+    req.admin = true
+    req.adminAccessLevel = 'full'
+    
+    next()
+    
+  } catch (error) {
+    console.error('Admin auth error:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Admin authentication failed',
+      code: 'ADMIN_AUTH_ERROR'
     })
   }
 }

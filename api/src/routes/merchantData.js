@@ -18,6 +18,10 @@ router.get('/dashboard-summary', async (req, res) => {
   try {
     const merchant = req.shop
     
+    console.log('🔍 Dashboard summary request - merchant info:')
+    console.log('   req.merchant:', req.merchant?.id, req.merchant?.name, req.merchant?.email)
+    console.log('   req.shop:', req.shop?.id, req.shop?.name, req.shop?.email)
+    
     if (!merchant) {
       return res.status(404).json({
         success: false,
@@ -26,6 +30,8 @@ router.get('/dashboard-summary', async (req, res) => {
     }
 
     try {
+      console.log(`🔍 Querying POs for merchant ID: ${merchant.id} (${merchant.name || merchant.email})`)
+      
       // Get recent purchase orders (last 5)
       const recentPOs = await db.client.purchaseOrder.findMany({
         where: { merchantId: merchant.id },

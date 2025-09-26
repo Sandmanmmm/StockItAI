@@ -41,6 +41,12 @@ export class RedisManager {
    * Initialize Redis connections with production settings
    */
   async initializeConnections() {
+    // Prevent double initialization
+    if (this.isConnected) {
+      console.log('Redis connections already initialized, skipping...')
+      return
+    }
+    
     try {
       const environment = process.env.NODE_ENV || 'development'
       const redisConfig = getRedisConfig(environment)
@@ -376,16 +382,121 @@ export class RedisManager {
   }
 
   /**
+   * Set a key-value pair in Redis
+   */
+  async set(key, value, ttlSeconds = null) {
+    if (!this.isConnected) {
+      throw new Error('Redis not connected')
+    }
+    
+    if (ttlSeconds) {
+      return await this.redis.setex(key, ttlSeconds, value)
+    } else {
+      return await this.redis.set(key, value)
+    }
+  }
+
+  /**
+   * Get a value from Redis
+   */
+  async get(key) {
+    if (!this.isConnected) {
+      throw new Error('Redis not connected')
+    }
+    
+    return await this.redis.get(key)
+  }
+
+  /**
+   * Delete a key from Redis
+   */
+  async del(key) {
+    if (!this.isConnected) {
+      throw new Error('Redis not connected')
+    }
+    
+    return await this.redis.del(key)
+  }
+
+  /**
+   * Check if a key exists in Redis
+   */
+  async exists(key) {
+    if (!this.isConnected) {
+      throw new Error('Redis not connected')
+    }
+    
+    return await this.redis.exists(key)
+  }
+
+  /**
+   * Set expiration for a key
+   */
+  async expire(key, ttlSeconds) {
+    if (!this.isConnected) {
+      throw new Error('Redis not connected')
+    }
+    
+    return await this.redis.expire(key, ttlSeconds)
+  }
+
+  /**
+   * Properly disconnect all Redis connections
+   * Essential for preventing hanging in tests and graceful shutdowns
+   */
+  async disconnect() {
+    const promises = []
+    
+    try {
+      if (this.redis && this.redis.status !== 'end') {
+        console.log('🔌 Disconnecting main Redis connection...')
+        promises.push(this.redis.quit())
+      }
+      
+      if (this.subscriber && this.subscriber.status !== 'end') {
+        console.log('🔌 Disconnecting Redis subscriber...')
+        promises.push(this.subscriber.quit())
+      }
+      
+      if (this.publisher && this.publisher.status !== 'end') {
+        console.log('🔌 Disconnecting Redis publisher...')  
+        promises.push(this.publisher.quit())
+      }
+      
+      // Wait for all disconnections
+      await Promise.all(promises)
+      
+      // Reset state
+      this.redis = null
+      this.subscriber = null
+      this.publisher = null
+      this.isConnected = false
+      
+      console.log('✅ All Redis connections closed successfully')
+      
+    } catch (error) {
+      console.error('❌ Error during Redis disconnection:', error)
+      
+      // Force close if graceful quit fails
+      if (this.redis) this.redis.disconnect(false)
+      if (this.subscriber) this.subscriber.disconnect(false)
+      if (this.publisher) this.publisher.disconnect(false)
+      
+      this.redis = null
+      this.subscriber = null
+      this.publisher = null
+      this.isConnected = false
+    }
+  }
+
+  /**
    * Graceful shutdown
    */
   async shutdown() {
     console.log('Shutting down Redis connections...')
     
     try {
-      if (this.redis) await this.redis.disconnect()
-      if (this.subscriber) await this.subscriber.disconnect()
-      if (this.publisher) await this.publisher.disconnect()
-      
+      await this.disconnect()
       console.log('Redis connections closed gracefully')
     } catch (error) {
       console.error('Error during Redis shutdown:', error)

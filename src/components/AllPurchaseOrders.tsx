@@ -45,6 +45,7 @@ import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import { usePurchaseOrders } from '../hooks/useMerchantData'
 import { PurchaseOrderDetails } from './PurchaseOrderDetails'
+import { PurchaseOrderReviewPage } from './PurchaseOrderReviewPage'
 
 interface PurchaseOrderItem {
   id: string
@@ -74,6 +75,53 @@ interface PurchaseOrder {
   fileName?: string
   fileSize?: number
   processingNotes?: string
+  rawData?: {                  // AI analysis data - actual nested structure
+    extractedData?: {
+      supplier?: {
+        name?: string
+        address?: string
+        contact?: {
+          email?: string
+          phone?: string
+        }
+      }
+      totals?: {
+        grandTotal?: number
+        total?: number
+        totalAmount?: number
+        subtotal?: number
+        tax?: number
+        shipping?: number
+      }
+      lineItems?: any[]
+      confidence?: number
+      dates?: any
+      poNumber?: string
+      notes?: string
+    }
+    vendor?: {
+      name?: string
+      address?: string
+    }
+    supplier?: {
+      name?: string
+    }
+    totals?: {
+      total?: number
+      grandTotal?: number
+      totalAmount?: number
+      subtotal?: number
+      tax?: number
+    }
+    total?: {
+      amount?: number
+    }
+    lineItems?: any[]
+    confidence?: {
+      overall?: number
+    } | number
+    [key: string]: any  // Allow other properties
+  }
   createdAt: string
   updatedAt: string
   
@@ -98,6 +146,7 @@ interface AllPurchaseOrdersProps {
 
 export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
+  const [reviewOrderId, setReviewOrderId] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [supplierFilter, setSupplierFilter] = useState('all')
@@ -202,6 +251,52 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
     })
   }
 
+  // Enhanced data extraction helper - based on actual rawData structure (nested extractedData)
+  const extractEnhancedData = (po: PurchaseOrder) => {
+    const rawData = po.rawData
+    const extractedData = rawData?.extractedData
+    
+    // Helper to safely convert to number
+    const safeToNumber = (value: any) => {
+      if (typeof value === 'number') return value
+      if (typeof value === 'string') return parseFloat(value) || 0
+      return 0
+    }
+
+    if (rawData && extractedData) {
+      return {
+        supplierName: extractedData.supplier?.name || rawData.vendor?.name || rawData.supplier?.name || po.supplierName || 'Unknown Supplier',
+        totalAmount: safeToNumber(
+          extractedData.totals?.grandTotal || 
+          extractedData.totals?.total || 
+          extractedData.totals?.totalAmount || 
+          rawData.totals?.total || 
+          rawData.totals?.grandTotal || 
+          rawData.total?.amount ||
+          po.totalAmount || 0
+        ),
+        lineItemsCount: extractedData.lineItems?.length || rawData.lineItems?.length || po._count?.lineItems || 0,
+        confidence: (() => {
+          const conf = rawData.confidence || extractedData.confidence
+          if (typeof conf === 'object' && conf?.overall) {
+            return conf.overall
+          }
+          if (typeof conf === 'number') {
+            return conf * 100 // Convert to percentage if needed
+          }
+          return (po.confidence || 0) * 100
+        })()
+      }
+    }
+
+    return {
+      supplierName: po.supplierName || 'Unknown Supplier',
+      totalAmount: safeToNumber(po.totalAmount || 0),
+      lineItemsCount: po._count?.lineItems || 0,
+      confidence: (po.confidence || 0) * 100 // Convert to percentage
+    }
+  }
+
   const handleSort = (field: 'number' | 'supplierName' | 'createdAt' | 'totalAmount') => {
     if (sortField === field) {
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
@@ -221,8 +316,17 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
     const completed = filteredAndSortedPOs.filter(po => po.status === 'completed').length
     const processing = filteredAndSortedPOs.filter(po => po.status === 'processing').length
     const failed = filteredAndSortedPOs.filter(po => po.status === 'failed').length
-    const totalValue = filteredAndSortedPOs.reduce((sum, po) => sum + (po.totalAmount || 0), 0)
-    const avgConfidence = filteredAndSortedPOs.reduce((sum, po) => sum + po.confidence, 0) / (total || 1)
+    
+    // Use enhanced data for more accurate totals
+    const totalValue = filteredAndSortedPOs.reduce((sum, po) => {
+      const enhancedData = extractEnhancedData(po)
+      return sum + enhancedData.totalAmount
+    }, 0)
+    
+    const avgConfidence = filteredAndSortedPOs.reduce((sum, po) => {
+      const enhancedData = extractEnhancedData(po)
+      return sum + enhancedData.confidence
+    }, 0) / (total || 1)
 
     return { total, completed, processing, failed, totalValue, avgConfidence }
   }
@@ -235,6 +339,16 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
       <PurchaseOrderDetails 
         orderId={selectedOrderId}
         onBack={() => setSelectedOrderId(null)}
+      />
+    )
+  }
+
+  // Show purchase order review page
+  if (reviewOrderId) {
+    return (
+      <PurchaseOrderReviewPage 
+        purchaseOrderId={reviewOrderId} 
+        onBack={() => setReviewOrderId(null)} 
       />
     )
   }
@@ -401,53 +515,72 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredAndSortedPOs.map((po) => (
-                  <TableRow 
-                    key={po.id} 
-                    className="cursor-pointer hover:bg-muted/50"
-                    onClick={() => setSelectedOrderId(po.id)}
-                  >
-                    <TableCell className="font-medium">{po.number}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                          <Package className="w-4 h-4 text-primary" />
+                {filteredAndSortedPOs.map((po) => {
+                  const enhancedData = extractEnhancedData(po)
+                  return (
+                    <TableRow 
+                      key={po.id} 
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => setSelectedOrderId(po.id)}
+                    >
+                      <TableCell className="font-medium">{po.number}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                            <Package className="w-4 h-4 text-primary" />
+                          </div>
+                          {enhancedData.supplierName}
                         </div>
-                        {po.supplierName}
-                      </div>
-                    </TableCell>
-                    <TableCell>{getStatusBadge(po.status)}</TableCell>
-                    <TableCell>{formatDate(po.createdAt)}</TableCell>
-                    <TableCell className="text-right">{po._count?.lineItems || 0}</TableCell>
-                    <TableCell className="text-right font-mono">{formatCurrency(po.totalAmount || 0)}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center gap-2 justify-end">
-                        <div className="w-16 bg-muted rounded-full h-2">
-                          <div 
-                            className={`h-2 rounded-full transition-all ${
-                              (po.confidence || 0) >= 90 ? 'bg-success' :
-                              (po.confidence || 0) >= 70 ? 'bg-warning' : 'bg-destructive'
-                            }`}
-                            style={{ width: `${po.confidence || 0}%` }}
-                          />
+                      </TableCell>
+                      <TableCell>{getStatusBadge(po.status)}</TableCell>
+                      <TableCell>{formatDate(po.createdAt)}</TableCell>
+                      <TableCell className="text-right">{enhancedData.lineItemsCount}</TableCell>
+                      <TableCell className="text-right font-mono">{formatCurrency(enhancedData.totalAmount)}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center gap-2 justify-end">
+                          <div className="w-16 bg-muted rounded-full h-2">
+                            <div 
+                              className={`h-2 rounded-full transition-all ${
+                                enhancedData.confidence >= 90 ? 'bg-success' :
+                                enhancedData.confidence >= 70 ? 'bg-warning' : 'bg-destructive'
+                              }`}
+                              style={{ width: `${enhancedData.confidence}%` }}
+                            />
+                          </div>
+                          <span className="text-sm font-medium">{enhancedData.confidence}%</span>
                         </div>
-                        <span className="text-sm font-medium">{po.confidence || 0}%</span>
-                      </div>
-                    </TableCell>
+                      </TableCell>
                     <TableCell className="text-right">
-                      <Button 
-                        variant="ghost" 
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setSelectedOrderId(po.id)
-                        }}
-                      >
-                        <Eye className="w-4 h-4" />
-                      </Button>
+                      <div className="flex items-center justify-end space-x-1">
+                        {(po.status === 'review_needed' || po.status === 'processing') && (
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setReviewOrderId(po.id)
+                            }}
+                            className="text-blue-600 hover:text-blue-700"
+                          >
+                            <PencilSimple className="w-4 h-4 mr-1" />
+                            Review
+                          </Button>
+                        )}
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSelectedOrderId(po.id)
+                          }}
+                        >
+                          <Eye className="w-4 h-4" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                  )
+                })}
               </TableBody>
             </Table>
           </div>

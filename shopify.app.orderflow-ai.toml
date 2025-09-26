@@ -2,7 +2,7 @@
 
 client_id = "484def5b3b4823489f8ebff0d2e9cadd"
 name = "orderflow-ai"
-application_url = "https://clear-ontario-awesome-track.trycloudflare.com"
+application_url = "https://drill-infrared-utilize-fever.trycloudflare.com"
 embedded = true
 handle = "orderflow-ai"
 
@@ -20,9 +20,9 @@ scopes = "read_customers,read_inventory,read_orders,read_products,write_customer
 
 [auth]
 redirect_urls = [
-  "https://clear-ontario-awesome-track.trycloudflare.com/auth/callback",
-  "https://clear-ontario-awesome-track.trycloudflare.com/auth/shopify/callback",
-  "https://clear-ontario-awesome-track.trycloudflare.com/api/auth/callback"
+  "https://drill-infrared-utilize-fever.trycloudflare.com/auth/callback",
+  "https://drill-infrared-utilize-fever.trycloudflare.com/auth/shopify/callback",
+  "https://drill-infrared-utilize-fever.trycloudflare.com/api/auth/callback"
 ]
 
 [pos]

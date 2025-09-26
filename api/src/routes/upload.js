@@ -1,12 +1,12 @@
 /**
- * File Upload API routes with production AI processing and Supabase Storage
+ * File Upload API routes with Workflow Orchestration
  */
 
 import express from 'express'
 import multer from 'multer'
 import { db } from '../lib/db.js'
 import { storageService } from '../lib/storageService.js'
-import { fileProcessingJobService } from '../lib/fileProcessingJobService.js'
+import { workflowIntegration } from '../lib/workflowIntegration.js'
 import path from 'path'
 
 const router = express.Router()
@@ -97,72 +97,100 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
         await db.client.purchaseOrder.delete({
           where: { id: purchaseOrder.id }
         })
-        
         return res.status(500).json({
           success: false,
           error: 'File storage failed: ' + uploadResult.error
         })
       }
 
-      // Update PO record with file URL
+      // Create upload record for workflow tracking
+      const uploadRecord = await db.client.upload.create({
+        data: {
+          fileName: req.file.originalname,
+          originalFileName: req.file.originalname,
+          fileSize: req.file.size,
+          mimeType: req.file.mimetype,
+          fileUrl: uploadResult.filePath,
+          status: 'uploaded',
+          merchantId: merchant.id,
+          supplierId: supplierId || null,
+          metadata: {
+            purchaseOrderId: purchaseOrder.id,
+            autoProcess: autoProcess === 'true',
+            uploadedAt: new Date().toISOString()
+          }
+        }
+      })
+
+      // Update PO record with file URL and upload reference
       const updatedPO = await db.client.purchaseOrder.update({
         where: { id: purchaseOrder.id },
         data: {
-          fileUrl: uploadResult.filePath // Store the storage path, not the signed URL
+          fileUrl: uploadResult.filePath,
+          status: autoProcess === 'true' ? 'processing' : 'uploaded'
         }
       })
 
       // Get merchant AI settings
-      const aiSettings = await db.client.aiSettings.findUnique({
+      const aiSettings = await db.client.aISettings.findUnique({
         where: { merchantId: merchant.id }
       })
 
       const processingOptions = {
-        autoProcess: autoProcess === 'true',
-        aiSettings: {
-          ...aiSettings,
-          confidenceThreshold: confidenceThreshold ? parseFloat(confidenceThreshold) : aiSettings?.confidenceThreshold || 0.8,
-          customRules: customRules ? JSON.parse(customRules) : aiSettings?.customRules || []
-        }
+        confidenceThreshold: confidenceThreshold ? parseFloat(confidenceThreshold) : aiSettings?.confidenceThreshold || 0.8,
+        customRules: customRules ? JSON.parse(customRules) : aiSettings?.customRules || [],
+        strictMatching: aiSettings?.strictMatching || true,
+        primaryModel: aiSettings?.primaryModel || 'gpt-5-nano',
+        fallbackModel: aiSettings?.fallbackModel || 'gpt-4o-mini'
       }
 
-      // Queue file for processing if auto-process is enabled
-      if (processingOptions.autoProcess) {
+      // Start workflow processing if auto-process is enabled
+      let workflowResult = null
+      if (autoProcess === 'true') {
         try {
-          const jobId = await fileProcessingJobService.addFileProcessingJob(
-            purchaseOrder.id,
-            {
-              uploadId: purchaseOrder.id,
-              fileName: req.file.originalname,
-              fileSize: req.file.size,
-              mimeType: req.file.mimetype,
-              merchantId: merchant.id,
-              supplierId: supplierId || null,
-              filePath: uploadResult.filePath
-            },
-            processingOptions
-          )
+          const workflowData = {
+            uploadId: uploadRecord.id,
+            fileName: req.file.originalname,
+            originalFileName: req.file.originalname,
+            fileSize: req.file.size,
+            mimeType: req.file.mimetype || 'text/csv', // Default to CSV if undefined
+            merchantId: merchant.id,
+            supplierId: supplierId || null,
+            buffer: req.file.buffer,
+            aiSettings: processingOptions,
+            purchaseOrderId: purchaseOrder.id
+          }
 
-          // Update PO with job ID
-          await db.client.purchaseOrder.update({
-            where: { id: purchaseOrder.id },
+          console.log(`📝 Starting workflow with data:`, {
+            uploadId: workflowData.uploadId,
+            fileName: workflowData.fileName,
+            mimeType: workflowData.mimeType,
+            fileSize: workflowData.fileSize
+          })
+
+          workflowResult = await workflowIntegration.processUploadedFile(workflowData)
+          
+          console.log(`✅ Workflow started for upload ${uploadRecord.id}: ${workflowResult.workflowId}`)
+
+        } catch (workflowError) {
+          console.error(`❌ Failed to start workflow for upload ${uploadRecord.id}:`, workflowError)
+          
+          // Update upload status to failed
+          await db.client.upload.update({
+            where: { id: uploadRecord.id },
             data: {
-              analysisJobId: jobId,
-              jobStatus: 'processing',
-              jobStartedAt: new Date()
+              status: 'failed',
+              errorMessage: workflowError.message
             }
           })
 
-          console.log(`File queued for processing: ${purchaseOrder.id} (Job: ${jobId})`)
-        } catch (jobError) {
-          console.error(`Failed to queue processing job: ${purchaseOrder.id}`, jobError)
-          
-          // Update job status to failed
+          // Update PO status to failed
           await db.client.purchaseOrder.update({
             where: { id: purchaseOrder.id },
             data: {
+              status: 'failed',
               jobStatus: 'failed',
-              jobError: jobError.message
+              jobError: workflowError.message
             }
           })
         }
@@ -172,15 +200,16 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
         success: true,
         data: {
           poId: purchaseOrder.id,
-          uploadId: purchaseOrder.id, // For backward compatibility
+          uploadId: uploadRecord.id,
           fileName: req.file.originalname,
           fileSize: req.file.size,
-          status: processingOptions.autoProcess ? 'processing' : 'uploaded',
-          estimatedProcessingTime: estimateProcessingTime(req.file.size, req.file.mimetype),
+          status: autoProcess === 'true' ? 'processing' : 'uploaded',
+          workflowId: workflowResult?.workflowId,
+          estimatedCompletionTime: workflowResult?.estimatedCompletionTime,
           fileUrl: uploadResult.fileUrl // Signed URL for immediate access
         },
-        message: processingOptions.autoProcess ? 
-          'File uploaded successfully and queued for AI processing' : 
+        message: autoProcess === 'true' ? 
+          'File uploaded successfully and workflow started for AI processing' : 
           'File uploaded successfully'
       })
 
@@ -354,7 +383,7 @@ router.post('/:poId/process', async (req, res) => {
     }
 
     // Get merchant AI settings
-    const aiSettings = await db.client.aiSettings.findUnique({
+    const aiSettings = await db.client.aISettings.findUnique({
       where: { merchantId: merchant.id }
     })
 
@@ -464,6 +493,57 @@ router.get('/:poId/download', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to generate download link'
+    })
+  }
+})
+
+// GET /api/upload/:uploadId/workflow-status - Get workflow status for upload
+router.get('/:uploadId/workflow-status', async (req, res) => {
+  try {
+    const { uploadId } = req.params
+    
+    const merchant = await db.getCurrentMerchant()
+    if (!merchant) {
+      return res.status(401).json({
+        success: false,
+        error: 'Merchant not found'
+      })
+    }
+
+    // Get upload record
+    const upload = await db.client.upload.findFirst({
+      where: {
+        id: uploadId,
+        merchantId: merchant.id
+      }
+    })
+    
+    if (!upload) {
+      return res.status(404).json({
+        success: false,
+        error: 'Upload not found'
+      })
+    }
+
+    // Get workflow status
+    const workflowStatus = await workflowIntegration.getUploadWorkflowStatus(uploadId)
+    
+    res.json({
+      success: true,
+      upload: {
+        id: upload.id,
+        fileName: upload.fileName,
+        status: upload.status,
+        createdAt: upload.createdAt
+      },
+      workflow: workflowStatus
+    })
+
+  } catch (error) {
+    console.error('Workflow status error:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get workflow status'
     })
   }
 })

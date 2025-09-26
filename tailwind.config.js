@@ -4,7 +4,7 @@ import fs from "fs";
 
 let theme = {};
 try {
-  const themePath = "./theme.json";
+  const themePath = "theme.json";
 
   if (fs.existsSync(themePath)) {
     theme = JSON.parse(fs.readFileSync(themePath, "utf-8"));
@@ -113,6 +113,14 @@ const defaultTheme = {
       destructive: {
         DEFAULT: "hsl(var(--destructive))",
         foreground: "hsl(var(--destructive-foreground))",
+      },
+      success: {
+        DEFAULT: 'oklch(0.50 0.15 140)',
+        foreground: 'oklch(0.98 0.005 240)',
+      },
+      warning: {
+        DEFAULT: 'oklch(0.60 0.18 85)',
+        foreground: 'oklch(0.10 0.02 60)',
       },
       muted: {
         DEFAULT: "hsl(var(--muted))",

@@ -12,7 +12,8 @@ import session from 'express-session'
 import { fileURLToPath } from 'url'
 
 // Load environment variables
-dotenv.config({ path: '../orderflow-ai/.env' })
+dotenv.config() // Load from .env in current directory
+dotenv.config({ path: '../.env.local' }) // Also load from root .env.local if exists
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -44,7 +45,7 @@ app.use(cors({
   origin: [
     process.env.FRONTEND_URL || 'http://localhost:5173',
     'http://localhost:3003', // Allow API server to serve React app
-    'https://clear-ontario-awesome-track.trycloudflare.com' // Allow Cloudflare tunnel
+    'https://drill-infrared-utilize-fever.trycloudflare.com' // Allow Cloudflare tunnel
   ],
   credentials: true
 }))
@@ -53,15 +54,121 @@ app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 
 // Import authentication middleware
-import { verifyShopifyRequest, devBypassAuth, generateAuthUrl, handleAuthCallback } from './lib/auth.js'
+import { verifyShopifyRequest, devBypassAuth, generateAuthUrl, handleAuthCallback, adminAuth } from './lib/auth.js'
 
 // Import route handlers
 import purchaseOrdersRouter from './routes/purchaseOrders.js'
 import uploadRouter from './routes/upload.js'
+import workflowRouter from './routes/workflow.js'
+import merchantStatusRouter from './routes/merchantStatus.js'
+import merchantJobStatusRouter from './routes/merchantJobStatus.js'
+import merchantDataRouter from './routes/merchantData.js'
+import monitoringRouter from './routes/monitoring.js'
+import analyticsRouter from './routes/analytics.js'
+import deadLetterQueueRouter from './routes/deadLetterQueue.js'
+import aiSettingsRouter from './routes/aiSettings.js'
+import filesRouter from './routes/files.js'
+import testRouter from './routes/test.js'
+
+// Import workflow system
+import { workflowIntegration } from './lib/workflowIntegration.js'
+import { processorRegistrationService } from './lib/processorRegistrationService.js'
 
 // Register route handlers
 app.use('/api/purchase-orders', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, purchaseOrdersRouter)
 app.use('/api/upload', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, uploadRouter)
+app.use('/api/workflow', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, workflowRouter)
+app.use('/api/merchant', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, merchantStatusRouter)
+app.use('/api/merchant/data', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, merchantDataRouter)
+app.use('/api/jobs', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, merchantJobStatusRouter)
+app.use('/api/ai-settings', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, aiSettingsRouter)
+app.use('/api/files', filesRouter) // File serving doesn't need auth verification
+
+// Test endpoints (development only)
+if (process.env.NODE_ENV === 'development') {
+  app.use('/api/test', testRouter)
+}
+
+// Production monitoring and analytics (admin access)
+if (process.env.NODE_ENV === 'production') {
+  app.use('/api/monitoring', adminAuth, monitoringRouter)
+  app.use('/api/analytics', adminAuth, analyticsRouter)
+  app.use('/api/dlq', adminAuth, deadLetterQueueRouter)
+} else {
+  // Development access without admin auth
+  app.use('/api/monitoring', devBypassAuth, monitoringRouter)
+  app.use('/api/analytics', devBypassAuth, analyticsRouter)
+  app.use('/api/dlq', devBypassAuth, deadLetterQueueRouter)
+}
+
+// Health check endpoint (no authentication required)
+app.get('/api/health', async (req, res) => {
+  try {
+    const health = {
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      version: process.env.npm_package_version || '1.0.0',
+      environment: process.env.NODE_ENV || 'development',
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
+      services: {
+        redis: 'unknown',
+        database: 'unknown',
+        openai: 'unknown'
+      }
+    }
+    
+    // Check Redis health
+    try {
+      const { redisManager } = await import('./lib/redisManager.js')
+      const redisHealth = await redisManager.healthCheck()
+      health.services.redis = redisHealth.status
+    } catch (error) {
+      health.services.redis = 'error'
+    }
+    
+    // Check Database health
+    try {
+      const { db } = await import('./lib/db.js')
+      await db.raw('SELECT 1')
+      health.services.database = 'healthy'
+    } catch (error) {
+      health.services.database = 'error'
+    }
+    
+    // Check OpenAI service
+    try {
+      if (process.env.OPENAI_API_KEY) {
+        health.services.openai = 'configured'
+        console.log('🤖 OpenAI API Key found, length:', process.env.OPENAI_API_KEY.length)
+      } else {
+        health.services.openai = 'not_configured'
+        console.log('❌ OpenAI API Key not found in environment variables')
+      }
+    } catch (error) {
+      health.services.openai = 'error'
+      console.error('❌ OpenAI configuration error:', error.message)
+    }
+    
+    // Determine overall health
+    const hasErrors = Object.values(health.services).includes('error')
+    if (hasErrors) {
+      health.status = 'degraded'
+      // Return 200 for degraded status to allow continued operation
+      res.status(200)
+    }
+    
+    res.json(health)
+    
+  } catch (error) {
+    console.error('Health check error:', error)
+    res.status(500).json({
+      status: 'unhealthy',
+      timestamp: new Date().toISOString(),
+      error: 'Health check failed'
+    })
+  }
+})
 
 // Development test endpoint
 if (process.env.NODE_ENV !== 'production') {
@@ -287,29 +394,10 @@ app.post('/api/auth/verify', verifyShopifyRequest, (req, res) => {
 })
 
 // Merchant data endpoints
-app.get('/api/merchant/data/dashboard-summary', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, async (req, res) => {
-  try {
-    console.log('Dashboard summary requested for merchant:', req.merchant.shopDomain)
-    
-    // Mock dashboard data for now - replace with real database queries
-    const summary = {
-      totalPOs: 45,
-      pendingPOs: 12,
-      activeSuppliersCount: 8,
-      lastSyncTime: new Date().toISOString(),
-      syncStatus: 'active',
-      upcomingJobs: 3,
-      alertsCount: 2,
-      merchantId: req.merchant.id,
-      shopDomain: req.merchant.shopDomain
-    }
-    
-    res.json({ success: true, data: summary })
-  } catch (error) {
-    console.error('Dashboard summary error:', error)
-    res.status(500).json({ success: false, error: 'Failed to fetch dashboard summary' })
-  }
-})
+// Dashboard summary endpoint moved to /routes/merchantData.js for proper database integration
+// app.get('/api/merchant/data/dashboard-summary', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, async (req, res) => {
+//   ... (moved to merchantData route for proper database queries)
+// })
 
 app.get('/api/merchant/data/suppliers', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, async (req, res) => {
   try {
@@ -471,9 +559,117 @@ app.use((error, req, res, next) => {
     ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
   })
 })
+
+// Global error handling middleware (must be after all routes)
+app.use((error, req, res, next) => {
+  console.error('Unhandled error:', error)
+  
+  // Don't expose internal errors in production
+  const isDevelopment = process.env.NODE_ENV === 'development'
+  
+  // Determine error status code
+  const statusCode = error.status || error.statusCode || 500
+  
+  // Prepare error response
+  const errorResponse = {
+    success: false,
+    error: error.message || 'Internal server error',
+    code: error.code || 'INTERNAL_ERROR',
+    timestamp: new Date().toISOString(),
+    requestId: req.headers['x-request-id'] || 'unknown'
+  }
+  
+  // Add debugging info in development
+  if (isDevelopment) {
+    errorResponse.stack = error.stack
+    errorResponse.details = error.details
+  }
+  
+  res.status(statusCode).json(errorResponse)
+})
+
+// 404 handler for unknown routes
+app.use('*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: 'Route not found',
+    code: 'ROUTE_NOT_FOUND',
+    path: req.originalUrl,
+    method: req.method,
+    timestamp: new Date().toISOString()
+  })
+})
+
+// Process-level error handlers for production stability
+process.on('uncaughtException', (error) => {
+  console.error('🚨 Uncaught Exception:', error)
+  // Log error but don't crash in development
+  if (process.env.NODE_ENV === 'production') {
+    console.error('⚠️ Server will restart due to uncaught exception')
+    process.exit(1)
+  }
+})
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🚨 Unhandled Rejection at:', promise, 'reason:', reason)
+  // Log error but don't crash in development
+  if (process.env.NODE_ENV === 'production') {
+    console.error('⚠️ Server will restart due to unhandled rejection')
+    process.exit(1)
+  }
+})
+
+// Graceful shutdown handler
+process.on('SIGTERM', async () => {
+  console.log('🔴 SIGTERM received - shutting down gracefully...')
+  
+  try {
+    // Close workflow system
+    await workflowIntegration.shutdown()
+    console.log('✅ Workflow system shutdown complete')
+  } catch (error) {
+    console.error('❌ Error during workflow shutdown:', error)
+  }
+  
+  try {
+    // Close queue processors
+    await processorRegistrationService.cleanup()
+    console.log('✅ Queue processors cleanup complete')
+  } catch (error) {
+    console.error('❌ Error during processor cleanup:', error)
+  }
+  
+  try {
+    // Close Redis connections
+    const { redisManager } = await import('./lib/redisManager.js')
+    await redisManager.disconnect()
+    console.log('✅ Redis connections closed')
+  } catch (error) {
+    console.error('❌ Error closing Redis:', error)
+  }
+  
+  console.log('✅ Graceful shutdown complete')
+  process.exit(0)
+})
+
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log('API Server running on port', PORT)
   console.log('Health check: http://localhost:' + PORT + '/api/health')
   console.log('Environment:', process.env.NODE_ENV || 'development')
+  
+  // Initialize workflow orchestration system
+  try {
+    console.log('🚀 Initializing Workflow Orchestration System...')
+    await workflowIntegration.initialize()
+    console.log('✅ Workflow Orchestration System initialized successfully')
+    
+    // Initialize queue processors
+    console.log('🔧 Starting Queue Processors...')
+    await processorRegistrationService.initializeAllProcessors()
+    console.log('✅ All Queue Processors started successfully')
+  } catch (error) {
+    console.error('❌ Failed to initialize Workflow System:', error)
+    console.warn('⚠️ Server will continue without workflow orchestration')
+  }
 })
