@@ -1,75 +1,93 @@
-import { ComponentProps } from "react"
+import { ComponentProps, forwardRef } from "react"
 import { Slot } from "@radix-ui/react-slot"
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right"
 import MoreHorizontal from "lucide-react/dist/esm/icons/more-horizontal"
 
 import { cn } from "@/lib/utils"
 
-function Breadcrumb({ ...props }: ComponentProps<"nav">) {
-  return <nav aria-label="breadcrumb" data-slot="breadcrumb" {...props} />
-}
+const Breadcrumb = forwardRef<HTMLElement, ComponentProps<"nav">>(
+  ({ ...props }, ref) => {
+    return <nav aria-label="breadcrumb" data-slot="breadcrumb" ref={ref} {...props} />
+  }
+)
 
-function BreadcrumbList({ className, ...props }: ComponentProps<"ol">) {
-  return (
-    <ol
-      data-slot="breadcrumb-list"
-      className={cn(
-        "text-muted-foreground flex flex-wrap items-center gap-1.5 text-sm break-words sm:gap-2.5",
-        className
-      )}
-      {...props}
-    />
-  )
-}
+Breadcrumb.displayName = "Breadcrumb"
 
-function BreadcrumbItem({ className, ...props }: ComponentProps<"li">) {
-  return (
-    <li
-      data-slot="breadcrumb-item"
-      className={cn("inline-flex items-center gap-1.5", className)}
-      {...props}
-    />
-  )
-}
+const BreadcrumbList = forwardRef<HTMLOListElement, ComponentProps<"ol">>(
+  ({ className, ...props }, ref) => {
+    return (
+      <ol
+        ref={ref}
+        data-slot="breadcrumb-list"
+        className={cn(
+          "text-muted-foreground flex flex-wrap items-center gap-1.5 text-sm break-words sm:gap-2.5",
+          className
+        )}
+        {...props}
+      />
+    )
+  }
+)
+BreadcrumbList.displayName = "BreadcrumbList"
 
-function BreadcrumbLink({
-  asChild,
-  className,
-  ...props
-}: ComponentProps<"a"> & {
-  asChild?: boolean
-}) {
+const BreadcrumbItem = forwardRef<HTMLLIElement, ComponentProps<"li">>(
+  ({ className, ...props }, ref) => {
+    return (
+      <li
+        ref={ref}
+        data-slot="breadcrumb-item"
+        className={cn("inline-flex items-center gap-1.5", className)}
+        {...props}
+      />
+    )
+  }
+)
+BreadcrumbItem.displayName = "BreadcrumbItem"
+
+const BreadcrumbLink = forwardRef<
+  HTMLAnchorElement,
+  ComponentProps<"a"> & {
+    asChild?: boolean
+  }
+>(({ asChild, className, ...props }, ref) => {
   const Comp = asChild ? Slot : "a"
 
   return (
     <Comp
       data-slot="breadcrumb-link"
       className={cn("hover:text-foreground transition-colors", className)}
+      ref={ref}
       {...props}
     />
   )
-}
+})
 
-function BreadcrumbPage({ className, ...props }: ComponentProps<"span">) {
-  return (
-    <span
-      data-slot="breadcrumb-page"
-      role="link"
-      aria-disabled="true"
-      aria-current="page"
-      className={cn("text-foreground font-normal", className)}
-      {...props}
-    />
-  )
-}
+BreadcrumbLink.displayName = "BreadcrumbLink"
 
-function BreadcrumbSeparator({
-  children,
-  className,
-  ...props
-}: ComponentProps<"li">) {
+const BreadcrumbPage = forwardRef<HTMLSpanElement, ComponentProps<"span">>(
+  ({ className, ...props }, ref) => {
+    return (
+      <span
+        ref={ref}
+        data-slot="breadcrumb-page"
+        role="link"
+        aria-disabled="true"
+        aria-current="page"
+        className={cn("text-foreground font-normal", className)}
+        {...props}
+      />
+    )
+  }
+)
+BreadcrumbPage.displayName = "BreadcrumbPage"
+
+const BreadcrumbSeparator = forwardRef<
+  HTMLLIElement,
+  ComponentProps<"li">
+>(({ children, className, ...props }, ref) => {
   return (
     <li
+      ref={ref}
       data-slot="breadcrumb-separator"
       role="presentation"
       aria-hidden="true"
@@ -79,14 +97,16 @@ function BreadcrumbSeparator({
       {children ?? <ChevronRight />}
     </li>
   )
-}
+})
+BreadcrumbSeparator.displayName = "BreadcrumbSeparator"
 
-function BreadcrumbEllipsis({
-  className,
-  ...props
-}: ComponentProps<"span">) {
+const BreadcrumbEllipsis = forwardRef<
+  HTMLSpanElement,
+  ComponentProps<"span">
+>(({ className, ...props }, ref) => {
   return (
     <span
+      ref={ref}
       data-slot="breadcrumb-ellipsis"
       role="presentation"
       aria-hidden="true"
@@ -97,7 +117,8 @@ function BreadcrumbEllipsis({
       <span className="sr-only">More</span>
     </span>
   )
-}
+})
+BreadcrumbEllipsis.displayName = "BreadcrumbEllipsis"
 
 export {
   Breadcrumb,

@@ -281,30 +281,84 @@ export class POAnalysisJobProcessor {
   }
 
   /**
-   * Attempt to match supplier by name
+   * Attempt to match supplier using parsed supplier data (email, phone, website, etc.)
    */
   async attemptSupplierMatching(purchaseOrderId, supplierName, merchantId) {
     try {
-      // Find existing supplier with similar name
-      const existingSupplier = await db.client.supplier.findFirst({
-        where: {
-          merchantId,
-          OR: [
-            { name: { equals: supplierName, mode: 'insensitive' } },
-            { name: { contains: supplierName.split(' ')[0], mode: 'insensitive' } }
-          ]
-        }
+      // Get the full PO with parsed data
+      const purchaseOrder = await db.client.purchaseOrder.findUnique({
+        where: { id: purchaseOrderId },
+        select: { rawData: true }
       })
 
-      if (existingSupplier) {
-        await db.client.purchaseOrder.update({
-          where: { id: purchaseOrderId },
-          data: { supplierId: existingSupplier.id }
-        })
-        console.log(`🔗 Matched supplier: ${existingSupplier.name}`)
+      if (!purchaseOrder) {
+        console.log('⚠️ Purchase order not found')
+        return null
       }
+
+      // Extract parsed supplier data from rawData
+      let parsedSupplier = null
+      if (purchaseOrder.rawData?.extractedData?.supplier) {
+        parsedSupplier = purchaseOrder.rawData.extractedData.supplier
+      } else if (purchaseOrder.rawData?.supplier) {
+        parsedSupplier = purchaseOrder.rawData.supplier
+      }
+
+      // If no parsed data, fall back to supplier name
+      if (!parsedSupplier || (!parsedSupplier.email && !parsedSupplier.phone && !parsedSupplier.website && !parsedSupplier.name && !parsedSupplier.contact)) {
+        console.log(`⚠️ No parsed supplier data available for PO ${purchaseOrderId}, skipping auto-match`)
+        return null
+      }
+
+      // Import the supplier matching service for fuzzy matching
+      const { findMatchingSuppliers } = await import('../services/supplierMatchingService.js')
+      
+      // Use fuzzy matching with all available supplier data
+      // Handle nested contact object structure
+      const matchData = {
+        name: parsedSupplier.name || supplierName,
+        email: parsedSupplier.email || parsedSupplier.contactEmail || parsedSupplier.contact?.email,
+        phone: parsedSupplier.phone || parsedSupplier.contactPhone || parsedSupplier.contact?.phone,
+        website: parsedSupplier.website,
+        address: parsedSupplier.address
+      }
+
+      console.log(`🔍 Matching supplier with data:`, {
+        name: matchData.name,
+        hasEmail: !!matchData.email,
+        hasPhone: !!matchData.phone,
+        hasWebsite: !!matchData.website,
+        hasAddress: !!matchData.address
+      })
+
+      const matches = await findMatchingSuppliers(matchData, merchantId)
+
+      if (matches && matches.length > 0) {
+        // Get the best match
+        const bestMatch = matches[0]
+        
+        // Auto-link if match score is high enough (>= 85%)
+        if (bestMatch.matchScore >= 85) {
+          await db.client.purchaseOrder.update({
+            where: { id: purchaseOrderId },
+            data: { supplierId: bestMatch.supplier.id }
+          })
+          console.log(`🔗 Auto-matched supplier: ${bestMatch.supplier.name} (${bestMatch.matchScore}% confidence)`)
+          return bestMatch.supplier
+        } else if (bestMatch.matchScore >= 70) {
+          // Log potential match for review but don't auto-link
+          console.log(`🤔 Potential supplier match found: ${bestMatch.supplier.name} (${bestMatch.matchScore}% confidence) - requires manual review`)
+        } else {
+          console.log(`⚠️ No strong supplier match found (best: ${bestMatch.matchScore}%)`)
+        }
+      } else {
+        console.log(`ℹ️ No existing supplier found matching the parsed data`)
+      }
+      
+      return null
     } catch (error) {
       console.warn('Supplier matching failed:', error.message)
+      return null
     }
   }
 

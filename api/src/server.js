@@ -37,7 +37,9 @@ app.use(helmet({
   frameguard: false, // Disable X-Frame-Options to allow Shopify embedding
   contentSecurityPolicy: {
     directives: {
-      frameAncestors: ["'self'", "https://*.shopify.com", "https://*.myshopify.com"]
+      frameAncestors: ["'self'", "https://*.shopify.com", "https://*.myshopify.com"],
+      imgSrc: ["'self'", "data:", "https:", "http:"], // Allow external images for product image scraping
+      connectSrc: ["'self'", "https://*.supabase.co", "wss://*.supabase.co", "https://*.trycloudflare.com"] // Allow Supabase API, Realtime WebSocket, and Cloudflare tunnels
     }
   }
 }))
@@ -45,7 +47,7 @@ app.use(cors({
   origin: [
     process.env.FRONTEND_URL || 'http://localhost:5173',
     'http://localhost:3003', // Allow API server to serve React app
-    'https://drill-infrared-utilize-fever.trycloudflare.com' // Allow Cloudflare tunnel
+    'https://forgot-yeah-termination-intelligence.trycloudflare.com' // Allow Cloudflare tunnel
   ],
   credentials: true
 }))
@@ -68,11 +70,18 @@ import analyticsRouter from './routes/analytics.js'
 import deadLetterQueueRouter from './routes/deadLetterQueue.js'
 import aiSettingsRouter from './routes/aiSettings.js'
 import filesRouter from './routes/files.js'
-import testRouter from './routes/test.js'
+import productDraftsRouter from './routes/productDrafts.js'
+import refinementConfigRouter from './routes/refinementConfig.js'
+import imageReviewRouter from './routes/imageReview.js'
+import aiGenerationRouter from './routes/aiGeneration.js'
+import securityRouter from './routes/security.js'
+import suppliersRouter from './routes/suppliers.js'
+import searchRouter from './routes/search.js'
 
 // Import workflow system
 import { workflowIntegration } from './lib/workflowIntegration.js'
 import { processorRegistrationService } from './lib/processorRegistrationService.js'
+import { initializeBackgroundJobs, stopBackgroundJobs } from './services/backgroundJobsService.js'
 
 // Register route handlers
 app.use('/api/purchase-orders', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, purchaseOrdersRouter)
@@ -82,12 +91,14 @@ app.use('/api/merchant', process.env.NODE_ENV === 'development' ? devBypassAuth 
 app.use('/api/merchant/data', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, merchantDataRouter)
 app.use('/api/jobs', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, merchantJobStatusRouter)
 app.use('/api/ai-settings', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, aiSettingsRouter)
+app.use('/api/product-drafts', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, productDraftsRouter)
+app.use('/api/refinement-config', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, refinementConfigRouter)
+app.use('/api/image-review', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, imageReviewRouter)
+app.use('/api/ai-generation', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, aiGenerationRouter)
+app.use('/api/security', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, securityRouter)
+app.use('/api/suppliers', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, suppliersRouter)
+app.use('/api/search', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, searchRouter)
 app.use('/api/files', filesRouter) // File serving doesn't need auth verification
-
-// Test endpoints (development only)
-if (process.env.NODE_ENV === 'development') {
-  app.use('/api/test', testRouter)
-}
 
 // Production monitoring and analytics (admin access)
 if (process.env.NODE_ENV === 'production') {
@@ -507,33 +518,11 @@ app.get('/api/merchant/data/notifications', process.env.NODE_ENV === 'developmen
   }
 })
 
+// Import webhook routes
+import webhookRoutes from './webhooks/routes/webhookRoutes.js'
+
 // Webhook endpoints for Shopify
-app.post('/api/webhooks/app/uninstalled', express.raw({ type: 'application/json' }), async (req, res) => {
-  try {
-    // Verify webhook authenticity
-    const hmac = req.get('X-Shopify-Hmac-Sha256')
-    const body = req.body
-    const shop = req.get('X-Shopify-Shop-Domain')
-
-    // In a full implementation, verify the HMAC
-    // const generatedHash = crypto.createHmac('sha256', process.env.SHOPIFY_WEBHOOK_SECRET)
-    //   .update(body, 'utf8')
-    //   .digest('base64')
-
-    console.log(`App uninstalled from shop: ${shop}`)
-    
-    // Clean up merchant data if needed
-    // await db.client.merchant.update({
-    //   where: { shopDomain: shop },
-    //   data: { status: 'uninstalled' }
-    // })
-
-    res.status(200).send('OK')
-  } catch (error) {
-    console.error('Webhook error:', error)
-    res.status(500).send('Error processing webhook')
-  }
-})
+app.use('/api/webhooks', webhookRoutes)
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({
@@ -624,6 +613,14 @@ process.on('SIGTERM', async () => {
   console.log('🔴 SIGTERM received - shutting down gracefully...')
   
   try {
+    // Stop background jobs
+    stopBackgroundJobs()
+    console.log('✅ Background jobs stopped')
+  } catch (error) {
+    console.error('❌ Error stopping background jobs:', error)
+  }
+  
+  try {
     // Close workflow system
     await workflowIntegration.shutdown()
     console.log('✅ Workflow system shutdown complete')
@@ -671,5 +668,15 @@ app.listen(PORT, async () => {
   } catch (error) {
     console.error('❌ Failed to initialize Workflow System:', error)
     console.warn('⚠️ Server will continue without workflow orchestration')
+  }
+  
+  // Initialize background jobs
+  try {
+    console.log('⏰ Initializing Background Jobs...')
+    initializeBackgroundJobs()
+    console.log('✅ Background Jobs initialized successfully')
+  } catch (error) {
+    console.error('❌ Failed to initialize Background Jobs:', error)
+    console.warn('⚠️ Server will continue without background jobs')
   }
 })

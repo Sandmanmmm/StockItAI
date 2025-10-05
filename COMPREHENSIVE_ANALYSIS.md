@@ -17,7 +17,7 @@
 
 ### 📋 **App Configuration Details**
 ```toml
-client_id = "484def5b3b4823489f8ebff0d2e9cadd"
+client_id = "your_shopify_api_key_here"
 name = "orderflow-ai" 
 application_url = "https://clear-ontario-awesome-track.trycloudflare.com"
 embedded = true

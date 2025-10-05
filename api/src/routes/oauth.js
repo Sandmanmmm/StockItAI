@@ -130,8 +130,13 @@ router.get('/auth/callback', async (req, res) => {
       emailVerified: false
     })
 
-    // Set up webhooks (optional but recommended)
-    await setupShopifyWebhooks(shop, tokenData.access_token)
+    // Set up webhooks using enhanced webhook manager
+    const { setupMerchantWebhooks } = await import('../lib/webhookManager.js')
+    const webhookResult = await setupMerchantWebhooks(shop, tokenData.access_token, APP_URL)
+    
+    if (!webhookResult.success) {
+      console.error('Webhook setup failed:', webhookResult.error)
+    }
 
     // Redirect to app with success
     const appUrl = `https://${shop}/admin/apps/${SHOPIFY_API_KEY}`

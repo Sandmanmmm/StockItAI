@@ -180,8 +180,8 @@ router.get('/suppliers', async (req, res) => {
             status: true,
             createdAt: true
           },
-          orderBy: { createdAt: 'desc' },
-          take: 1 // Get most recent PO for last order date
+          orderBy: { createdAt: 'desc' }
+          // Get ALL purchase orders to calculate correct totalSpent
         }
       },
       orderBy: { name: 'asc' }

@@ -54,7 +54,7 @@ router.get('/', async (req, res) => {
     }
 
     // Parse and validate query parameters
-    const limit = Math.min(parseInt(req.query.limit) || 50, 100) // Cap at 100
+    const limit = Math.min(parseInt(req.query.limit) || 50, 10000) // Cap at 10000 to load all orders
     const offset = Math.max(parseInt(req.query.offset) || 0, 0)   // Non-negative
     const status = req.query.status?.toString().trim()
     const supplierId = req.query.supplierId?.toString().trim()
@@ -115,6 +115,23 @@ router.get('/', async (req, res) => {
               id: true,
               name: true,
               status: true
+            }
+          },
+          lineItems: {
+            select: {
+              id: true,
+              productName: true,    // Fixed: was itemName
+              description: true,    // Fixed: was itemDescription
+              quantity: true,
+              unitCost: true,       // Fixed: was unitPrice
+              totalCost: true,      // Fixed: was totalPrice
+              sku: true,            // Using sku instead of productCode
+              status: true,
+              confidence: true,
+              createdAt: true
+            },
+            orderBy: {
+              createdAt: 'asc'
             }
           },
           _count: {
@@ -321,9 +338,88 @@ router.delete('/:id', async (req, res) => {
       })
     }
 
+    const poId = req.params.id
+
+    // Manually delete related records in the correct order to respect foreign key constraints
+    // 1. Delete product images (depends on product drafts)
+    await db.client.productImage.deleteMany({
+      where: {
+        productDraft: {
+          purchaseOrderId: poId
+        }
+      }
+    })
+
+    // 2. Delete product variants (depends on product drafts)
+    await db.client.productVariant.deleteMany({
+      where: {
+        productDraft: {
+          purchaseOrderId: poId
+        }
+      }
+    })
+
+    // 3. Delete product review history (depends on product drafts)
+    await db.client.productReviewHistory.deleteMany({
+      where: {
+        productDraft: {
+          purchaseOrderId: poId
+        }
+      }
+    })
+
+    // 4. Delete product drafts
+    await db.client.productDraft.deleteMany({
+      where: {
+        purchaseOrderId: poId
+      }
+    })
+
+    // 5. Delete image review product images
+    await db.client.imageReviewProductImage.deleteMany({
+      where: {
+        product: {
+          session: {
+            purchaseOrderId: poId
+          }
+        }
+      }
+    })
+
+    // 6. Delete image review products
+    await db.client.imageReviewProduct.deleteMany({
+      where: {
+        session: {
+          purchaseOrderId: poId
+        }
+      }
+    })
+
+    // 7. Delete image review sessions
+    await db.client.imageReviewSession.deleteMany({
+      where: {
+        purchaseOrderId: poId
+      }
+    })
+
+    // 8. Delete workflow executions
+    await db.client.workflowExecution.deleteMany({
+      where: {
+        purchaseOrderId: poId
+      }
+    })
+
+    // 9. Delete PO line items
+    await db.client.pOLineItem.deleteMany({
+      where: {
+        purchaseOrderId: poId
+      }
+    })
+
+    // 10. Finally, delete the purchase order itself
     const order = await db.client.purchaseOrder.deleteMany({
       where: { 
-        id: req.params.id,
+        id: poId,
         merchantId: merchant.id 
       }
     })
@@ -343,7 +439,8 @@ router.delete('/:id', async (req, res) => {
     console.error('Delete purchase order error:', error)
     res.status(500).json({
       success: false,
-      error: 'Failed to delete purchase order'
+      error: 'Failed to delete purchase order',
+      details: error.message
     })
   }
 })

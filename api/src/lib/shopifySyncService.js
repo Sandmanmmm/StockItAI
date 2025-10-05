@@ -56,7 +56,14 @@ export class ShopifySyncService {
         include: {
           lineItems: true,
           supplier: true,
-          merchant: true
+          merchant: true,
+          productDrafts: {
+            include: {
+              images: true,
+              variants: true,
+              supplier: true
+            }
+          }
         }
       })
 
@@ -95,7 +102,8 @@ export class ShopifySyncService {
       const syncResult = await shopifyClient.syncPurchaseOrderToShopify(
         purchaseOrder,
         purchaseOrder.lineItems,
-        purchaseOrder.supplier
+        purchaseOrder.supplier,
+        options
       )
 
       // Step 6: Update line items with Shopify data
@@ -177,6 +185,19 @@ export class ShopifySyncService {
           }
         })
       )
+
+      if (item.draft?.id) {
+        updates.push(
+          this.prisma.productDraft.update({
+            where: { id: item.draft.id },
+            data: {
+              shopifyProductId: item.product.id,
+              shopifyVariantId: item.variant?.id || null,
+              status: 'SYNCED'
+            }
+          })
+        )
+      }
     }
 
     // Process updated products
@@ -192,6 +213,19 @@ export class ShopifySyncService {
           }
         })
       )
+
+      if (item.draft?.id) {
+        updates.push(
+          this.prisma.productDraft.update({
+            where: { id: item.draft.id },
+            data: {
+              shopifyProductId: item.product.id,
+              shopifyVariantId: item.variant?.id || null,
+              status: 'SYNCED'
+            }
+          })
+        )
+      }
     }
 
     // Process errors
@@ -206,6 +240,18 @@ export class ShopifySyncService {
           }
         })
       )
+
+      if (item.draft?.id) {
+        updates.push(
+          this.prisma.productDraft.update({
+            where: { id: item.draft.id },
+            data: {
+              status: 'FAILED',
+              reviewNotes: item.error?.slice(0, 500) || undefined
+            }
+          })
+        )
+      }
     }
 
     await Promise.all(updates)

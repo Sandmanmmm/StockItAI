@@ -153,12 +153,17 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
   const [sortField, setSortField] = useState<'number' | 'supplierName' | 'createdAt' | 'totalAmount'>('createdAt')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
   const [currentPage, setCurrentPage] = useState(1)
-  const ordersPerPage = 10
+  const ordersPerPage = 1000  // Load all purchase orders (set high limit)
+  
+  // Multi-select state for bulk operations
+  const [selectedPOs, setSelectedPOs] = useState<Set<string>>(new Set())
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
-  // Use authenticated hook for purchase orders
+  // Use authenticated hook for purchase orders - load all at once
   const { purchaseOrders, total, loading, error, refetch } = usePurchaseOrders({
     limit: ordersPerPage,
-    offset: (currentPage - 1) * ordersPerPage
+    offset: 0  // Always start from beginning to get all orders
   })
 
   // Loading state
@@ -211,6 +216,59 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
 
   // Get unique suppliers for filter
   const uniqueSuppliers = Array.from(new Set((purchaseOrders || []).map(po => po.supplierName)))
+
+  // Checkbox handlers for bulk selection
+  const toggleSelectAll = () => {
+    if (selectedPOs.size === filteredAndSortedPOs.length) {
+      setSelectedPOs(new Set())
+    } else {
+      setSelectedPOs(new Set(filteredAndSortedPOs.map(po => po.id)))
+    }
+  }
+
+  const toggleSelectPO = (poId: string) => {
+    const newSelected = new Set(selectedPOs)
+    if (newSelected.has(poId)) {
+      newSelected.delete(poId)
+    } else {
+      newSelected.add(poId)
+    }
+    setSelectedPOs(newSelected)
+  }
+
+  // Bulk delete handler
+  const handleBulkDelete = async () => {
+    setIsDeleting(true)
+    try {
+      // Delete each selected PO
+      const deletePromises = Array.from(selectedPOs).map(async (poId) => {
+        const response = await fetch(`/api/purchase-orders/${poId}`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        })
+        
+        if (!response.ok) {
+          throw new Error(`Failed to delete PO ${poId}`)
+        }
+        
+        return response.json()
+      })
+
+      await Promise.all(deletePromises)
+      
+      // Clear selection and refresh
+      setSelectedPOs(new Set())
+      setShowDeleteConfirm(false)
+      refetch()
+    } catch (error) {
+      console.error('Error deleting purchase orders:', error)
+      alert('Failed to delete some purchase orders. Please try again.')
+    } finally {
+      setIsDeleting(false)
+    }
+  }
 
   const getStatusBadge = (status: PurchaseOrder['status']) => {
     switch (status) {
@@ -348,7 +406,11 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
     return (
       <PurchaseOrderReviewPage 
         purchaseOrderId={reviewOrderId} 
-        onBack={() => setReviewOrderId(null)} 
+        onBack={() => {
+          setReviewOrderId(null)
+          // Refetch purchase orders to show updated status
+          refetch()
+        }} 
       />
     )
   }
@@ -375,11 +437,21 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {selectedPOs.size > 0 && (
+            <Button 
+              variant="destructive" 
+              size="sm"
+              onClick={() => setShowDeleteConfirm(true)}
+            >
+              <Trash className="w-4 h-4 mr-2" />
+              Delete {selectedPOs.size} Selected
+            </Button>
+          )}
           <Button variant="outline" size="sm">
             <DownloadSimple className="w-4 h-4 mr-2" />
             Export
           </Button>
-          <Button size="sm">
+          <Button size="sm" onClick={() => refetch()}>
             <ArrowsClockwise className="w-4 h-4 mr-2" />
             Refresh
           </Button>
@@ -480,6 +552,14 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-12">
+                    <input
+                      type="checkbox"
+                      checked={selectedPOs.size === filteredAndSortedPOs.length && filteredAndSortedPOs.length > 0}
+                      onChange={toggleSelectAll}
+                      className="w-4 h-4 cursor-pointer"
+                    />
+                  </TableHead>
                   <TableHead className="cursor-pointer" onClick={() => handleSort('number')}>
                     <div className="flex items-center gap-2">
                       PO Number
@@ -521,10 +601,17 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
                     <TableRow 
                       key={po.id} 
                       className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => setSelectedOrderId(po.id)}
                     >
-                      <TableCell className="font-medium">{po.number}</TableCell>
-                      <TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selectedPOs.has(po.id)}
+                          onChange={() => toggleSelectPO(po.id)}
+                          className="w-4 h-4 cursor-pointer"
+                        />
+                      </TableCell>
+                      <TableCell onClick={() => setSelectedOrderId(po.id)} className="font-medium">{po.number}</TableCell>
+                      <TableCell onClick={() => setSelectedOrderId(po.id)}>
                         <div className="flex items-center gap-2">
                           <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
                             <Package className="w-4 h-4 text-primary" />
@@ -532,10 +619,10 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
                           {enhancedData.supplierName}
                         </div>
                       </TableCell>
-                      <TableCell>{getStatusBadge(po.status)}</TableCell>
-                      <TableCell>{formatDate(po.createdAt)}</TableCell>
-                      <TableCell className="text-right">{enhancedData.lineItemsCount}</TableCell>
-                      <TableCell className="text-right font-mono">{formatCurrency(enhancedData.totalAmount)}</TableCell>
+                      <TableCell onClick={() => setSelectedOrderId(po.id)}>{getStatusBadge(po.status)}</TableCell>
+                      <TableCell onClick={() => setSelectedOrderId(po.id)}>{formatDate(po.createdAt)}</TableCell>
+                      <TableCell onClick={() => setSelectedOrderId(po.id)} className="text-right">{enhancedData.lineItemsCount}</TableCell>
+                      <TableCell onClick={() => setSelectedOrderId(po.id)} className="text-right font-mono">{formatCurrency(enhancedData.totalAmount)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center gap-2 justify-end">
                           <div className="w-16 bg-muted rounded-full h-2">
@@ -586,6 +673,47 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Purchase Orders?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-muted-foreground">
+              Are you sure you want to delete {selectedPOs.size} purchase order{selectedPOs.size > 1 ? 's' : ''}? 
+              This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={isDeleting}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleBulkDelete}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <>
+                    <ArrowsClockwise className="w-4 h-4 mr-2 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash className="w-4 h-4 mr-2" />
+                    Delete {selectedPOs.size}
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   )
 }

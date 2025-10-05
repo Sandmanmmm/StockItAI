@@ -264,7 +264,7 @@ export function DashboardOverview({ onShowActiveSuppliers, onViewPO }: Dashboard
                   </div>
                   <div>
                     <h1 className="text-3xl lg:text-4xl font-bold bg-gradient-to-r from-slate-800 via-blue-800 to-indigo-800 bg-clip-text text-transparent">
-                      AI Purchase Orders
+                      StockIT AI
                     </h1>
                     <p className="text-slate-600 mt-1">Intelligent automation & insights dashboard</p>
                   </div>

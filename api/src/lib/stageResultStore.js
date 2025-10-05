@@ -27,6 +27,16 @@ class StageResultStore {
   }
 
   /**
+   * Convert BigInt values to strings for JSON serialization
+   */
+  bigIntReplacer(key, value) {
+    if (typeof value === 'bigint') {
+      return value.toString()
+    }
+    return value
+  }
+
+  /**
    * Save the result of a specific workflow stage
    */
   async saveStageResult(workflowId, stage, result) {
@@ -40,7 +50,7 @@ class StageResultStore {
         stage,
         timestamp: new Date().toISOString(),
         result
-      })
+      }, this.bigIntReplacer)
 
       await this.redis.setex(key, this.defaultTTL, value)
       console.log(`✅ Saved ${stage} result for workflow ${workflowId}`)
@@ -85,7 +95,17 @@ class StageResultStore {
         await this.initialize()
       }
 
-      const stages = ['ai_parsing', 'database_save', 'shopify_sync', 'status_update']
+      const stages = [
+        'ai_parsing', 
+        'database_save', 
+        'data_normalization',
+        'merchant_config',
+        'ai_enrichment',
+        'shopify_payload',
+        'product_drafts',
+        'shopify_sync', 
+        'status_update'
+      ]
       const results = {}
 
       for (const stage of stages) {
@@ -136,6 +156,32 @@ class StageResultStore {
           completed: true,
           purchaseOrderId: accumulated.purchaseOrderId,
           lineItemsCreated: stageResults.database_save.lineItems?.length || 0
+        }
+      }
+
+      if (stageResults.data_normalization) {
+        accumulated.normalizedItems = stageResults.data_normalization.normalizedItems || []
+        accumulated.stages.data_normalization = {
+          completed: true,
+          normalizedCount: accumulated.normalizedItems.length || 0
+        }
+      }
+
+      if (stageResults.merchant_config) {
+        accumulated.configuredItems = stageResults.merchant_config.configuredItems || []
+        accumulated.stages.merchant_config = {
+          completed: true,
+          configuredCount: accumulated.configuredItems.length || 0
+        }
+      }
+
+      if (stageResults.ai_enrichment) {
+        accumulated.enrichedItems = stageResults.ai_enrichment.enrichedItems || []
+        accumulated.imageReviewSession = stageResults.ai_enrichment.imageReviewSession
+        accumulated.stages.ai_enrichment = {
+          completed: true,
+          enrichedCount: accumulated.enrichedItems.length || 0,
+          hasImageSession: !!accumulated.imageReviewSession
         }
       }
 

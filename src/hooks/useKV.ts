@@ -14,13 +14,21 @@ export function useKV<T>(key: string, defaultValue: T) {
     }
   })
 
-  const setValueAndStore = (newValue: T) => {
-    try {
-      setValue(newValue)
-      localStorage.setItem(key, JSON.stringify(newValue))
-    } catch (error) {
-      console.error(`Failed to store value for key ${key}:`, error)
-    }
+  const setValueAndStore = (valueOrUpdater: T | ((previousValue: T) => T)) => {
+    setValue(prevValue => {
+      const newValue =
+        typeof valueOrUpdater === 'function'
+          ? (valueOrUpdater as (previousValue: T) => T)(prevValue)
+          : valueOrUpdater
+
+      try {
+        localStorage.setItem(key, JSON.stringify(newValue))
+      } catch (error) {
+        console.error(`Failed to store value for key ${key}:`, error)
+      }
+
+      return newValue
+    })
   }
 
   useEffect(() => {

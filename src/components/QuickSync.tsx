@@ -6,6 +6,8 @@ import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
 import { 
   Lightning, 
@@ -25,6 +27,7 @@ import {
   Shield
 } from '@phosphor-icons/react'
 import { useKV } from '../hooks/useKV'
+import { usePurchaseOrders } from '../hooks/useMerchantData'
 
 interface SyncStep {
   id: string
@@ -54,6 +57,13 @@ export function QuickSync({ onClose }: { onClose: () => void }) {
   const [overallProgress, setOverallProgress] = useState(0)
   const [startTime, setStartTime] = useState<Date | null>(null)
   const [elapsedTime, setElapsedTime] = useState(0)
+  const [selectedPOFilter, setSelectedPOFilter] = useState<string>('all')
+  
+  // Fetch recent purchase orders for filtering
+  const { purchaseOrders, loading: poLoading } = usePurchaseOrders({
+    limit: 50,
+    dateFrom: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString() // Last 30 days
+  })
   
   const [syncSteps, setSyncSteps] = useState<SyncStep[]>([
     {
@@ -150,15 +160,42 @@ export function QuickSync({ onClose }: { onClose: () => void }) {
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
+  // Get filtered POs count and description
+  const getFilterInfo = () => {
+    if (selectedPOFilter === 'all') {
+      return { count: 24, description: 'AI-powered synchronization is now running across all suppliers' }
+    } else if (selectedPOFilter === 'recent') {
+      const recentPOs = purchaseOrders.filter(po => 
+        new Date(po.updatedAt) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+      )
+      return { count: recentPOs.length, description: `Syncing ${recentPOs.length} recent purchase orders (last 7 days)` }
+    } else if (selectedPOFilter === 'pending') {
+      const pendingPOs = purchaseOrders.filter(po => po.status === 'pending')
+      return { count: pendingPOs.length, description: `Syncing ${pendingPOs.length} pending purchase orders` }
+    } else if (selectedPOFilter === 'processing') {
+      const processingPOs = purchaseOrders.filter(po => po.status === 'processing')
+      return { count: processingPOs.length, description: `Syncing ${processingPOs.length} processing purchase orders` }
+    } else {
+      // Specific PO selected
+      const selectedPO = purchaseOrders.find(po => po.id === selectedPOFilter)
+      return { 
+        count: 1, 
+        description: `Syncing specific PO #${selectedPO?.number} from ${selectedPO?.supplierName}` 
+      }
+    }
+  }
+
   const startSync = async () => {
     setIsRunning(true)
     setStartTime(new Date())
     setCurrentStep(0)
     setOverallProgress(0)
 
+    const syncFilterInfo = getFilterInfo()
+
     // Show start notification
     toast.success('Quick Sync Started', {
-      description: 'AI-powered synchronization is now running across all suppliers'
+      description: syncFilterInfo.description
     })
 
     // Reset all states
@@ -189,12 +226,22 @@ export function QuickSync({ onClose }: { onClose: () => void }) {
 
       // Update step details based on step type
       if (i === 2) { // Fetch POs step
+        const stepFilterInfo = getFilterInfo()
         setSyncSteps(prev => prev.map((step, idx) => 
-          idx === i ? { ...step, itemsProcessed: 24, totalItems: 24 } : step
+          idx === i ? { 
+            ...step, 
+            itemsProcessed: stepFilterInfo.count, 
+            totalItems: stepFilterInfo.count,
+            details: selectedPOFilter === 'all' ? 'All suppliers' : 
+                    selectedPOFilter === 'recent' ? 'Recent POs (7 days)' :
+                    selectedPOFilter === 'pending' ? 'Pending POs only' :
+                    selectedPOFilter === 'processing' ? 'Processing POs only' :
+                    `Specific PO #${purchaseOrders.find(po => po.id === selectedPOFilter)?.number}`
+          } : step
         ))
         
         toast.info('Purchase Orders Retrieved', {
-          description: '24 POs collected from all suppliers'
+          description: `${stepFilterInfo.count} PO${stepFilterInfo.count !== 1 ? 's' : ''} collected based on your filter`
         })
       }
 
@@ -241,8 +288,11 @@ export function QuickSync({ onClose }: { onClose: () => void }) {
     // Complete sync
     setIsRunning(false)
     
+    const completeFilterInfo = getFilterInfo()
     toast.success('Quick Sync Completed!', {
-      description: `Successfully updated ${totalItems} items across ${suppliers.length} suppliers`
+      description: selectedPOFilter === 'all' 
+        ? `Successfully updated ${totalItems} items across ${suppliers.length} suppliers`
+        : `Successfully processed ${completeFilterInfo.count} filtered purchase order${completeFilterInfo.count !== 1 ? 's' : ''}`
     })
   }
 
@@ -303,6 +353,54 @@ export function QuickSync({ onClose }: { onClose: () => void }) {
         </CardHeader>
 
         <CardContent className="p-6 space-y-6">
+          {/* Sync Options */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-lg">Sync Options</h3>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="po-filter">Filter by Purchase Order</Label>
+                <Select 
+                  value={selectedPOFilter} 
+                  onValueChange={setSelectedPOFilter}
+                  disabled={isRunning}
+                >
+                  <SelectTrigger id="po-filter">
+                    <SelectValue placeholder="Select PO filter" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Purchase Orders</SelectItem>
+                    <SelectItem value="recent">Recent (Last 7 days)</SelectItem>
+                    <SelectItem value="pending">Pending Only</SelectItem>
+                    <SelectItem value="processing">Processing Only</SelectItem>
+                    <Separator className="my-1" />
+                    {!poLoading && purchaseOrders.length > 0 && (
+                      <>
+                        {purchaseOrders
+                          .filter(po => po.number && (po.status === 'pending' || po.status === 'processing' || po.updatedAt > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()))
+                          .slice(0, 10)
+                          .map(po => (
+                            <SelectItem key={po.id} value={po.id}>
+                              PO #{po.number} - {po.supplierName}
+                              {po.status === 'processing' && ' (Processing)'}
+                            </SelectItem>
+                          ))}
+                      </>
+                    )}
+                  </SelectContent>
+                </Select>
+                {selectedPOFilter !== 'all' && selectedPOFilter !== 'recent' && selectedPOFilter !== 'pending' && selectedPOFilter !== 'processing' && (
+                  <p className="text-xs text-muted-foreground">
+                    Syncing specific PO: {purchaseOrders.find(po => po.id === selectedPOFilter)?.number}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <Separator />
+
           {/* Overall Progress */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">

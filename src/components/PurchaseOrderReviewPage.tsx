@@ -148,35 +148,34 @@ export function PurchaseOrderReviewPage({
         }
       }
 
-      // Approve and sync to Shopify
+      // Approve the PO - changes status from "Review" to "Completed"
+      // Does NOT sync to Shopify automatically
       const approveResponse = await authenticatedRequest(`/purchase-orders/${poId}/approve`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          syncToShopify: true,
-          queueShopifySync: false // Sync immediately
+          syncToShopify: false,  // Do not sync to Shopify
+          queueShopifySync: false // Do not queue for sync
         })
       })
 
       if (!approveResponse.success) {
         throw new Error(approveResponse.error || 'Failed to approve purchase order')
       }
-
-      const result = approveResponse.data as any
       
       // Refresh the purchase order data to show updated status
       await fetchPurchaseOrder()
       
       await notificationService.showSuccess(
         'Purchase Order Approved',
-        `PO ${purchaseOrder?.number} has been approved and sync to Shopify has ${result.shopifySync?.success ? 'started' : 'been queued'}.`
+        `PO ${purchaseOrder?.number} has been moved to "Completed" status. You can sync to Shopify from the Purchase Orders list.`
       )
 
-      // Small delay to show the updated status, then navigate back  
+      // Navigate back after a short delay
       setTimeout(() => {
-        onBack()
+        onBack()  // This will trigger refetch in the parent component
       }, 2000)
 
     } catch (error) {
@@ -369,11 +368,14 @@ export function PurchaseOrderReviewPage({
       {/* Merchant Review Interface */}
       <MerchantReviewInterface
         purchaseOrder={purchaseOrder}
-        aiSettings={aiSettings}
         onApprove={handleApprove}
         onDeny={handleDeny}
-        onEdit={handleEdit}
-        onUpdateSettings={handleUpdateSettings}
+        onViewDetails={(poId) => {
+          // Navigate to detailed PO page for editing
+          // This will open PurchaseOrderDetails component
+          console.log('View details for PO:', poId)
+          // You can implement navigation here if needed
+        }}
         isLoading={isLoading}
       />
     </div>

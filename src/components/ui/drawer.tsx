@@ -1,4 +1,4 @@
-import { ComponentProps } from "react"
+import { ComponentProps, forwardRef } from "react"
 import { Drawer as DrawerPrimitive } from "vaul"
 
 import { cn } from "@/lib/utils"
@@ -70,25 +70,33 @@ function DrawerContent({
   )
 }
 
-function DrawerHeader({ className, ...props }: ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="drawer-header"
-      className={cn("flex flex-col gap-1.5 p-4", className)}
-      {...props}
-    />
-  )
-}
+const DrawerHeader = forwardRef<HTMLDivElement, ComponentProps<"div">>(
+  ({ className, ...props }, ref) => {
+    return (
+      <div
+        ref={ref}
+        data-slot="drawer-header"
+        className={cn("flex flex-col gap-1.5 p-4", className)}
+        {...props}
+      />
+    )
+  }
+)
+DrawerHeader.displayName = "DrawerHeader"
 
-function DrawerFooter({ className, ...props }: ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="drawer-footer"
-      className={cn("mt-auto flex flex-col gap-2 p-4", className)}
-      {...props}
-    />
-  )
-}
+const DrawerFooter = forwardRef<HTMLDivElement, ComponentProps<"div">>(
+  ({ className, ...props }, ref) => {
+    return (
+      <div
+        ref={ref}
+        data-slot="drawer-footer"
+        className={cn("mt-auto flex flex-col gap-2 p-4", className)}
+        {...props}
+      />
+    )
+  }
+)
+DrawerFooter.displayName = "DrawerFooter"
 
 function DrawerTitle({
   className,

@@ -10,7 +10,7 @@ $apiPath = Join-Path $PSScriptRoot "api"
 Start-Process powershell -ArgumentList @(
     "-NoExit", 
     "-Command", 
-    "cd '$apiPath'; Write-Host 'Starting Shopify PO Sync Pro API Server...' -ForegroundColor Green; Write-Host 'Server will run on http://localhost:3003' -ForegroundColor Yellow; Write-Host 'Queue processors will initialize automatically' -ForegroundColor Cyan; Write-Host ''; npm start"
+    "cd '$apiPath'; Write-Host 'Starting Shopify PO Sync Pro API Server...' -ForegroundColor Green; Write-Host 'Server will run on http://localhost:3003' -ForegroundColor Yellow; Write-Host 'Queue processors will initialize automatically' -ForegroundColor Cyan; Write-Host 'Loading NEW WEB SCRAPING implementation (zero cost!)' -ForegroundColor Magenta; Write-Host ''; npm start"
 )
 
 Write-Host "API Server starting in new window..." -ForegroundColor Green

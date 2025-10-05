@@ -1,6 +1,6 @@
 "use client"
 
-import { ComponentProps, createContext, useCallback, useContext, useEffect, useState, KeyboardEvent } from "react"
+import { ComponentProps, createContext, useCallback, useContext, useEffect, useState, KeyboardEvent, forwardRef } from "react"
 import useEmblaCarousel, {
   type UseEmblaCarouselType,
 } from "embla-carousel-react"
@@ -133,44 +133,52 @@ function Carousel({
   )
 }
 
-function CarouselContent({ className, ...props }: ComponentProps<"div">) {
-  const { carouselRef, orientation } = useCarousel()
+const CarouselContent = forwardRef<HTMLDivElement, ComponentProps<"div">>(
+  ({ className, ...props }, ref) => {
+    const { carouselRef, orientation } = useCarousel()
 
-  return (
-    <div
-      ref={carouselRef}
-      className="overflow-hidden"
-      data-slot="carousel-content"
-    >
+    return (
       <div
+        ref={carouselRef}
+        className="overflow-hidden"
+        data-slot="carousel-content"
+      >
+        <div
+          ref={ref}
+          className={cn(
+            "flex",
+            orientation === "horizontal" ? "-ml-4" : "-mt-4 flex-col",
+            className
+          )}
+          {...props}
+        />
+      </div>
+    )
+  }
+)
+CarouselContent.displayName = "CarouselContent"
+
+const CarouselItem = forwardRef<HTMLDivElement, ComponentProps<"div">>(
+  ({ className, ...props }, ref) => {
+    const { orientation } = useCarousel()
+
+    return (
+      <div
+        ref={ref}
+        role="group"
+        aria-roledescription="slide"
+        data-slot="carousel-item"
         className={cn(
-          "flex",
-          orientation === "horizontal" ? "-ml-4" : "-mt-4 flex-col",
+          "min-w-0 shrink-0 grow-0 basis-full",
+          orientation === "horizontal" ? "pl-4" : "pt-4",
           className
         )}
         {...props}
       />
-    </div>
-  )
-}
-
-function CarouselItem({ className, ...props }: ComponentProps<"div">) {
-  const { orientation } = useCarousel()
-
-  return (
-    <div
-      role="group"
-      aria-roledescription="slide"
-      data-slot="carousel-item"
-      className={cn(
-        "min-w-0 shrink-0 grow-0 basis-full",
-        orientation === "horizontal" ? "pl-4" : "pt-4",
-        className
-      )}
-      {...props}
-    />
-  )
-}
+    )
+  }
+)
+CarouselItem.displayName = "CarouselItem"
 
 function CarouselPrevious({
   className,

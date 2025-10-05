@@ -11,7 +11,8 @@
     "dev:api": "cd api && npm run dev",
     "build": "vite build",
     "preview": "cd api && npm start",
-    "install:all": "npm install && cd api && npm install"
+    "install:all": "npm install && cd api && npm install",
+    "vercel-build": "npm run build"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
@@ -35,9 +36,11 @@
     "@shopify/app-bridge": "^3.7.10",
     "@shopify/app-bridge-react": "^4.2.3",
     "@shopify/polaris": "^12.0.0",
+    "@supabase/supabase-js": "^2.58.0",
     "axios": "^1.12.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "dotenv": "^17.2.3",
     "form-data": "^4.0.4",
     "framer-motion": "^11.11.17",
     "lucide-react": "^0.460.0",

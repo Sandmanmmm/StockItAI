@@ -1,4 +1,13 @@
-# Quick Cloudflare Tunnel Setup (No domain required)
+# Quick Cloudflare Tun# Start the tunnel in a new PowerShell window
+Write-Host "🚀 Starting tunnel in new PowerShell window..." -ForegroundColor Cyan
+Write-Host "📝 Tunneling: http://localhost:3005 -> https://[random].trycloudflare.com" -ForegroundColor Gray
+
+$scriptDir = $PSScriptRoot
+Start-Process powershell -ArgumentList @(
+    "-NoExit", 
+    "-Command", 
+    "cd '$scriptDir'; Write-Host '🚇 Starting Cloudflare tunnel...' -ForegroundColor Cyan; Write-Host 'Connecting to http://localhost:3005' -ForegroundColor Gray; Write-Host ''; .\cloudflared.exe tunnel --url http://localhost:3005; Write-Host ''; Write-Host '🛑 Tunnel stopped. Press Enter to close this window...' -ForegroundColor Red; Read-Host"
+)n required)
 # This creates a temporary tunnel with a random trycloudflare.com URL
 
 Write-Host "🌐 Starting quick Cloudflare tunnel..." -ForegroundColor Cyan

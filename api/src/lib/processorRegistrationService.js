@@ -63,8 +63,16 @@ export class ProcessorRegistrationService {
     const processorConfigs = [
       { queueName: 'ai-parsing', jobType: 'ai_parsing', concurrency: 2 },
       { queueName: 'database-save', jobType: 'database_save', concurrency: 5 },
+      { queueName: 'product-draft-creation', jobType: 'product_draft_creation', concurrency: 3 },
+      { queueName: 'image-attachment', jobType: 'image_attachment', concurrency: 2 },
       { queueName: 'shopify-sync', jobType: 'shopify_sync', concurrency: 3 },
-      { queueName: 'status-update', jobType: 'status_update', concurrency: 10 }
+      { queueName: 'status-update', jobType: 'status_update', concurrency: 10 },
+      
+      // Refinement Pipeline processors
+      { queueName: 'data-normalization', jobType: 'data_normalization', concurrency: 3 },
+      { queueName: 'merchant-config', jobType: 'merchant_config', concurrency: 2 },
+      { queueName: 'ai-enrichment', jobType: 'ai_enrichment', concurrency: 2 },
+      { queueName: 'shopify-payload', jobType: 'shopify_payload', concurrency: 3 }
     ];
 
     for (const config of processorConfigs) {

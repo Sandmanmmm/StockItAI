@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Separator } from '@/components/ui/separator'
+import { Toaster } from 'sonner'
 import { 
   Upload, 
   Calendar, 
@@ -33,15 +34,18 @@ import {
 } from '@phosphor-icons/react'
 import { DashboardOverview } from './components/DashboardOverview'
 import { ProductionPOUpload } from './components/ProductionPOUpload'
+import { RefinementConfigPanel } from './components/RefinementConfigPanel'
 import { SyncScheduler } from './components/SyncScheduler'
 import { SettingsPanel } from './components/SettingsPanel'
 import { BulkPOConfiguration } from './components/BulkPOConfiguration'
 import { QuickSync } from './components/QuickSync'
+import { QuickSyncPro } from './components/QuickSyncPro'
 import { NotificationsPanel } from './components/NotificationsPanel'
 import { ActiveSuppliers } from './components/ActiveSuppliers'
 import { AllPurchaseOrders } from './components/AllPurchaseOrders'
 import { PurchaseOrderDetails } from './components/PurchaseOrderDetails'
-import { AIChatbot } from './components/AIChatbot'
+import { ProductDetailView } from './components/ProductDetailView'
+import { RealTimeFeedback } from './components/RealTimeFeedback'
 import { useKV } from './hooks/useKV'
 import { safeFormatTime } from '@/lib/utils'
 import { ShopifyLayoutWrapper } from './components/ShopifyLayoutWrapper'
@@ -64,10 +68,13 @@ function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [showActiveSuppliers, setShowActiveSuppliers] = useState(false)
   const [showAllPurchaseOrders, setShowAllPurchaseOrders] = useState(false)
+  const [showProductDetail, setShowProductDetail] = useState(false)
+  const [selectedProduct, setSelectedProduct] = useState<any | null>(null)
+  const [refreshQuickSync, setRefreshQuickSync] = useState(0)
   const [selectedPurchaseOrderId, setSelectedPurchaseOrderId] = useState<string | null>(null)
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null)
   const [unreadNotifications, setUnreadNotifications] = useState(3)
-  const [showAIChatbot, setShowAIChatbot] = useState(false)
-  const [isAIChatbotMinimized, setIsAIChatbotMinimized] = useState(false)
+  const [imageApprovedFlag, setImageApprovedFlag] = useState(false)
   const [notifications] = useKV<NotificationItem[]>('notifications', [
     {
       id: '1',
@@ -176,17 +183,32 @@ function App() {
         onNotificationsClick={() => setShowNotifications(!showNotifications)}
         onSettingsClick={() => setShowSettings(!showSettings)}
         unreadNotifications={unreadNotifications}
+        onPurchaseOrderSelected={(poId) => {
+          setActiveTab('dashboard')
+          setShowActiveSuppliers(false)
+          setShowAllPurchaseOrders(false)
+          setSelectedSupplierId(null)
+          setSelectedPurchaseOrderId(poId)
+        }}
+        onSupplierSelected={(supplierId) => {
+          setSelectedPurchaseOrderId(null)
+          setShowAllPurchaseOrders(false)
+          setShowActiveSuppliers(true)
+          setSelectedSupplierId(supplierId)
+          setActiveTab('suppliers')
+        }}
       />
 
       {/* Production-Ready Dashboard Layout */}
-      <div className="w-full">
+      <div className="w-full overflow-x-hidden">
         {/* Main Content Container - Optimized for Shopify */}
-        <div className="max-w-[1800px] mx-auto px-1 sm:px-2 md:px-3 lg:px-5 space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4">
+        <div className="max-w-[1600px] mx-auto px-2 sm:px-3 md:px-4 lg:px-6 space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4">
           {/* Navigation Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             {!showActiveSuppliers && !showAllPurchaseOrders && !selectedPurchaseOrderId && (
-              <TabsList className="grid w-full grid-cols-4 h-9 md:h-10">
+              <TabsList className="grid w-full grid-cols-5 h-9 md:h-10">
                 <TabsTrigger value="dashboard" className="text-sm">Dashboard</TabsTrigger>
+                <TabsTrigger value="suppliers" className="text-sm">Suppliers</TabsTrigger>
                 <TabsTrigger value="sync" className="text-sm">Quick Sync</TabsTrigger>
                 <TabsTrigger value="upload" className="text-sm">Upload PO</TabsTrigger>
                 <TabsTrigger value="settings" className="text-sm">Settings</TabsTrigger>
@@ -209,19 +231,53 @@ function App() {
                       onShowActiveSuppliers={() => setShowActiveSuppliers(true)} 
                       onShowAllPurchaseOrders={() => setShowAllPurchaseOrders(true)}
                       onShowPurchaseOrderDetails={(orderId) => setSelectedPurchaseOrderId(orderId)}
+                      onShowSupplierDetails={(supplierId) => {
+                        setSelectedSupplierId(supplierId)
+                        setActiveTab('suppliers')
+                      }}
                     />
                   </motion.div>
                 </TabsContent>
 
-                <TabsContent value="sync" className="space-y-4 md:space-y-6 mt-4 md:mt-6">
+                <TabsContent value="suppliers" className="space-y-4 md:space-y-6 mt-4 md:mt-6">
+                  <motion.div
+                    key="suppliers"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <ActiveSuppliers 
+                      onBack={() => {
+                        setActiveTab('dashboard')
+                        setSelectedSupplierId(null)
+                      }} 
+                      initialSupplierId={selectedSupplierId || undefined}
+                    />
+                  </motion.div>
+                </TabsContent>
+
+                <TabsContent value="sync" className="h-[calc(100vh-120px)]">
                   <motion.div
                     key="sync"
                     initial={{ opacity: 0, x: 20 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -20 }}
                     transition={{ duration: 0.3 }}
+                    className="h-full"
                   >
-                    <QuickSync onClose={() => {}} />
+                    <QuickSyncPro 
+                      onBack={() => setActiveTab('dashboard')}
+                      onViewProductDetail={(product) => {
+                        setSelectedProduct(product)
+                        setShowProductDetail(true)
+                      }}
+                      onProductUpdate={() => {
+                        // Trigger a refresh of the product drafts list
+                        setRefreshQuickSync(prev => prev + 1)
+                      }}
+                      refreshTrigger={refreshQuickSync}
+                    />
                   </motion.div>
                 </TabsContent>
 
@@ -232,7 +288,12 @@ function App() {
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -20 }}
                     transition={{ duration: 0.3 }}
+                    className="space-y-6"
                   >
+                    {/* Refinement Configuration Panel */}
+                    <RefinementConfigPanel />
+                    
+                    {/* Upload Section */}
                     <ProductionPOUpload 
                       onUploadComplete={(purchaseOrder) => {
                         console.log('Upload completed:', purchaseOrder)
@@ -243,6 +304,9 @@ function App() {
                       autoProcess={true}
                       confidenceThreshold={0.8}
                     />
+
+                    {/* Real-Time Feedback Section */}
+                    <RealTimeFeedback />
                   </motion.div>
                 </TabsContent>
 
@@ -253,6 +317,7 @@ function App() {
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -20 }}
                     transition={{ duration: 0.3 }}
+                    className="overflow-visible"
                   >
                     <SettingsPanel />
                   </motion.div>
@@ -268,7 +333,13 @@ function App() {
                 transition={{ duration: 0.3 }}
                 className="mt-6"
               >
-                <ActiveSuppliers onBack={() => setShowActiveSuppliers(false)} />
+                <ActiveSuppliers
+                  onBack={() => {
+                    setShowActiveSuppliers(false)
+                    setSelectedSupplierId(null)
+                  }}
+                  initialSupplierId={selectedSupplierId || undefined}
+                />
               </motion.div>
             ) : showAllPurchaseOrders ? (
               <motion.div
@@ -330,17 +401,73 @@ function App() {
         )}
       </AnimatePresence>
 
-      {/* AI Chatbot */}
-      <AIChatbot
-        isOpen={showAIChatbot}
-        isMinimized={isAIChatbotMinimized}
-        onToggle={() => setShowAIChatbot(!showAIChatbot)}
-        onMinimize={() => setIsAIChatbotMinimized(true)}
-        onClose={() => {
-          setShowAIChatbot(false)
-          setIsAIChatbotMinimized(false)
-        }}
-      />
+      {/* Product Detail View */}
+      {showProductDetail && selectedProduct && (
+        <ProductDetailView
+          item={{
+            id: selectedProduct.lineItemId || selectedProduct.id,
+            sku: selectedProduct.sku || '',
+            name: selectedProduct.refinedTitle || selectedProduct.originalTitle || selectedProduct.title || 'Unknown Product',
+            description: selectedProduct.description || selectedProduct.originalDescription,
+            quantity: selectedProduct.lineItem?.quantity || 1,
+            unitPrice: selectedProduct.priceRefined || selectedProduct.priceOriginal || 0,
+            totalPrice: (selectedProduct.priceRefined || selectedProduct.priceOriginal || 0) * (selectedProduct.lineItem?.quantity || 1),
+            confidence: selectedProduct.confidence || 0,
+            weight: selectedProduct.weight,
+            barcode: selectedProduct.barcode,
+            category: selectedProduct.productType,
+            vendor: selectedProduct.vendor,
+            images: selectedProduct.images ? {
+              vendorImages: [],
+              webScraped: [],
+              aiGenerated: null,
+              processed: selectedProduct.images || [],
+              recommended: null,
+              needsReview: false,
+              totalImages: selectedProduct.images?.length || 0
+            } : undefined
+          }}
+          purchaseOrder={{
+            id: selectedProduct.purchaseOrderId || selectedProduct.purchaseOrder?.id || '',
+            number: selectedProduct.purchaseOrder?.number || 'N/A',
+            supplierName: selectedProduct.supplier?.name || 'Unknown Supplier',
+            currency: selectedProduct.currencyTarget || selectedProduct.currencyOriginal || 'USD',
+            supplier: selectedProduct.supplier ? {
+              id: selectedProduct.supplier.id,
+              name: selectedProduct.supplier.name
+            } : undefined
+          }}
+          merchantId={selectedProduct.merchantId || ''}
+          onClose={() => {
+            console.log('🔵 ProductDetailView onClose called, imageApprovedFlag:', imageApprovedFlag)
+            setShowProductDetail(false)
+            setSelectedProduct(null)
+            // Only refresh if images were approved during this session
+            if (imageApprovedFlag) {
+              console.log('🔄 Triggering refresh due to image approval')
+              setRefreshQuickSync(prev => prev + 1)
+              setImageApprovedFlag(false)
+            }
+          }}
+          onSave={(updatedItem) => {
+            console.log('Product updated:', updatedItem)
+            // Trigger refresh of the product drafts list
+            setRefreshQuickSync(prev => prev + 1)
+            setShowProductDetail(false)
+            setSelectedProduct(null)
+          }}
+          onImageApproved={() => {
+            // Set flag that images were approved
+            // Actual refresh will happen when modal closes
+            console.log('🎯 onImageApproved called, setting flag to true')
+            setImageApprovedFlag(true)
+            console.log('✅ Image approved - will refresh on modal close')
+          }}
+        />
+      )}
+
+      {/* Toast Notifications */}
+      <Toaster position="top-right" richColors />
     </ShopifyLayoutWrapper>
   )
 }

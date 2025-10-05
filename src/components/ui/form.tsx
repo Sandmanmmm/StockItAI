@@ -1,4 +1,4 @@
-import { ComponentProps, createContext, useContext, useId } from "react"
+import { ComponentProps, createContext, useContext, useId, forwardRef } from "react"
 import * as LabelPrimitive from "@radix-ui/react-label"
 import { Slot } from "@radix-ui/react-slot"
 import {
@@ -71,28 +71,33 @@ const FormItemContext = createContext<FormItemContextValue>(
   {} as FormItemContextValue
 )
 
-function FormItem({ className, ...props }: ComponentProps<"div">) {
-  const id = useId()
+const FormItem = forwardRef<HTMLDivElement, ComponentProps<"div">>(
+  ({ className, ...props }, ref) => {
+    const id = useId()
 
-  return (
-    <FormItemContext.Provider value={{ id }}>
-      <div
-        data-slot="form-item"
-        className={cn("grid gap-2", className)}
-        {...props}
-      />
-    </FormItemContext.Provider>
-  )
-}
+    return (
+      <FormItemContext.Provider value={{ id }}>
+        <div
+          ref={ref}
+          data-slot="form-item"
+          className={cn("grid gap-2", className)}
+          {...props}
+        />
+      </FormItemContext.Provider>
+    )
+  }
+)
+FormItem.displayName = "FormItem"
 
-function FormLabel({
-  className,
-  ...props
-}: ComponentProps<typeof LabelPrimitive.Root>) {
+const FormLabel = forwardRef<
+  React.ElementRef<typeof LabelPrimitive.Root>,
+  ComponentProps<typeof LabelPrimitive.Root>
+>(({ className, ...props }, ref) => {
   const { error, formItemId } = useFormField()
 
   return (
     <Label
+      ref={ref}
       data-slot="form-label"
       data-error={!!error}
       className={cn("data-[error=true]:text-destructive", className)}
@@ -100,9 +105,13 @@ function FormLabel({
       {...props}
     />
   )
-}
+})
+FormLabel.displayName = "FormLabel"
 
-function FormControl({ ...props }: ComponentProps<typeof Slot>) {
+const FormControl = forwardRef<
+  React.ElementRef<typeof Slot>,
+  ComponentProps<typeof Slot>
+>(({ ...props }, ref) => {
   const { error, formItemId, formDescriptionId, formMessageId } = useFormField()
 
   return (
@@ -115,43 +124,54 @@ function FormControl({ ...props }: ComponentProps<typeof Slot>) {
           : `${formDescriptionId} ${formMessageId}`
       }
       aria-invalid={!!error}
+      ref={ref}
       {...props}
     />
   )
-}
+})
 
-function FormDescription({ className, ...props }: ComponentProps<"p">) {
-  const { formDescriptionId } = useFormField()
+FormControl.displayName = "FormControl"
 
-  return (
-    <p
-      data-slot="form-description"
-      id={formDescriptionId}
-      className={cn("text-muted-foreground text-sm", className)}
-      {...props}
-    />
-  )
-}
+const FormDescription = forwardRef<HTMLParagraphElement, ComponentProps<"p">>(
+  ({ className, ...props }, ref) => {
+    const { formDescriptionId } = useFormField()
 
-function FormMessage({ className, ...props }: ComponentProps<"p">) {
-  const { error, formMessageId } = useFormField()
-  const body = error ? String(error?.message ?? "") : props.children
-
-  if (!body) {
-    return null
+    return (
+      <p
+        ref={ref}
+        data-slot="form-description"
+        id={formDescriptionId}
+        className={cn("text-muted-foreground text-sm", className)}
+        {...props}
+      />
+    )
   }
+)
+FormDescription.displayName = "FormDescription"
 
-  return (
-    <p
-      data-slot="form-message"
-      id={formMessageId}
-      className={cn("text-destructive text-sm", className)}
-      {...props}
-    >
-      {body}
-    </p>
-  )
-}
+const FormMessage = forwardRef<HTMLParagraphElement, ComponentProps<"p">>(
+  ({ className, ...props }, ref) => {
+    const { error, formMessageId } = useFormField()
+    const body = error ? String(error?.message ?? "") : props.children
+
+    if (!body) {
+      return null
+    }
+
+    return (
+      <p
+        ref={ref}
+        data-slot="form-message"
+        id={formMessageId}
+        className={cn("text-destructive text-sm", className)}
+        {...props}
+      >
+        {body}
+      </p>
+    )
+  }
+)
+FormMessage.displayName = "FormMessage"
 
 export {
   useFormField,

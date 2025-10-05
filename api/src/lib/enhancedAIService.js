@@ -705,6 +705,36 @@ Document Content (Chunk 1/${chunks.length}):\n${chunks[0]}`
     
     return firstResponse
   }
+
+  // ==========================================
+  // DEPRECATED: AI Image Generation Removed
+  // Image sourcing now relies exclusively on Google Images
+  // ==========================================
+
+  /**
+   * @deprecated AI image generation has been removed to reduce costs
+   * Use Google Images search instead via imageProcessingService
+   */
+  async generateProductImage(prompt, options = {}) {
+    console.warn('⚠️ generateProductImage is deprecated - use Google Images search instead')
+    return `https://via.placeholder.com/400x400/f0f0f0/999999?text=${encodeURIComponent('Use Google Images')}`
+  }
+
+  /**
+   * @deprecated AI image generation has been removed to reduce costs
+   */
+  async generateProductImageVariations(basePrompt, count = 2, options = {}) {
+    console.warn('⚠️ generateProductImageVariations is deprecated - use Google Images search instead')
+    return []
+  }
+
+  /**
+   * @deprecated AI image generation has been removed
+   */
+  generateProductImagePrompt(productData) {
+    console.warn('⚠️ generateProductImagePrompt is deprecated')
+    return ''
+  }
 }
 
 // Export singleton instance

@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client'
+import { autoMatchSupplier } from '../services/supplierMatchingService.js'
 
 /**
  * Database Persistence Service for AI Processing Results
@@ -112,13 +113,15 @@ export class DatabasePersistenceService {
   }
 
   /**
-   * Find existing supplier or create new one
+   * Find existing supplier or create new one with fuzzy matching
    */
   async findOrCreateSupplier(tx, supplierName, vendorData, merchantId) {
     if (!supplierName) return null
     
     try {
-      // Try to find existing supplier (case-insensitive)
+      console.log(`🔍 Finding or creating supplier: ${supplierName}`)
+      
+      // Try exact match first (case-insensitive)
       let supplier = await tx.supplier.findFirst({
         where: {
           merchantId,
@@ -129,42 +132,91 @@ export class DatabasePersistenceService {
         }
       })
       
-      if (!supplier) {
-        // Create new supplier
-        console.log(`📝 Creating new supplier: ${supplierName}`)
-        supplier = await tx.supplier.create({
-          data: {
-            name: supplierName,
-            merchantId,
-            contactEmail: vendorData?.email || vendorData?.contactEmail,
-            contactPhone: vendorData?.phone || vendorData?.contactPhone,
-            address: vendorData?.address,
-            website: vendorData?.website,
-            status: 'active',
-            totalPOs: 1
-          }
-        })
-        console.log(`✅ New supplier created: ${supplier.id}`)
-      } else {
-        // Update existing supplier PO count
+      if (supplier) {
+        console.log(`✅ Found exact match supplier: ${supplier.name} (${supplier.id})`)
+        
+        // Update existing supplier PO count and info
         supplier = await tx.supplier.update({
           where: { id: supplier.id },
           data: {
             totalPOs: { increment: 1 },
             // Update contact info if provided and missing
-            contactEmail: supplier.contactEmail || vendorData?.email,
-            contactPhone: supplier.contactPhone || vendorData?.phone,
+            contactEmail: supplier.contactEmail || vendorData?.email || vendorData?.contactEmail,
+            contactPhone: supplier.contactPhone || vendorData?.phone || vendorData?.contactPhone,
             address: supplier.address || vendorData?.address,
-            website: supplier.website || vendorData?.website
+            website: supplier.website || vendorData?.website,
+            updatedAt: new Date()
           }
         })
-        console.log(`📊 Updated existing supplier: ${supplier.name}`)
+        
+        return supplier
       }
+      
+      // No exact match - use fuzzy matching
+      console.log(`🤖 No exact match, trying fuzzy matching...`)
+      
+      // Import the matching service inline to avoid circular dependencies
+      const { findMatchingSuppliers } = await import('../services/supplierMatchingService.js')
+      
+      // Prepare parsed supplier data
+      const parsedSupplier = {
+        name: supplierName,
+        email: vendorData?.email || vendorData?.contactEmail,
+        phone: vendorData?.phone || vendorData?.contactPhone,
+        address: vendorData?.address,
+        website: vendorData?.website
+      }
+      
+      // Find matches with high confidence threshold
+      const matches = await findMatchingSuppliers(parsedSupplier, merchantId, {
+        minScore: 0.85, // High confidence for auto-linking
+        maxResults: 1,
+        includeInactive: false
+      })
+      
+      if (matches.length > 0) {
+        const bestMatch = matches[0]
+        console.log(`🎯 Found fuzzy match: ${bestMatch.supplier.name} (score: ${bestMatch.matchScore})`)
+        
+        // Update the matched supplier
+        supplier = await tx.supplier.update({
+          where: { id: bestMatch.supplier.id },
+          data: {
+            totalPOs: { increment: 1 },
+            // Update missing contact info
+            contactEmail: supplier?.contactEmail || vendorData?.email || vendorData?.contactEmail,
+            contactPhone: supplier?.contactPhone || vendorData?.phone || vendorData?.contactPhone,
+            address: supplier?.address || vendorData?.address,
+            website: supplier?.website || vendorData?.website,
+            updatedAt: new Date()
+          }
+        })
+        
+        console.log(`✅ Linked to existing supplier via fuzzy match`)
+        return supplier
+      }
+      
+      // No match found - create new supplier
+      console.log(`📝 No match found, creating new supplier: ${supplierName}`)
+      supplier = await tx.supplier.create({
+        data: {
+          name: supplierName,
+          merchantId,
+          contactEmail: vendorData?.email || vendorData?.contactEmail,
+          contactPhone: vendorData?.phone || vendorData?.contactPhone,
+          address: vendorData?.address,
+          website: vendorData?.website,
+          status: 'active',
+          totalPOs: 1
+        }
+      })
+      console.log(`✅ New supplier created: ${supplier.id}`)
       
       return supplier
       
     } catch (error) {
       console.warn('⚠️ Supplier creation/update failed:', error.message)
+      console.warn('Stack:', error.stack)
       return null
     }
   }
@@ -232,7 +284,7 @@ export class DatabasePersistenceService {
         status: status,
         confidence: overallConfidence / 100, // Store as 0-1 range
         rawData: extractedData, // Store all extracted data
-        processingNotes: aiResult.processingNotes || `Processed by ${aiResult.model}`,
+        processingNotes: aiResult.processingNotes || (aiResult.model ? `Processed by ${aiResult.model}` : 'Processing in progress...'),
         fileName: fileName,
         fileSize: options.fileSize || null,
         fileUrl: options.fileUrl || null,
@@ -321,7 +373,7 @@ export class DatabasePersistenceService {
       status: status,
       confidence: overallConfidence / 100, // Store as 0-1 range
       rawData: extractedData, // Store all extracted data
-      processingNotes: aiResult.processingNotes || `Processed by ${aiResult.model}`,
+      processingNotes: aiResult.processingNotes || (aiResult.model ? `Processed by ${aiResult.model}` : 'Processing in progress...'),
       supplierId: supplierId,
       jobStatus: 'completed',
       updatedAt: new Date()
@@ -407,7 +459,9 @@ export class DatabasePersistenceService {
             confidence: itemConfidence / 100, // Store as 0-1 range
             status: itemConfidence >= 80 ? 'pending' : 'review_needed',
             aiNotes: `AI extracted: ${JSON.stringify(item)}`,
-            purchaseOrderId: purchaseOrderId
+            purchaseOrder: {
+              connect: { id: purchaseOrderId }
+            }
           }
         })
         

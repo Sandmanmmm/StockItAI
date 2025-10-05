@@ -21,7 +21,7 @@ Object.entries(endpoints).forEach(([name, url]) => {
 })
 
 // Verify the tunnel URL format
-const expectedTunnelUrl = 'https://ted-creativity-warriors-stewart.trycloudflare.com'
+const expectedTunnelUrl = 'https://hitachi-jeff-amy-knows.trycloudflare.com'
 if (API_BASE_URL === expectedTunnelUrl) {
   console.log('✅ Configuration correctly points to Cloudflare tunnel')
 } else {

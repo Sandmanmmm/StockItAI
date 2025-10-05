@@ -63,6 +63,7 @@ class NotificationService {
   private initAudioContext() {
     try {
       this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+      // Don't try to resume immediately - wait for user interaction
     } catch (error) {
       console.warn('Web Audio API not supported:', error)
     }
@@ -98,7 +99,13 @@ class NotificationService {
     try {
       // Resume audio context if suspended (browser requirement)
       if (this.audioContext.state === 'suspended') {
-        await this.audioContext.resume()
+        // Only try to resume if we're in a user interaction context
+        try {
+          await this.audioContext.resume()
+        } catch (resumeError) {
+          console.debug('AudioContext resume failed (expected without user interaction):', resumeError)
+          return // Silently fail - this is expected behavior
+        }
       }
 
       const volume = this.settings.soundVolume / 100 * 0.3
@@ -199,11 +206,11 @@ class NotificationService {
     // Show desktop notification
     this.showDesktopNotification(notification)
 
-    // Store notification in KV store
+    // Store notification in local storage (KV replacement)
     try {
-      const existingNotifications = await window.spark.kv.get<NotificationItem[]>('notifications') || []
+      const existingNotifications = JSON.parse(localStorage.getItem('notifications') || '[]') as NotificationItem[]
       const updatedNotifications = [fullNotification, ...existingNotifications].slice(0, 50) // Keep only last 50
-      await window.spark.kv.set('notifications', updatedNotifications)
+      localStorage.setItem('notifications', JSON.stringify(updatedNotifications))
     } catch (error) {
       console.warn('Failed to store notification:', error)
     }

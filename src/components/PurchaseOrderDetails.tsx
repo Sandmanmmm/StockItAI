@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
+import { Switch } from '@/components/ui/switch'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -37,11 +38,15 @@ import {
   ChatCircle as MessageCircle,
   Tag,
   TrendUp,
-  ShoppingCart
+  ShoppingCart,
+  MagicWand
 } from '@phosphor-icons/react'
 import { useKV } from '../hooks/useKV'
 import { notificationService } from '@/lib/notificationService'
 import { authenticatedRequest } from '@/lib/shopifyApiService'
+import { ProductRefinementDialog } from './ProductRefinementDialog'
+import { ProductDetailView } from './ProductDetailView'
+import { SupplierMatchSuggestions } from './SupplierMatchSuggestions'
 
 interface PurchaseOrder {
   id: string
@@ -131,9 +136,14 @@ export function PurchaseOrderDetails({ orderId, onBack }: PurchaseOrderDetailsPr
   const [purchaseOrder, setPurchaseOrder] = useState<PurchaseOrder | null>(null)
   const [showApprovalDialog, setShowApprovalDialog] = useState(false)
   const [showRejectDialog, setShowRejectDialog] = useState(false)
+  const [showRefinementDialog, setShowRefinementDialog] = useState(false)
+  const [showProductDetail, setShowProductDetail] = useState(false)
+  const [selectedProduct, setSelectedProduct] = useState<any>(null)
   const [rejectReason, setRejectReason] = useState('')
   const [processing, setProcessing] = useState(false)
   const [documentPreviewLoading, setDocumentPreviewLoading] = useState(false)
+  const [showImageThumbnails, setShowImageThumbnails] = useState(false)
+  const [lineItemImages, setLineItemImages] = useState<Record<string, string | null>>({})
 
   // Helper function to get document URL for preview
   const getDocumentUrl = () => {
@@ -226,16 +236,34 @@ export function PurchaseOrderDetails({ orderId, onBack }: PurchaseOrderDetailsPr
                           extractedData.total?.amount ||
                           foundPO.totalAmount || 0,
               currency: foundPO.currency || 'USD',
-              items: lineItems.map((item: any, index: number) => ({
-                id: (index + 1).toString(),
-                sku: item.productCode || item.sku || item.itemCode || `ITEM-${index + 1}`,
-                name: item.description || item.name || item.product || item.title || 'Unknown Item',
-                quantity: parseInt(item.quantity) || parseInt(item.qty) || parseInt(item.amount) || 1,
-                unitPrice: parseFloat(item.unitPrice) || parseFloat(item.price) || parseFloat(item.unit_price) || 0,
-                totalPrice: parseFloat(item.total) || parseFloat(item.totalPrice) || parseFloat(item.total_price) || 
-                           (parseFloat(item.unitPrice || item.price || 0) * parseInt(item.quantity || item.qty || 1)) || 0,
-                confidence: Math.round((foundPO.rawData?.fieldConfidences?.lineItems || 0.9) * 100)
-              })),
+              items: (() => {
+                // Priority 1: Use real POLineItem data if available
+                if (foundPO.lineItems && foundPO.lineItems.length > 0) {
+                  console.log('Using real POLineItem data:', foundPO.lineItems.length, 'items');
+                  return foundPO.lineItems.map((lineItem: any) => ({
+                    id: lineItem.id, // REAL database ID
+                    sku: lineItem.sku || lineItem.productCode || lineItem.itemCode || `ITEM-${lineItem.id}`,
+                    name: lineItem.productName || lineItem.description || 'Unknown Item',
+                    quantity: lineItem.quantity || 1,
+                    unitPrice: lineItem.unitCost || 0,
+                    totalPrice: lineItem.totalCost || (lineItem.unitCost * lineItem.quantity) || 0,
+                    confidence: Math.round((lineItem.confidence || 0.9) * 100)
+                  }));
+                }
+                
+                // Priority 2: Fall back to extracted data with warning
+                console.warn('No real POLineItem data found, falling back to extracted data');
+                return lineItems.map((item: any, index: number) => ({
+                  id: `temp-${index + 1}`, // Temporary ID with clear prefix
+                  sku: item.productCode || item.sku || item.itemCode || `ITEM-${index + 1}`,
+                  name: item.description || item.name || item.product || item.title || 'Unknown Item',
+                  quantity: parseInt(item.quantity) || parseInt(item.qty) || parseInt(item.amount) || 1,
+                  unitPrice: parseFloat(item.unitPrice) || parseFloat(item.price) || parseFloat(item.unit_price) || 0,
+                  totalPrice: parseFloat(item.total) || parseFloat(item.totalPrice) || parseFloat(item.total_price) || 
+                             (parseFloat(item.unitPrice || item.price || 0) * parseInt(item.quantity || item.qty || 1)) || 0,
+                  confidence: Math.round((foundPO.rawData?.fieldConfidences?.lineItems || 0.9) * 100)
+                }));
+              })(),
               notes: extractedData.notes || foundPO.processingNotes || 'No additional notes',
               aiProcessingNotes: foundPO.rawData?.qualityAssessment?.overall === 'high' 
                 ? `High confidence extraction (${Math.round((foundPO.confidence || 0) * 100)}%). Document processed successfully with ${foundPO.rawData?.qualityIndicators?.documentCompleteness || 'good'} completeness.`
@@ -351,6 +379,82 @@ export function PurchaseOrderDetails({ orderId, onBack }: PurchaseOrderDetailsPr
     fetchPurchaseOrder()
   }, [orderId])
 
+  // Fetch approved images for line items
+  useEffect(() => {
+    const fetchLineItemImages = async () => {
+      if (!showImageThumbnails || !purchaseOrder?.id) {
+        console.log('🖼️ Image fetch skipped:', { showImageThumbnails, poId: purchaseOrder?.id })
+        return
+      }
+      
+      try {
+        console.log('🖼️ Fetching images for PO:', purchaseOrder.id)
+        const imageMap: Record<string, string | null> = {}
+        
+        // Fetch image review session for this PO
+        const response = await authenticatedRequest(`/api/image-review/sessions/by-purchase-order/${purchaseOrder.id}`)
+        console.log('🖼️ Session lookup response:', response)
+        
+        if (!response.success || !response.data) {
+          console.log('⚠️ No session found for this PO')
+          return
+        }
+        
+        // Fetch full session details
+        const sessionData = response.data as any
+        console.log('🖼️ Fetching full session:', sessionData.sessionId)
+        const sessionResponse = await authenticatedRequest(`/api/image-review/sessions/${sessionData.sessionId}`)
+        console.log('🖼️ Full session response:', sessionResponse)
+        
+        if (!sessionResponse.success || !sessionResponse.data) {
+          console.log('⚠️ Could not fetch full session')
+          return
+        }
+        
+        // Map line item IDs to their approved images
+        const fullSessionData = sessionResponse.data as any
+        console.log('🖼️ Session has products:', fullSessionData.products?.length)
+        
+        fullSessionData.products?.forEach((product: any) => {
+          console.log('🖼️ Processing product:', {
+            name: product.productName,
+            lineItemId: product.lineItemId,
+            sku: product.productSku,
+            imageCount: product.images?.length
+          })
+          
+          if (product.images && product.images.length > 0) {
+            // Find the first approved/selected image
+            const approvedImage = product.images.find((img: any) => img.isApproved || img.isSelected)
+            const selectedUrl = approvedImage?.imageUrl || product.images[0]?.imageUrl || null
+            
+            // Try to match by lineItemId first, then by SKU as fallback
+            if (product.lineItemId) {
+              imageMap[product.lineItemId] = selectedUrl
+              console.log(`  → Mapped by ID ${product.lineItemId} to:`, selectedUrl?.substring(0, 60))
+            } else if (product.productSku) {
+              // Find line item by SKU
+              const matchingItem = purchaseOrder.items.find((item: any) => item.sku === product.productSku)
+              if (matchingItem) {
+                imageMap[matchingItem.id] = selectedUrl
+                console.log(`  → Mapped by SKU ${product.productSku} to item ${matchingItem.id}:`, selectedUrl?.substring(0, 60))
+              } else {
+                console.log(`  ⚠️ No matching line item found for SKU: ${product.productSku}`)
+              }
+            }
+          }
+        })
+        
+        console.log('🖼️ Final image map:', imageMap)
+        setLineItemImages(imageMap)
+      } catch (error) {
+        console.error('❌ Error fetching line item images:', error)
+      }
+    }
+    
+    fetchLineItemImages()
+  }, [showImageThumbnails, purchaseOrder?.id])
+
   const handleApprove = async () => {
     if (!purchaseOrder) return
     
@@ -418,6 +522,23 @@ export function PurchaseOrderDetails({ orderId, onBack }: PurchaseOrderDetailsPr
     setRejectReason('')
   }
 
+  const handleRefinementComplete = () => {
+    // Refresh the purchase order data or show success state
+    notificationService.showSuccess(
+      'Products Created for Refinement',
+      'Product drafts have been created and are ready for review in the product management section.',
+      { category: 'user', priority: 'high' }
+    )
+    
+    // Update PO status to indicate refinement has started
+    if (purchaseOrder) {
+      setPurchaseOrder({
+        ...purchaseOrder,
+        status: 'processing'
+      })
+    }
+  }
+
   const handleReprocess = async () => {
     if (!purchaseOrder) return
     
@@ -462,6 +583,73 @@ export function PurchaseOrderDetails({ orderId, onBack }: PurchaseOrderDetailsPr
       )
     }
     setProcessing(false)
+  }
+
+  const handleProductClick = (item: any) => {
+    setSelectedProduct(item)
+    setShowProductDetail(true)
+  }
+
+  const handleProductDetailClose = () => {
+    setShowProductDetail(false)
+    setSelectedProduct(null)
+    
+    // Refresh images if thumbnails are visible
+    if (showImageThumbnails && purchaseOrder?.id) {
+      console.log('🔄 Refreshing thumbnails after product detail close')
+      // Trigger a re-fetch by toggling and re-toggling state
+      // Or we can create a refresh trigger
+      const refreshImages = async () => {
+        try {
+          const imageMap: Record<string, string | null> = {}
+          
+          const response = await authenticatedRequest(`/api/image-review/sessions/by-purchase-order/${purchaseOrder.id}`)
+          if (!response.success || !response.data) return
+          
+          const sessionData = response.data as any
+          const sessionResponse = await authenticatedRequest(`/api/image-review/sessions/${sessionData.sessionId}`)
+          if (!sessionResponse.success || !sessionResponse.data) return
+          
+          const fullSessionData = sessionResponse.data as any
+          fullSessionData.products?.forEach((product: any) => {
+            if (product.images && product.images.length > 0) {
+              const approvedImage = product.images.find((img: any) => img.isApproved || img.isSelected)
+              const selectedUrl = approvedImage?.imageUrl || product.images[0]?.imageUrl || null
+              
+              if (product.lineItemId) {
+                imageMap[product.lineItemId] = selectedUrl
+              } else if (product.productSku) {
+                const matchingItem = purchaseOrder.items.find((item: any) => item.sku === product.productSku)
+                if (matchingItem) {
+                  imageMap[matchingItem.id] = selectedUrl
+                }
+              }
+            }
+          })
+          
+          console.log('🔄 Refreshed image map:', imageMap)
+          setLineItemImages(imageMap)
+        } catch (error) {
+          console.error('❌ Error refreshing images:', error)
+        }
+      }
+      
+      refreshImages()
+    }
+  }
+
+  const handleProductSave = (updatedItem: any) => {
+    if (!purchaseOrder) return
+    
+    // Update the item in the purchase order
+    const updatedItems = purchaseOrder.items.map((item: any) =>
+      item.id === updatedItem.id ? updatedItem : item
+    )
+    
+    setPurchaseOrder({
+      ...purchaseOrder,
+      items: updatedItems
+    })
   }
 
   if (!purchaseOrder) {
@@ -592,6 +780,17 @@ export function PurchaseOrderDetails({ orderId, onBack }: PurchaseOrderDetailsPr
               >
                 <Robot className="w-4 h-4 mr-2" />
                 {processing ? 'Processing...' : 'Reprocess AI'}
+              </Button>
+              
+              <Button 
+                variant="outline" 
+                className="w-full justify-start bg-gradient-to-r from-primary/10 to-blue-500/10 hover:from-primary/20 hover:to-blue-500/20 border-primary/20" 
+                size="sm"
+                onClick={() => setShowRefinementDialog(true)}
+                disabled={!purchaseOrder.items || purchaseOrder.items.length === 0}
+              >
+                <MagicWand className="w-4 h-4 mr-2" />
+                Product Refinement
               </Button>
               
               <Button variant="outline" className="w-full justify-start" size="sm">
@@ -808,6 +1007,18 @@ export function PurchaseOrderDetails({ orderId, onBack }: PurchaseOrderDetailsPr
               </div>
             </CardContent>
           </Card>
+
+          {/* Supplier Matching AI */}
+          <SupplierMatchSuggestions
+            purchaseOrderId={purchaseOrder.id}
+            currentSupplierId={null}
+            currency={purchaseOrder.currency}
+            onSupplierLinked={(supplierId) => {
+              console.log('Supplier linked:', supplierId)
+              // Refresh PO data
+              // You could add a refresh function here
+            }}
+          />
 
           {/* Order Information */}
           <Card>
@@ -1058,7 +1269,20 @@ export function PurchaseOrderDetails({ orderId, onBack }: PurchaseOrderDetailsPr
           <CardTitle className="flex items-center gap-2">
             <ShoppingCart className="w-5 h-5" />
             Line Items ({purchaseOrder.items.length})
+            <Badge variant="secondary" className="ml-auto">
+              Click rows to configure for Shopify
+            </Badge>
           </CardTitle>
+          <div className="flex items-center gap-2 mt-2">
+            <Switch
+              id="show-images"
+              checked={showImageThumbnails}
+              onCheckedChange={setShowImageThumbnails}
+            />
+            <label htmlFor="show-images" className="text-sm text-muted-foreground cursor-pointer">
+              Show Product Images
+            </label>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="overflow-hidden border rounded-lg">
@@ -1066,12 +1290,14 @@ export function PurchaseOrderDetails({ orderId, onBack }: PurchaseOrderDetailsPr
               <table className="w-full">
                 <thead className="bg-muted/50">
                   <tr className="text-left">
+                    {showImageThumbnails && <th className="px-4 py-3 text-sm font-medium w-24">Image</th>}
                     <th className="px-4 py-3 text-sm font-medium">SKU</th>
                     <th className="px-4 py-3 text-sm font-medium">Product Name</th>
                     <th className="px-4 py-3 text-sm font-medium text-center">Qty</th>
                     <th className="px-4 py-3 text-sm font-medium text-right">Unit Price</th>
                     <th className="px-4 py-3 text-sm font-medium text-right">Total</th>
                     <th className="px-4 py-3 text-sm font-medium text-center">Confidence</th>
+                    <th className="px-4 py-3 text-sm font-medium text-center">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -1081,10 +1307,42 @@ export function PurchaseOrderDetails({ orderId, onBack }: PurchaseOrderDetailsPr
                       initial={{ opacity: 0, x: -20 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ delay: index * 0.1 }}
-                      className="hover:bg-muted/30"
+                      className="hover:bg-muted/30 cursor-pointer transition-all duration-200 group border-l-2 border-transparent hover:border-l-primary/50"
+                      onClick={() => handleProductClick(item)}
                     >
+                      {showImageThumbnails && (
+                        <td className="px-4 py-3" style={{ width: '96px', minWidth: '96px', maxWidth: '96px' }}>
+                          <div style={{ width: '64px', height: '64px', minWidth: '64px', minHeight: '64px', maxWidth: '64px', maxHeight: '64px' }} className="flex items-center justify-center flex-shrink-0 overflow-hidden">
+                            {lineItemImages[item.id] ? (
+                              <img
+                                src={lineItemImages[item.id]!}
+                                alt={item.name}
+                                style={{ width: '64px', height: '64px', minWidth: '64px', minHeight: '64px', maxWidth: '64px', maxHeight: '64px' }}
+                                className="object-cover rounded border flex-shrink-0"
+                                onError={(e) => {
+                                  const target = e.target as HTMLImageElement
+                                  target.style.display = 'none'
+                                  const parent = target.parentElement
+                                  if (parent) {
+                                    parent.innerHTML = '<div style="width: 64px; height: 64px;" class="flex items-center justify-center bg-muted rounded border"><svg class="w-8 h-8 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path></svg></div>'
+                                  }
+                                }}
+                              />
+                            ) : (
+                              <div style={{ width: '64px', height: '64px' }} className="flex items-center justify-center bg-muted rounded border flex-shrink-0">
+                                <Package className="w-8 h-8 text-muted-foreground" />
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      )}
                       <td className="px-4 py-3 text-sm font-mono">{item.sku}</td>
-                      <td className="px-4 py-3 text-sm">{item.name}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <div className="flex items-center gap-2">
+                          <Package className="w-4 h-4 text-muted-foreground" />
+                          {item.name}
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-sm text-center">{item.quantity}</td>
                       <td className="px-4 py-3 text-sm text-right">
                         {purchaseOrder.currency} {item.unitPrice.toFixed(2)}
@@ -1099,6 +1357,20 @@ export function PurchaseOrderDetails({ orderId, onBack }: PurchaseOrderDetailsPr
                         >
                           {item.confidence}%
                         </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleProductClick(item)
+                          }}
+                          className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                        >
+                          <MagicWand className="w-3 h-3" />
+                          Configure
+                        </Button>
                       </td>
                     </motion.tr>
                   ))}
@@ -1160,6 +1432,35 @@ export function PurchaseOrderDetails({ orderId, onBack }: PurchaseOrderDetailsPr
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Product Refinement Dialog */}
+      <ProductRefinementDialog
+        isOpen={showRefinementDialog}
+        onClose={() => setShowRefinementDialog(false)}
+        purchaseOrderId={purchaseOrder.id}
+        lineItems={purchaseOrder.items}
+        onRefinementComplete={handleRefinementComplete}
+      />
+
+      {/* Product Detail View */}
+      {showProductDetail && selectedProduct && (
+        <ProductDetailView
+          item={selectedProduct}
+          purchaseOrder={{
+            id: purchaseOrder.id,
+            number: purchaseOrder.number,
+            supplierName: purchaseOrder.supplier.name,
+            currency: purchaseOrder.currency,
+            supplier: {
+              id: 'unknown', // This should be fetched from the API response
+              name: purchaseOrder.supplier.name
+            }
+          }}
+          merchantId="cmft3moy50000ultcbqgxzz6d" // Real merchant ID from database
+          onClose={handleProductDetailClose}
+          onSave={handleProductSave}
+        />
+      )}
     </motion.div>
   )
 }

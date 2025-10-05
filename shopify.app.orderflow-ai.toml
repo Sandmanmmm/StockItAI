@@ -2,14 +2,13 @@
 
 client_id = "484def5b3b4823489f8ebff0d2e9cadd"
 name = "orderflow-ai"
-application_url = "https://drill-infrared-utilize-fever.trycloudflare.com"
+application_url = "https://forgot-yeah-termination-intelligence.trycloudflare.com"
 embedded = true
 handle = "orderflow-ai"
 
 [build]
 automatically_update_urls_on_dev = false
 dev_store_url = ""
-include_config_on_deploy = true
 
 [webhooks]
 api_version = "2025-07"
@@ -20,9 +19,9 @@ scopes = "read_customers,read_inventory,read_orders,read_products,write_customer
 
 [auth]
 redirect_urls = [
-  "https://drill-infrared-utilize-fever.trycloudflare.com/auth/callback",
-  "https://drill-infrared-utilize-fever.trycloudflare.com/auth/shopify/callback",
-  "https://drill-infrared-utilize-fever.trycloudflare.com/api/auth/callback"
+  "https://forgot-yeah-termination-intelligence.trycloudflare.com/auth/callback",
+  "https://forgot-yeah-termination-intelligence.trycloudflare.com/auth/shopify/callback",
+  "https://forgot-yeah-termination-intelligence.trycloudflare.com/api/auth/callback"
 ]
 
 [pos]

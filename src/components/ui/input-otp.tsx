@@ -1,6 +1,6 @@
 "use client"
 
-import { ComponentProps, useContext } from "react"
+import { ComponentProps, forwardRef, useContext } from "react"
 import { OTPInput, OTPInputContext } from "input-otp"
 import MinusIcon from "lucide-react/dist/esm/icons/minus"
 
@@ -26,15 +26,19 @@ function InputOTP({
   )
 }
 
-function InputOTPGroup({ className, ...props }: ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="input-otp-group"
-      className={cn("flex items-center", className)}
-      {...props}
-    />
-  )
-}
+const InputOTPGroup = forwardRef<HTMLDivElement, ComponentProps<"div">>(
+  ({ className, ...props }, ref) => {
+    return (
+      <div
+        ref={ref}
+        data-slot="input-otp-group"
+        className={cn("flex items-center", className)}
+        {...props}
+      />
+    )
+  }
+)
+InputOTPGroup.displayName = "InputOTPGroup"
 
 function InputOTPSlot({
   index,
@@ -66,12 +70,15 @@ function InputOTPSlot({
   )
 }
 
-function InputOTPSeparator({ ...props }: ComponentProps<"div">) {
-  return (
-    <div data-slot="input-otp-separator" role="separator" {...props}>
-      <MinusIcon />
-    </div>
-  )
-}
+const InputOTPSeparator = forwardRef<HTMLDivElement, ComponentProps<"div">>(
+  ({ ...props }, ref) => {
+    return (
+      <div ref={ref} data-slot="input-otp-separator" role="separator" {...props}>
+        <MinusIcon />
+      </div>
+    )
+  }
+)
+InputOTPSeparator.displayName = "InputOTPSeparator"
 
 export { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator }

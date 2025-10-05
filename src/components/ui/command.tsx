@@ -1,6 +1,6 @@
 "use client"
 
-import { ComponentProps } from "react"
+import { ComponentProps, forwardRef } from "react"
 import { Command as CommandPrimitive } from "cmdk"
 import SearchIcon from "lucide-react/dist/esm/icons/search"
 
@@ -148,21 +148,22 @@ function CommandItem({
   )
 }
 
-function CommandShortcut({
-  className,
-  ...props
-}: ComponentProps<"span">) {
-  return (
-    <span
-      data-slot="command-shortcut"
-      className={cn(
-        "text-muted-foreground ml-auto text-xs tracking-widest",
-        className
-      )}
-      {...props}
-    />
-  )
-}
+const CommandShortcut = forwardRef<HTMLSpanElement, ComponentProps<"span">>(
+  ({ className, ...props }, ref) => {
+    return (
+      <span
+        ref={ref}
+        data-slot="command-shortcut"
+        className={cn(
+          "text-muted-foreground ml-auto text-xs tracking-widest",
+          className
+        )}
+        {...props}
+      />
+    )
+  }
+)
+CommandShortcut.displayName = "CommandShortcut"
 
 export {
   Command,

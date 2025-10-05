@@ -25,6 +25,12 @@ dist-ssr
 *.sw?
 
 .env
+.env.local
+.env.production
+.env.development.local
+.env.test.local
+.env.production.local
+api/.env.local
 **/agent-eval-report*
 packages
 pids
@@ -32,3 +38,130 @@ pids
 .devcontainer/
 
 .spark-workbench-id
+
+# Testing and Debug files
+tests/
+test-*.js
+test-*.cjs
+test-*.html
+test-*.pdf
+test-*.csv
+test-*.txt
+test-*.ps1
+check-*.js
+check-*.cjs
+diagnose-*.js
+debug-*.js
+debug-*.cjs
+fix-*.js
+monitor-*.js
+verify-*.js
+investigate-*.js
+examine-*.js
+compare-*.js
+analyze-*.js
+trigger-*.js
+quick-test.js
+latest-test-result.txt
+
+# API test files
+api/test-*.js
+api/test-*.cjs
+api/check-*.js
+api/check-*.cjs
+api/debug-*.js
+api/diagnose-*.js
+api/fix-*.js
+api/monitor-*.js
+api/analyze-*.js
+api/validate-*.js
+api/retrigger-*.js
+api/retry-*.js
+api/create-sample-*.js
+api/process-*.js
+api/manual-*.js
+api/simple-*.js
+api/emergency-*.js
+api/clear-*.js
+api/clean-*.js
+api/find-*.js
+api/*.csv
+api/*.txt
+api/*.pdf
+api/temp.txt
+
+# Reports and analysis
+*-report.json
+*-analysis.json
+diagnostic-*.json
+api/dependency-analysis-report.json
+api/redis-diagnostic-report.json
+api/redis-production-readiness-analysis.json
+api/production-readiness-report.js
+api/production-check.js
+po-*-analysis.json
+
+# Database backups
+api/database/
+backups/
+api/backups/
+
+# Redis config
+api/config/redis/
+
+# Docker compose files
+docker-compose*.yml
+api/docker-compose*.yml
+
+# Backup files
+*.backup
+*.old
+*.corrupted.backup
+*.disabled
+api/src/**/*.backup
+api/src/**/*.old
+
+# Shell scripts (keep essential ones)
+*.ps1
+*.bat
+*.sh
+!start-api-server-window.ps1
+!start-tunnel-window.ps1
+!start-quick-tunnel.ps1
+!start-redis.ps1
+!update-tunnel-url.ps1
+
+# Executables
+cloudflared.exe
+*.exe
+
+# Shopify CLI
+.shopify/
+
+# Spark metadata
+spark.meta.json
+.spark-initial-sha
+
+# Monitoring
+api/monitoring-dashboard.html
+
+# Error notebooks
+*.ipynb
+
+# Public test files
+public/test-*
+
+# Supabase setup
+api/supabase-setup-guide.js
+
+# Additional documentation to keep
+!README.md
+!DEPLOYMENT_CHECKLIST.md
+!PRODUCTION_GUIDE.md
+!SECURITY.md
+!PRD.md
+!WEBHOOK_PRODUCTION_ANALYSIS.md
+!WEBHOOK_SECRET_DEPLOYMENT.md
+!WEBHOOK_DEPLOYMENT_STATUS.md
+!VERCEL_DEPLOYMENT_GUIDE.md
+!LICENSE

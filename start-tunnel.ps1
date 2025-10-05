@@ -106,5 +106,5 @@ $tunnelInfo = @{
 $tunnelInfo | ConvertTo-Json | Out-File -FilePath "current-tunnel.json" -Encoding UTF8
 Write-Host "💾 Tunnel info saved to current-tunnel.json" -ForegroundColor Green
 
-Write-Host "`nPress any key to continue..." -ForegroundColor Gray
+Write-Host "`n`nPress any key to continue..." -ForegroundColor Gray
 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")

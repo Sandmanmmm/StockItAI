@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -120,7 +120,10 @@ export function NotificationsPanel({ isOpen, onClose, onNotificationUpdate, onOp
 
   // Update parent component with unread count
   const unreadCount = notifications?.filter(n => !n.read).length || 0
-  onNotificationUpdate(unreadCount)
+  
+  useEffect(() => {
+    onNotificationUpdate(unreadCount)
+  }, [unreadCount, onNotificationUpdate])
 
   const getNotificationIcon = (type: string) => {
     switch (type) {
@@ -166,21 +169,20 @@ export function NotificationsPanel({ isOpen, onClose, onNotificationUpdate, onOp
   }
 
   const markAsRead = (id: string) => {
-    setNotifications((current) => 
-      current?.map(n => n.id === id ? { ...n, read: true } : n) || []
+    const updatedNotifications = notifications.map(n => 
+      n.id === id ? { ...n, read: true } : n
     )
+    setNotifications(updatedNotifications)
   }
 
   const markAllAsRead = () => {
-    setNotifications((current) => 
-      current?.map(n => ({ ...n, read: true })) || []
-    )
+    const updatedNotifications = notifications.map(n => ({ ...n, read: true }))
+    setNotifications(updatedNotifications)
   }
 
   const deleteNotification = (id: string) => {
-    setNotifications((current) => 
-      current?.filter(n => n.id !== id) || []
-    )
+    const updatedNotifications = notifications.filter(n => n.id !== id)
+    setNotifications(updatedNotifications)
   }
 
   const clearAll = () => {

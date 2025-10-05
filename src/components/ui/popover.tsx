@@ -1,6 +1,6 @@
 "use client"
 
-import { ComponentProps } from "react"
+import { ComponentProps, forwardRef } from "react"
 import * as PopoverPrimitive from "@radix-ui/react-popover"
 
 import { cn } from "@/lib/utils"
@@ -11,21 +11,22 @@ function Popover({
   return <PopoverPrimitive.Root data-slot="popover" {...props} />
 }
 
-function PopoverTrigger({
-  ...props
-}: ComponentProps<typeof PopoverPrimitive.Trigger>) {
-  return <PopoverPrimitive.Trigger data-slot="popover-trigger" {...props} />
-}
+const PopoverTrigger = forwardRef<
+  React.ElementRef<typeof PopoverPrimitive.Trigger>,
+  ComponentProps<typeof PopoverPrimitive.Trigger>
+>(({ ...props }, ref) => {
+  return <PopoverPrimitive.Trigger ref={ref} data-slot="popover-trigger" {...props} />
+})
+PopoverTrigger.displayName = "PopoverTrigger"
 
-function PopoverContent({
-  className,
-  align = "center",
-  sideOffset = 4,
-  ...props
-}: ComponentProps<typeof PopoverPrimitive.Content>) {
+const PopoverContent = forwardRef<
+  React.ElementRef<typeof PopoverPrimitive.Content>,
+  ComponentProps<typeof PopoverPrimitive.Content>
+>(({ className, align = "center", sideOffset = 4, ...props }, ref) => {
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Content
+        ref={ref}
         data-slot="popover-content"
         align={align}
         sideOffset={sideOffset}
@@ -37,12 +38,15 @@ function PopoverContent({
       />
     </PopoverPrimitive.Portal>
   )
-}
+})
+PopoverContent.displayName = "PopoverContent"
 
-function PopoverAnchor({
-  ...props
-}: ComponentProps<typeof PopoverPrimitive.Anchor>) {
-  return <PopoverPrimitive.Anchor data-slot="popover-anchor" {...props} />
-}
+const PopoverAnchor = forwardRef<
+  React.ElementRef<typeof PopoverPrimitive.Anchor>,
+  ComponentProps<typeof PopoverPrimitive.Anchor>
+>(({ ...props }, ref) => {
+  return <PopoverPrimitive.Anchor ref={ref} data-slot="popover-anchor" {...props} />
+})
+PopoverAnchor.displayName = "PopoverAnchor"
 
 export { Popover, PopoverTrigger, PopoverContent, PopoverAnchor }

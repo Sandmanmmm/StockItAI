@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+// Force rebuild: Updated supplier metrics calculation
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
@@ -49,6 +50,8 @@ import {
 } from '@phosphor-icons/react'
 import { useSuppliers } from '../hooks/useMerchantData'
 import { safeFormatDate, safeFormatTime } from '@/lib/utils'
+import SupplierMetricsCard from './SupplierMetricsCard'
+import CreateSupplierDialog from './CreateSupplierDialog'
 
 interface Supplier {
   id: string
@@ -67,6 +70,7 @@ interface Supplier {
 
 interface ActiveSuppliersProps {
   onBack: () => void
+  initialSupplierId?: string
 }
 
 const containerVariants = {
@@ -84,15 +88,29 @@ const cardVariants = {
   visible: { y: 0, opacity: 1 }
 }
 
-export function ActiveSuppliers({ onBack }: ActiveSuppliersProps) {
+export function ActiveSuppliers({ onBack, initialSupplierId }: ActiveSuppliersProps) {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null)
   const [showConfig, setShowConfig] = useState(false)
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [sortBy, setSortBy] = useState<string>('name')
+  
+  // Track if we've already auto-selected to prevent re-opening
+  const hasAutoSelectedRef = useRef(false)
 
   // Use authenticated hook for suppliers data
   const { suppliers, total, loading, error, refetch } = useSuppliers()
+
+  // Auto-select supplier if initialSupplierId is provided (only once)
+  useEffect(() => {
+    if (initialSupplierId && suppliers && suppliers.length > 0 && !hasAutoSelectedRef.current) {
+      const supplier = suppliers.find(s => s.id === initialSupplierId)
+      if (supplier) {
+        setSelectedSupplier(supplier)
+        hasAutoSelectedRef.current = true
+      }
+    }
+  }, [initialSupplierId, suppliers])
 
   // Loading state
   if (loading) {
@@ -242,23 +260,7 @@ export function ActiveSuppliers({ onBack }: ActiveSuppliersProps) {
             <Download className="w-4 h-4 mr-2" />
             Export
           </Button>
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button size="sm">
-                <Plus className="w-4 h-4 mr-2" />
-                Add Supplier
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-5xl max-h-[80vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Add New Supplier</DialogTitle>
-                <DialogDescription>
-                  Configure a new supplier connection and sync settings
-                </DialogDescription>
-              </DialogHeader>
-              <SupplierConfigForm />
-            </DialogContent>
-          </Dialog>
+          <CreateSupplierDialog onSuccess={() => refetch()} />
         </div>
       </div>
 
@@ -561,6 +563,11 @@ function SupplierDetailView({ supplier }: { supplier: Supplier }) {
           <TabsTrigger value="configuration">Configuration</TabsTrigger>
           <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
+
+        {/* Performance Metrics Tab */}
+        <TabsContent value="performance" className="mt-4">
+          <SupplierMetricsCard supplierId={supplier.id} />
+        </TabsContent>
 
         <TabsContent value="overview" className="space-y-4 mt-4">
           <div className="grid grid-cols-2 gap-6">

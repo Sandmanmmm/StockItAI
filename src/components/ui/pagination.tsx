@@ -1,4 +1,4 @@
-import { ComponentProps } from "react"
+import { ComponentProps, forwardRef } from "react"
 import ChevronLeftIcon from "lucide-react/dist/esm/icons/chevron-left"
 import ChevronRightIcon from "lucide-react/dist/esm/icons/chevron-right"
 import MoreHorizontalIcon from "lucide-react/dist/esm/icons/more-horizontal"
@@ -6,34 +6,42 @@ import MoreHorizontalIcon from "lucide-react/dist/esm/icons/more-horizontal"
 import { cn } from "@/lib/utils"
 import { Button, buttonVariants } from "@/components/ui/button"
 
-function Pagination({ className, ...props }: ComponentProps<"nav">) {
-  return (
-    <nav
-      role="navigation"
-      aria-label="pagination"
-      data-slot="pagination"
-      className={cn("mx-auto flex w-full justify-center", className)}
-      {...props}
-    />
-  )
-}
+const Pagination = forwardRef<HTMLElement, ComponentProps<"nav">>(
+  ({ className, ...props }, ref) => {
+    return (
+      <nav
+        ref={ref}
+        role="navigation"
+        aria-label="pagination"
+        data-slot="pagination"
+        className={cn("mx-auto flex w-full justify-center", className)}
+        {...props}
+      />
+    )
+  }
+)
+Pagination.displayName = "Pagination"
 
-function PaginationContent({
-  className,
-  ...props
-}: ComponentProps<"ul">) {
-  return (
-    <ul
-      data-slot="pagination-content"
-      className={cn("flex flex-row items-center gap-1", className)}
-      {...props}
-    />
-  )
-}
+const PaginationContent = forwardRef<HTMLUListElement, ComponentProps<"ul">>(
+  ({ className, ...props }, ref) => {
+    return (
+      <ul
+        ref={ref}
+        data-slot="pagination-content"
+        className={cn("flex flex-row items-center gap-1", className)}
+        {...props}
+      />
+    )
+  }
+)
+PaginationContent.displayName = "PaginationContent"
 
-function PaginationItem({ ...props }: ComponentProps<"li">) {
-  return <li data-slot="pagination-item" {...props} />
-}
+const PaginationItem = forwardRef<HTMLLIElement, ComponentProps<"li">>(
+  ({ ...props }, ref) => {
+    return <li ref={ref} data-slot="pagination-item" {...props} />
+  }
+)
+PaginationItem.displayName = "PaginationItem"
 
 type PaginationLinkProps = {
   isActive?: boolean

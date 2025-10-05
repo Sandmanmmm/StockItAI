@@ -22,12 +22,47 @@ import { SupabaseStorageService } from './storageService.js'
 import { processorRegistrationService } from './processorRegistrationService.js'
 import { FileParsingService } from './fileParsingService.js'
 import { stageResultStore } from './stageResultStore.js'
+import { SimpleProductDraftService } from '../services/simpleProductDraftService.js'
+import { RefinementConfigService } from '../services/refinementConfigService.js'
+import { RefinementPipelineService } from './refinementPipelineService.js'
+
+/**
+ * Convert BigInt values to strings for JSON serialization
+ * Bull queue and Redis require JSON-serializable data
+ */
+function sanitizeBigInt(obj) {
+  if (obj === null || obj === undefined) return obj
+  
+  if (typeof obj === 'bigint') {
+    return obj.toString()
+  }
+  
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeBigInt(item))
+  }
+  
+  if (typeof obj === 'object') {
+    const sanitized = {}
+    for (const [key, value] of Object.entries(obj)) {
+      sanitized[key] = sanitizeBigInt(value)
+    }
+    return sanitized
+  }
+  
+  return obj
+}
 
 // Workflow Stage Definitions
 export const WORKFLOW_STAGES = {
   FILE_UPLOAD: 'file_upload',
   AI_PARSING: 'ai_parsing', 
   DATABASE_SAVE: 'database_save',
+  DATA_NORMALIZATION: 'data_normalization',
+  MERCHANT_CONFIG: 'merchant_config',
+  AI_ENRICHMENT: 'ai_enrichment',
+  SHOPIFY_PAYLOAD: 'shopify_payload',
+  PRODUCT_DRAFT_CREATION: 'product_draft_creation',
+  IMAGE_ATTACHMENT: 'image_attachment',
   SHOPIFY_SYNC: 'shopify_sync',
   STATUS_UPDATE: 'status_update',
   COMPLETED: 'completed',
@@ -39,6 +74,12 @@ const STAGE_MESSAGES = {
   [WORKFLOW_STAGES.FILE_UPLOAD]: 'File uploaded successfully',
   [WORKFLOW_STAGES.AI_PARSING]: 'AI is analyzing your purchase order...',
   [WORKFLOW_STAGES.DATABASE_SAVE]: 'Saving purchase order data...',
+  [WORKFLOW_STAGES.DATA_NORMALIZATION]: 'Normalizing product data...',
+  [WORKFLOW_STAGES.MERCHANT_CONFIG]: 'Applying merchant configuration rules...',
+  [WORKFLOW_STAGES.AI_ENRICHMENT]: 'Enriching products with AI descriptions and images...',
+  [WORKFLOW_STAGES.SHOPIFY_PAYLOAD]: 'Preparing Shopify-ready product data...',
+  [WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION]: 'Creating product drafts for refinement...',
+  [WORKFLOW_STAGES.IMAGE_ATTACHMENT]: 'Searching and attaching product images...',
   [WORKFLOW_STAGES.SHOPIFY_SYNC]: 'Syncing with Shopify...',
   [WORKFLOW_STAGES.STATUS_UPDATE]: 'Finalizing...',
   [WORKFLOW_STAGES.COMPLETED]: 'Purchase order processed successfully',
@@ -54,6 +95,8 @@ export class WorkflowOrchestrator {
     this.dbService = new DatabasePersistenceService()
     this.storageService = new SupabaseStorageService()
     this.fileParsingService = new FileParsingService()
+    this.productDraftService = new SimpleProductDraftService(db.client)
+    this.refinementConfigService = new RefinementConfigService(db.client)
   }
 
   /**
@@ -202,6 +245,11 @@ export class WorkflowOrchestrator {
       stages: {
         [WORKFLOW_STAGES.AI_PARSING]: { status: 'pending' },
         [WORKFLOW_STAGES.DATABASE_SAVE]: { status: 'pending' },
+        [WORKFLOW_STAGES.DATA_NORMALIZATION]: { status: 'pending' },
+        [WORKFLOW_STAGES.MERCHANT_CONFIG]: { status: 'pending' },
+        [WORKFLOW_STAGES.AI_ENRICHMENT]: { status: 'pending' },
+        [WORKFLOW_STAGES.SHOPIFY_PAYLOAD]: { status: 'pending' },
+        [WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION]: { status: 'pending' },
         [WORKFLOW_STAGES.SHOPIFY_SYNC]: { status: 'pending' },
         [WORKFLOW_STAGES.STATUS_UPDATE]: { status: 'pending' }
       },
@@ -252,7 +300,8 @@ export class WorkflowOrchestrator {
       await this.updateWorkflowStage(workflowId, stage, 'processing')
       
       // Add job to appropriate queue with enriched data
-      const jobData = { workflowId, stage, data: enrichedData }
+      // Sanitize BigInt values for Bull queue serialization
+      const jobData = sanitizeBigInt({ workflowId, stage, data: enrichedData })
       
       switch (stage) {
         case WORKFLOW_STAGES.AI_PARSING:
@@ -260,6 +309,24 @@ export class WorkflowOrchestrator {
           break
         case WORKFLOW_STAGES.DATABASE_SAVE:
           await processorRegistrationService.addJob('database-save', jobData)
+          break
+        case WORKFLOW_STAGES.DATA_NORMALIZATION:
+          await processorRegistrationService.addJob('data-normalization', jobData)
+          break
+        case WORKFLOW_STAGES.MERCHANT_CONFIG:
+          await processorRegistrationService.addJob('merchant-config', jobData)
+          break
+        case WORKFLOW_STAGES.AI_ENRICHMENT:
+          await processorRegistrationService.addJob('ai-enrichment', jobData)
+          break
+        case WORKFLOW_STAGES.SHOPIFY_PAYLOAD:
+          await processorRegistrationService.addJob('shopify-payload', jobData)
+          break
+        case WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION:
+          await processorRegistrationService.addJob('product-draft-creation', jobData)
+          break
+        case WORKFLOW_STAGES.IMAGE_ATTACHMENT:
+          await processorRegistrationService.addJob('image-attachment', jobData)
           break
         case WORKFLOW_STAGES.SHOPIFY_SYNC:
           await processorRegistrationService.addJob('shopify-sync', jobData)
@@ -281,7 +348,8 @@ export class WorkflowOrchestrator {
       await this.updateWorkflowStage(workflowId, stage, 'processing')
       
       // Add job to appropriate queue
-      const jobData = { workflowId, stage, data }
+      // Sanitize BigInt values for Bull queue serialization
+      const jobData = sanitizeBigInt({ workflowId, stage, data })
       
       switch (stage) {
         case WORKFLOW_STAGES.AI_PARSING:
@@ -289,6 +357,24 @@ export class WorkflowOrchestrator {
           break
         case WORKFLOW_STAGES.DATABASE_SAVE:
           await processorRegistrationService.addJob('database-save', jobData)
+          break
+        case WORKFLOW_STAGES.DATA_NORMALIZATION:
+          await processorRegistrationService.addJob('data-normalization', jobData)
+          break
+        case WORKFLOW_STAGES.MERCHANT_CONFIG:
+          await processorRegistrationService.addJob('merchant-config', jobData)
+          break
+        case WORKFLOW_STAGES.AI_ENRICHMENT:
+          await processorRegistrationService.addJob('ai-enrichment', jobData)
+          break
+        case WORKFLOW_STAGES.SHOPIFY_PAYLOAD:
+          await processorRegistrationService.addJob('shopify-payload', jobData)
+          break
+        case WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION:
+          await processorRegistrationService.addJob('product-draft-creation', jobData)
+          break
+        case WORKFLOW_STAGES.IMAGE_ATTACHMENT:
+          await processorRegistrationService.addJob('image-attachment', jobData)
           break
         case WORKFLOW_STAGES.SHOPIFY_SYNC:
           await processorRegistrationService.addJob('shopify-sync', jobData)
@@ -417,6 +503,46 @@ export class WorkflowOrchestrator {
   }
 
   /**
+   * Update purchase order with real-time progress information
+   * This makes progress visible to the frontend via Supabase
+   * @param {string} purchaseOrderId - Purchase order ID
+   * @param {string} stage - Current stage
+   * @param {number} progress - Progress percentage (0-100)
+   * @param {number} itemsProcessed - Number of items processed
+   * @param {number} totalItems - Total number of items
+   */
+  async updatePurchaseOrderProgress(purchaseOrderId, stage, progress, itemsProcessed = 0, totalItems = 0) {
+    if (!purchaseOrderId) return
+    
+    try {
+      const stageName = STAGE_MESSAGES[stage] || stage
+      const progressNote = totalItems > 0 
+        ? `${stageName} - ${itemsProcessed}/${totalItems} items (${progress}% complete)`
+        : `${stageName} - ${progress}% complete`
+      
+      await db.client.purchaseOrder.update({
+        where: { id: purchaseOrderId },
+        data: {
+          processingNotes: JSON.stringify({
+            currentStep: stageName,
+            progress: progress,
+            itemsProcessed: itemsProcessed,
+            totalItems: totalItems,
+            message: progressNote,
+            updatedAt: new Date().toISOString()
+          }),
+          updatedAt: new Date()
+        }
+      })
+      
+      console.log(`📊 Updated PO ${purchaseOrderId} progress: ${progressNote}`)
+    } catch (error) {
+      // Don't fail the workflow if progress update fails
+      console.error(`⚠️ Failed to update PO progress:`, error.message)
+    }
+  }
+
+  /**
    * Get workflow status
    * @param {string} workflowId - Workflow ID
    * @returns {Object} - Workflow status
@@ -465,6 +591,13 @@ export class WorkflowOrchestrator {
       mimeType,
       options 
     })
+
+    // Get purchaseOrderId from workflow metadata for progress updates
+    const workflowMetadata = await this.getWorkflowMetadata(workflowId)
+    const purchaseOrderId = workflowMetadata?.data?.purchaseOrderId || data.purchaseOrderId
+    
+    // Update progress: Starting AI parsing
+    await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.AI_PARSING, 5)
 
     // Get file content for processing
     let contentForProcessing
@@ -563,6 +696,9 @@ export class WorkflowOrchestrator {
     
     job.progress(10)
     
+    // Update DB progress: Parsing document
+    await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.AI_PARSING, 10)
+    
     try {
       // Determine which parsing service to use based on file type
       const fileExtension = fileName.split('.').pop().toLowerCase()
@@ -570,6 +706,9 @@ export class WorkflowOrchestrator {
       
       // Parse document with AI service
       job.progress(30)
+      
+      // Update DB progress: AI analyzing
+      await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.AI_PARSING, 30)
       
       // Use original file buffer for AI service if available, otherwise use processed content
       const aiServiceInput = fileBuffer || contentForProcessing
@@ -605,6 +744,9 @@ export class WorkflowOrchestrator {
       console.log('   Confidence:', `${((confidence || 0) * 100).toFixed(1)}%`)
       
       job.progress(90)
+      
+      // Update DB progress: AI parsing complete
+      await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.AI_PARSING, 90)
       
       // Save AI result to stage store and prepare next stage data
       const stageResult = {
@@ -671,12 +813,19 @@ export class WorkflowOrchestrator {
     
     job.progress(10)
     
+    // Get purchaseOrderId for progress updates
+    const purchaseOrderId = data.purchaseOrderId
+    await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.DATABASE_SAVE, 10)
+    
     try {
       // Get merchant ID (defaulting to a test merchant for now)
       const merchantId = data.merchantId || 'cmft3moy50000ultcbqgxzz6d' // Default test merchant
       
       console.log('💾 Persisting AI results to database...')
       job.progress(30)
+      
+      // Update DB progress: Saving to database
+      await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.DATABASE_SAVE, 30)
       
       // Save AI results to database
       const dbResult = await this.dbService.persistAIResults(
@@ -697,6 +846,10 @@ export class WorkflowOrchestrator {
       
       job.progress(90)
       
+      // Update DB progress: Database save complete
+      const newPurchaseOrderId = dbResult.purchaseOrder?.id || purchaseOrderId
+      await this.updatePurchaseOrderProgress(newPurchaseOrderId, WORKFLOW_STAGES.DATABASE_SAVE, 90)
+      
       // Update workflow metadata (non-fatal if fails)
       try {
         await this.updateWorkflowStage(workflowId, WORKFLOW_STAGES.DATABASE_SAVE, 'completed')
@@ -706,7 +859,7 @@ export class WorkflowOrchestrator {
         // Continue processing - database save was successful
       }
       
-      console.log('🚀 FORCING SHOPIFY SYNC - Database save completed, always scheduling Shopify sync')
+      console.log('🚀 DATABASE SAVE COMPLETED - Scheduling Product Draft Creation')
       console.log('   dbResult.purchaseOrder exists:', !!dbResult.purchaseOrder)
       console.log('   dbResult.purchaseOrder.id:', dbResult.purchaseOrder?.id)
       
@@ -736,14 +889,14 @@ export class WorkflowOrchestrator {
         nextStageData
       )
       
-      console.log('📋 About to schedule Shopify sync with enriched data:', {
+      console.log('📋 About to schedule Product Draft Creation with enriched data:', {
         workflowId,
         hasDbResult: !!enrichedNextStageData.dbResult,
         hasAiResult: !!enrichedNextStageData.aiResult,
         purchaseOrderId: enrichedNextStageData.purchaseOrderId
       })
       
-      await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.SHOPIFY_SYNC, enrichedNextStageData)
+      await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.DATA_NORMALIZATION, enrichedNextStageData)
       
       job.progress(100)
       
@@ -751,12 +904,462 @@ export class WorkflowOrchestrator {
         success: true,
         stage: WORKFLOW_STAGES.DATABASE_SAVE,
         dbResult,
-        nextStage: WORKFLOW_STAGES.SHOPIFY_SYNC // Always go to Shopify sync for now
+        nextStage: WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION
       }
       
     } catch (error) {
       console.error('❌ Database save failed:', error)
       await this.failWorkflow(workflowId, WORKFLOW_STAGES.DATABASE_SAVE, error)
+      throw error
+    }
+  }
+
+  /**
+   * Process Product Draft Creation stage
+   * @param {Object} job - Bull job object
+   */
+  async processProductDraftCreation(job) {
+    console.log('🎨 processProductDraftCreation - Starting...')
+    
+    const { workflowId, data } = job.data
+    const { aiResult, dbResult, purchaseOrderId, merchantId } = data
+    
+    console.log('🎨 Product Draft Creation data:', { 
+      workflowId, 
+      purchaseOrderId,
+      merchantId,
+      hasAiResult: !!aiResult,
+      hasDbResult: !!dbResult
+    })
+
+    try {
+      job.progress(10)
+
+      // Validate required data
+      if (!dbResult?.purchaseOrder) {
+        throw new Error('No purchase order data available for product draft creation')
+      }
+
+      const purchaseOrder = dbResult.purchaseOrder
+      
+      // Get the saved line items from the database
+      const lineItemsFromDb = await db.client.pOLineItem.findMany({
+        where: { purchaseOrderId: purchaseOrder.id }
+      })
+      
+      if (!lineItemsFromDb || lineItemsFromDb.length === 0) {
+        throw new Error('No line items found in database for this purchase order')
+      }
+
+      console.log(`📦 Creating product drafts for ${lineItemsFromDb.length} line items`)
+
+      job.progress(30)
+      
+      // Update DB progress: Creating product drafts
+      await this.updatePurchaseOrderProgress(
+        purchaseOrder.id, 
+        WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION, 
+        30,
+        0,
+        lineItemsFromDb.length
+      )
+
+      // Create product drafts for each line item
+      const productDrafts = []
+      
+      for (let index = 0; index < lineItemsFromDb.length; index++) {
+        const lineItem = lineItemsFromDb[index]
+        
+        try {
+          console.log(`🎨 Creating product draft for line item ${index + 1}:`, {
+            sku: lineItem.sku,
+            productName: lineItem.productName,
+            unitCost: lineItem.unitCost
+          })
+
+          // Check if a product draft already exists for this line item
+          const existingDraft = await db.client.productDraft.findUnique({
+            where: { lineItemId: lineItem.id }
+          });
+
+          if (existingDraft) {
+            console.log(`⏭️ Product draft already exists for line item ${lineItem.id}, skipping...`)
+            productDrafts.push(existingDraft)
+            continue
+          }
+
+          // Find a session for this merchant (required by our schema)
+          const session = await db.client.session.findFirst({
+            where: { merchantId: merchantId }
+          });
+
+          if (!session) {
+            throw new Error(`No session found for merchant ${merchantId}`)
+          }
+
+          // Apply refinement rules to pricing
+          console.log(`🔧 Applying refinement rules for merchant ${merchantId}...`)
+          const refinementResult = await this.refinementConfigService.testPricingRules(merchantId, {
+            title: lineItem.productName || `Product from PO ${purchaseOrder.number}`,
+            price: (lineItem.unitCost || 0).toString(),
+            sku: lineItem.sku || '',
+            description: lineItem.description || ''
+          })
+
+          const originalPrice = lineItem.unitCost || 0
+          // Ensure priceRefined is always a Float, not a string
+          const priceRefined = parseFloat(refinementResult.adjustedPrice) || (originalPrice > 0 ? originalPrice * 1.5 : 0)
+          const estimatedMargin = originalPrice > 0 && priceRefined > originalPrice 
+            ? ((priceRefined - originalPrice) / priceRefined) * 100 
+            : 0
+
+          // Create review notes with applied rules information
+          let reviewNotes = `Auto-generated from PO processing with ${Math.round((aiResult?.confidence?.overall || aiResult?.confidence || 0) * 100)}% AI confidence`
+          if (refinementResult.appliedRules && refinementResult.appliedRules.length > 0) {
+            const rulesDescription = refinementResult.appliedRules.map(rule => rule.description).join(', ')
+            reviewNotes += `\nRefinement rules applied: ${rulesDescription}`
+          }
+
+          console.log(`💰 Pricing calculation for ${lineItem.productName}:`, {
+            originalPrice,
+            priceRefined,
+            appliedRules: refinementResult.appliedRules?.length || 0,
+            estimatedMargin: estimatedMargin.toFixed(1) + '%'
+          })
+
+          const productDraft = await this.productDraftService.createProductDraft({
+            sessionId: session.id,
+            merchantId: merchantId,
+            purchaseOrderId: purchaseOrder.id,
+            lineItemId: lineItem.id,
+            supplierId: purchaseOrder.supplierId,
+            originalTitle: lineItem.productName || `Product from PO ${purchaseOrder.number}`,
+            originalDescription: lineItem.description || `Product imported from Purchase Order ${purchaseOrder.number}`,
+            originalPrice: originalPrice,
+            priceRefined: priceRefined,
+            estimatedMargin: estimatedMargin,
+            reviewNotes: reviewNotes
+          })
+
+          productDrafts.push(productDraft)
+          console.log(`✅ Created product draft: ${productDraft.originalTitle} (ID: ${productDraft.id})`)
+          
+        } catch (itemError) {
+          console.error(`❌ Failed to create product draft for item ${index}:`, itemError)
+          // Continue with other items - don't fail the entire stage for one item
+        }
+
+        // Update progress
+        job.progress(30 + (index / lineItemsFromDb.length) * 50)
+        
+        // Update DB progress with item counts
+        const currentProgress = Math.round(30 + (index / lineItemsFromDb.length) * 50)
+        await this.updatePurchaseOrderProgress(
+          purchaseOrder.id,
+          WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION,
+          currentProgress,
+          index + 1,
+          lineItemsFromDb.length
+        )
+      }
+
+      console.log(`🎨 Successfully created ${productDrafts.length} product drafts`)
+
+      job.progress(85)
+
+      // Update workflow metadata
+      await this.updateWorkflowStage(workflowId, WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION, 'completed')
+
+      // Save product draft creation result to stage store and prepare next stage data
+      const stageResult = {
+        productDrafts,
+        productDraftCount: productDrafts.length,
+        purchaseOrderId,
+        merchantId,
+        timestamp: new Date().toISOString(),
+        stage: WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION
+      }
+
+      const nextStageData = {
+        ...data,
+        productDrafts,
+        productDraftCreationResult: stageResult
+      }
+
+      // Save and accumulate data for next stage
+      const enrichedNextStageData = await this.saveAndAccumulateStageData(
+        workflowId,
+        WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION,
+        stageResult,
+        nextStageData
+      )
+
+      // Continue to image search and attachment stage
+      console.log('🎯 Product Draft Creation completed - Proceeding to image search...')
+      
+      // Schedule image search stage to find and attach product images
+      await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.IMAGE_ATTACHMENT, enrichedNextStageData)
+
+      job.progress(90)
+
+      return {
+        success: true,
+        stage: WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION,
+        productDrafts,
+        productDraftCount: productDrafts.length,
+        nextStage: WORKFLOW_STAGES.STATUS_UPDATE
+      }
+
+    } catch (error) {
+      console.error('❌ Product Draft Creation failed:', error)
+      await this.failWorkflow(workflowId, WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION, error)
+      throw error
+    }
+  }
+
+  /**
+   * Process Image Attachment stage
+   * Search for images and attach them to product drafts
+   * @param {Object} job - Bull job object
+   */
+  async processImageAttachment(job) {
+    console.log('🖼️ processImageAttachment - Starting image search and attachment...')
+    
+    const { workflowId, data } = job.data
+    const { purchaseOrderId, productDrafts } = data
+    
+    console.log(`🖼️ Image attachment data:`, { 
+      workflowId, 
+      purchaseOrderId,
+      productDraftCount: productDrafts?.length
+    })
+    
+    job.progress(10)
+    
+    // Update DB progress: Starting image search
+    await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.IMAGE_ATTACHMENT, 10)
+    
+    try {
+      if (!purchaseOrderId) {
+        throw new Error('No purchase order ID found for image attachment')
+      }
+
+      if (!productDrafts || productDrafts.length === 0) {
+        throw new Error('No product drafts found for image attachment')
+      }
+
+      // Get product drafts from database to ensure we have latest data
+      const draftsFromDb = await db.client.productDraft.findMany({
+        where: { purchaseOrderId },
+        include: {
+          lineItem: true,
+          images: true
+        }
+      })
+
+      console.log(`🖼️ Found ${draftsFromDb.length} product drafts to process`)
+      
+      job.progress(20)
+      
+      // Update DB progress: Searching for images
+      await this.updatePurchaseOrderProgress(
+        purchaseOrderId,
+        WORKFLOW_STAGES.IMAGE_ATTACHMENT,
+        20,
+        0,
+        draftsFromDb.length
+      )
+
+      // Import the image processing service
+      const { ImageProcessingService } = await import('./imageProcessingService.js')
+      const imageService = new ImageProcessingService()
+
+      let processedCount = 0
+      let imagesFoundCount = 0
+
+      // Process each draft to find and attach images
+      for (const [index, draft] of draftsFromDb.entries()) {
+        try {
+          console.log(`🔍 [${index + 1}/${draftsFromDb.length}] Searching images for: ${draft.originalTitle}`)
+          
+          // Prepare item data for image search (matching the format expected by imageProcessingService)
+          const itemForSearch = {
+            sku: draft.lineItem?.sku || '',
+            productName: draft.originalTitle,
+            brand: draft.lineItem?.brand || '',
+            quantity: draft.lineItem?.quantity || 1,
+            unitCost: draft.originalPrice || 0
+          }
+
+          // Search for images using web scraping
+          const images = await imageService.searchGoogleProductImages(itemForSearch)
+          
+          if (images && images.length > 0) {
+            console.log(`   ✅ Found ${images.length} images via scraping`)
+            imagesFoundCount++
+
+            // Save images to database
+            for (const [imgIndex, image] of images.slice(0, 3).entries()) {  // Top 3 images
+              await db.client.productImage.create({
+                data: {
+                  productDraftId: draft.id,
+                  originalUrl: image.url,
+                  altText: draft.originalTitle,
+                  position: imgIndex,
+                  isEnhanced: false,
+                  enhancementData: {
+                    source: image.source || 'google_images_scraping',
+                    confidence: image.confidence || 0.5,
+                    searchQuery: image.searchQuery || itemForSearch.productName,
+                    originalSearchResult: true
+                  }
+                }
+              })
+            }
+            
+            console.log(`   💾 Saved ${Math.min(3, images.length)} images to database`)
+          } else {
+            console.log(`   ⚠️ No images found for: ${draft.originalTitle}`)
+          }
+
+          processedCount++
+          job.progress(20 + (processedCount / draftsFromDb.length) * 60)
+          
+          // Update DB progress with item counts
+          const currentProgress = Math.round(20 + (processedCount / draftsFromDb.length) * 60)
+          await this.updatePurchaseOrderProgress(
+            purchaseOrderId,
+            WORKFLOW_STAGES.IMAGE_ATTACHMENT,
+            currentProgress,
+            processedCount,
+            draftsFromDb.length
+          )
+
+        } catch (itemError) {
+          console.error(`   ❌ Failed to process images for draft ${draft.id}:`, itemError.message)
+          // Continue with next item
+        }
+      }
+
+      console.log(`🖼️ Image attachment completed:`)
+      console.log(`   - Processed: ${processedCount}/${draftsFromDb.length} drafts`)
+      console.log(`   - Images found for: ${imagesFoundCount} products`)
+
+      job.progress(85)
+
+      // Create image review session for merchant
+      const { MerchantImageReviewService } = await import('./merchantImageReviewService.js')
+      const reviewService = new MerchantImageReviewService()
+
+      try {
+        // Try to get merchantId from multiple sources
+        let merchantId = data.merchantId
+        if (!merchantId) {
+          const dbResult = await stageResultStore.getStageResult(workflowId, 'database_save')
+          merchantId = dbResult?.merchantId
+        }
+        if (!merchantId) {
+          const accumulatedData = await stageResultStore.getAccumulatedData(workflowId)
+          merchantId = accumulatedData?.merchantId || accumulatedData?.dbResult?.merchantId
+        }
+
+        console.log(`🖼️ Image review session - merchantId: ${merchantId}, imagesFoundCount: ${imagesFoundCount}`)
+
+        if (merchantId && imagesFoundCount > 0) {
+          // Get all images for this PO
+          const allImages = await db.client.productImage.findMany({
+            where: {
+              productDraft: {
+                purchaseOrderId
+              }
+            },
+            include: {
+              productDraft: {
+                include: {
+                  lineItem: true
+                }
+              }
+            }
+          })
+
+          console.log(`🖼️ Found ${allImages.length} images in database for review session`)
+
+          // Group images by product and format for review session
+          const productImageMap = new Map()
+          
+          for (const img of allImages) {
+            const productKey = img.productDraft.lineItem?.sku || img.productDraft.id
+            
+            if (!productImageMap.has(productKey)) {
+              productImageMap.set(productKey, {
+                lineItemId: img.productDraft.lineItem?.id || null,  // Add lineItemId for matching
+                sku: img.productDraft.lineItem?.sku || '',
+                productName: img.productDraft.originalTitle,
+                images: []
+              })
+            }
+            
+            const product = productImageMap.get(productKey)
+            product.images.push({
+              url: img.originalUrl,
+              type: product.images.length === 0 ? 'MAIN' : 'GALLERY',  // First image is MAIN, rest are GALLERY
+              source: 'WEB_SCRAPED',  // ImageSource enum value
+              confidence: img.enhancementData?.confidence || 0.5,
+              altText: img.altText || img.productDraft.originalTitle
+            })
+          }
+          
+          const imageResults = Array.from(productImageMap.values())
+
+          const reviewSession = await reviewService.createImageReviewSession({
+            purchaseOrderId,
+            merchantId,
+            lineItems: imageResults
+          })
+
+          console.log(`✅ Created image review session: ${reviewSession.sessionId}`)
+        } else {
+          console.log(`⚠️ Skipping review session creation - merchantId: ${merchantId}, imagesFoundCount: ${imagesFoundCount}`)
+        }
+      } catch (reviewError) {
+        console.error('⚠️ Failed to create image review session:', reviewError)
+        // Don't fail the workflow, just log the error
+      }
+
+      // Update workflow metadata
+      await this.updateWorkflowStage(workflowId, WORKFLOW_STAGES.IMAGE_ATTACHMENT, 'completed')
+
+      // Save stage result
+      const stageResult = {
+        processedDrafts: processedCount,
+        imagesFound: imagesFoundCount,
+        purchaseOrderId,
+        timestamp: new Date().toISOString()
+      }
+
+      const enrichedNextStageData = await this.saveAndAccumulateStageData(
+        workflowId,
+        WORKFLOW_STAGES.IMAGE_ATTACHMENT,
+        stageResult,
+        { ...data, imageAttachmentResult: stageResult }
+      )
+
+      // Continue to status update
+      console.log('🎯 Image Attachment completed - Proceeding to status update...')
+      await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.STATUS_UPDATE, enrichedNextStageData)
+
+      job.progress(100)
+
+      return {
+        success: true,
+        stage: WORKFLOW_STAGES.IMAGE_ATTACHMENT,
+        processedDrafts: processedCount,
+        imagesFound: imagesFoundCount
+      }
+
+    } catch (error) {
+      console.error('❌ Image Attachment failed:', error)
+      await this.failWorkflow(workflowId, WORKFLOW_STAGES.IMAGE_ATTACHMENT, error)
       throw error
     }
   }
@@ -1090,6 +1693,305 @@ export class WorkflowOrchestrator {
     }
   }
 
+  // ==========================================
+  // REFINEMENT PIPELINE PROCESSORS
+  // ==========================================
+
+  /**
+   * Data Normalization Stage - Clean and standardize line item data
+   */
+  async processDataNormalization(job) {
+    const { workflowId, data } = job.data
+    console.log('🔧 processDataNormalization - Starting normalization...')
+    
+    try {
+      job.progress(10)
+      
+      // Get accumulated workflow data
+      const accumulatedData = await stageResultStore.getAccumulatedData(workflowId)
+      const lineItems = accumulatedData.dbResult?.lineItems || []
+      
+      if (!lineItems.length) {
+        throw new Error('No line items found for normalization')
+      }
+
+      // Get merchant ID and fetch merchant config
+      const merchantId = data.merchantId || accumulatedData.dbResult?.merchantId || 'cmft3moy50000ultcbqgxzz6d'
+      console.log('🔧 Using merchant ID for normalization:', merchantId)
+      
+      // Get merchant config - use default config if not found
+      let merchantConfig = {
+        baseCurrency: 'USD',
+        defaultMarkup: 1.0,
+        settings: {}
+      }
+      
+      try {
+        const merchant = await db.client.merchant.findUnique({
+          where: { id: merchantId }
+        })
+        if (merchant) {
+          merchantConfig = {
+            baseCurrency: merchant.currency || 'USD',
+            defaultMarkup: merchant.settings?.defaultMarkup || 1.0,
+            settings: merchant.settings || {}
+          }
+        }
+      } catch (error) {
+        console.warn('⚠️ Could not fetch merchant config, using defaults:', error.message)
+      }
+      
+      job.progress(30)
+      
+      // Initialize pipeline service and normalize data
+      const pipelineService = new RefinementPipelineService()
+      const normalizedItems = await pipelineService.normalizeLineItems(lineItems, merchantConfig)
+      
+      job.progress(70)
+      
+      // Save stage results
+      const stageResult = { normalizedItems }
+      const enrichedNextStageData = await this.saveAndAccumulateStageData(
+        workflowId,
+        WORKFLOW_STAGES.DATA_NORMALIZATION,
+        stageResult,
+        { ...data, normalizedItems }
+      )
+      
+      job.progress(90)
+      
+      // Update workflow and schedule next stage
+      await this.updateWorkflowStage(workflowId, WORKFLOW_STAGES.DATA_NORMALIZATION, 'completed')
+      await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.MERCHANT_CONFIG, enrichedNextStageData)
+      
+      job.progress(100)
+      
+      return {
+        success: true,
+        stage: WORKFLOW_STAGES.DATA_NORMALIZATION,
+        normalizedItems: normalizedItems.length
+      }
+      
+    } catch (error) {
+      console.error('❌ Data normalization failed:', error)
+      await this.failWorkflow(workflowId, WORKFLOW_STAGES.DATA_NORMALIZATION, error)
+      throw error
+    }
+  }
+
+  /**
+   * Merchant Config Stage - Apply merchant pricing and business rules
+   */
+  async processMerchantConfig(job) {
+    const { workflowId, data } = job.data
+    console.log('⚙️ processMerchantConfig - Applying merchant configurations...')
+    
+    try {
+      job.progress(10)
+      
+      // Get accumulated workflow data
+      console.log(`🔍 [MERCHANT CONFIG] Getting accumulated data for workflow: ${workflowId}`)
+      const accumulatedData = await stageResultStore.getAccumulatedData(workflowId)
+      console.log(`📊 [MERCHANT CONFIG] Accumulated data:`, {
+        hasData: !!accumulatedData,
+        stages: accumulatedData?.stages ? Object.keys(accumulatedData.stages) : [],
+        normalizedItemsCount: accumulatedData?.normalizedItems?.length || 0,
+        purchaseOrderId: accumulatedData?.purchaseOrderId
+      })
+      
+      const normalizedItems = accumulatedData?.normalizedItems || []
+      console.log(`📋 [MERCHANT CONFIG] Normalized items count: ${normalizedItems.length}`)
+      
+      if (!normalizedItems.length) {
+        console.error(`❌ [MERCHANT CONFIG] No normalized items found. Accumulated data:`, JSON.stringify(accumulatedData, null, 2))
+        throw new Error('No normalized items found for merchant config')
+      }
+      
+      job.progress(30)
+      
+      // Get merchant ID from database save result
+      const dbResult = await stageResultStore.getStageResult(workflowId, 'database_save')
+      if (!dbResult?.merchantId) {
+        throw new Error('Could not find merchant ID from database save result')
+      }
+      const merchantId = dbResult.merchantId
+      console.log(`🏪 [MERCHANT CONFIG] Using merchant ID: ${merchantId}`)
+      
+      // Apply merchant configuration rules
+      const pipelineService = new RefinementPipelineService()
+      const configuredItems = await pipelineService.applyMerchantConfigs(normalizedItems, merchantId)
+      
+      job.progress(70)
+      
+      // Save stage results
+      const stageResult = { configuredItems }
+      const enrichedNextStageData = await this.saveAndAccumulateStageData(
+        workflowId,
+        WORKFLOW_STAGES.MERCHANT_CONFIG,
+        stageResult,
+        { ...data, configuredItems }
+      )
+      
+      job.progress(90)
+      
+      // Update workflow and schedule next stage
+      await this.updateWorkflowStage(workflowId, WORKFLOW_STAGES.MERCHANT_CONFIG, 'completed')
+      await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.AI_ENRICHMENT, enrichedNextStageData)
+      
+      job.progress(100)
+      
+      return {
+        success: true,
+        stage: WORKFLOW_STAGES.MERCHANT_CONFIG,
+        configuredItems: configuredItems.length
+      }
+      
+    } catch (error) {
+      console.error('❌ Merchant config failed:', error)
+      await this.failWorkflow(workflowId, WORKFLOW_STAGES.MERCHANT_CONFIG, error)
+      throw error
+    }
+  }
+
+  /**
+   * AI Enrichment Stage - Add AI-generated descriptions and images
+   */
+  async processAIEnrichment(job) {
+    const { workflowId, data } = job.data
+    console.log('🤖 processAIEnrichment - Starting AI enrichment...')
+    
+    try {
+      job.progress(10)
+      
+      // Get accumulated workflow data
+      const accumulatedData = await stageResultStore.getAccumulatedData(workflowId)
+      const configuredItems = accumulatedData.configuredItems || []
+      
+      if (!configuredItems.length) {
+        throw new Error('No configured items found for AI enrichment')
+      }
+      
+      job.progress(30)
+      
+      // Get merchant ID and purchase order data for AI enrichment
+      const dbResult = await stageResultStore.getStageResult(workflowId, 'database_save')
+      if (!dbResult?.merchantId || !dbResult?.purchaseOrderId) {
+        throw new Error('Could not find merchant ID or purchase order ID for AI enrichment')
+      }
+      
+      const purchaseOrderData = {
+        purchaseOrderId: dbResult.purchaseOrderId,
+        merchantId: dbResult.merchantId,
+        originalContent: dbResult.originalContent,
+        parsedData: dbResult.parsedData
+      }
+      
+      console.log(`🤖 [AI ENRICHMENT] Processing with merchant ${dbResult.merchantId} and PO ${dbResult.purchaseOrderId}`)
+      
+      // Apply AI enrichment (GPT descriptions, image sourcing)
+      const pipelineService = new RefinementPipelineService()
+      const enrichedItems = await pipelineService.enrichWithAI(configuredItems, dbResult.merchantId, purchaseOrderData)
+      
+      job.progress(70)
+      
+      // Save stage results
+      const stageResult = { enrichedItems }
+      const enrichedNextStageData = await this.saveAndAccumulateStageData(
+        workflowId,
+        WORKFLOW_STAGES.AI_ENRICHMENT,
+        stageResult,
+        { ...data, enrichedItems }
+      )
+      
+      job.progress(90)
+      
+      // Update workflow and schedule next stage
+      await this.updateWorkflowStage(workflowId, WORKFLOW_STAGES.AI_ENRICHMENT, 'completed')
+      await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.SHOPIFY_PAYLOAD, enrichedNextStageData)
+      
+      job.progress(100)
+      
+      return {
+        success: true,
+        stage: WORKFLOW_STAGES.AI_ENRICHMENT,
+        enrichedItems: enrichedItems.length
+      }
+      
+    } catch (error) {
+      console.error('❌ AI enrichment failed:', error)
+      await this.failWorkflow(workflowId, WORKFLOW_STAGES.AI_ENRICHMENT, error)
+      throw error
+    }
+  }
+
+  /**
+   * Shopify Payload Stage - Prepare final Shopify-ready product data
+   */
+  async processShopifyPayload(job) {
+    const { workflowId, data } = job.data
+    console.log('🛍️ processShopifyPayload - Preparing Shopify payload...')
+    
+    try {
+      job.progress(10)
+      
+      // Get accumulated workflow data
+      const accumulatedData = await stageResultStore.getAccumulatedData(workflowId)
+      const enrichedItems = accumulatedData.enrichedItems || []
+      
+      if (!enrichedItems.length) {
+        throw new Error('No enriched items found for Shopify payload preparation')
+      }
+      
+      // Get merchant ID from accumulated data (same pattern as other stages)
+      const merchantId = data.merchantId || accumulatedData.dbResult?.merchantId || 'cmft3moy50000ultcbqgxzz6d'
+      console.log('🔧 Using merchant ID for Shopify payload:', merchantId)
+      
+      job.progress(30)
+      
+      // Prepare Shopify-ready payload with merchantId
+      const pipelineService = new RefinementPipelineService()
+      const shopifyPayload = await pipelineService.prepareShopifyPayload(
+        enrichedItems, 
+        accumulatedData.purchaseOrderId,
+        merchantId
+      )
+      
+      job.progress(70)
+      
+      // Save stage results
+      const stageResult = { shopifyPayload }
+      const enrichedNextStageData = await this.saveAndAccumulateStageData(
+        workflowId,
+        WORKFLOW_STAGES.SHOPIFY_PAYLOAD,
+        stageResult,
+        { ...data, shopifyPayload }
+      )
+      
+      job.progress(90)
+      
+      // Update workflow and schedule next stage (back to original flow)
+      await this.updateWorkflowStage(workflowId, WORKFLOW_STAGES.SHOPIFY_PAYLOAD, 'completed')
+      await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION, enrichedNextStageData)
+      
+      job.progress(100)
+      
+      return {
+        success: true,
+        stage: WORKFLOW_STAGES.SHOPIFY_PAYLOAD,
+        productsReady: shopifyPayload.products?.length || 0
+      }
+      
+    } catch (error) {
+      console.error('❌ Shopify payload preparation failed:', error)
+      await this.failWorkflow(workflowId, WORKFLOW_STAGES.SHOPIFY_PAYLOAD, error)
+      throw error
+    }
+  }
+
+  // ==========================================
+  // END REFINEMENT PIPELINE PROCESSORS
+  // ==========================================
+
   /**
    * Generic job processor - routes to appropriate stage processor
    * @param {Object} job - Bull job object
@@ -1104,6 +2006,18 @@ export class WorkflowOrchestrator {
         return await this.processAIParsing(job)
       case WORKFLOW_STAGES.DATABASE_SAVE:
         return await this.processDatabaseSave(job)
+      case WORKFLOW_STAGES.DATA_NORMALIZATION:
+        return await this.processDataNormalization(job)
+      case WORKFLOW_STAGES.MERCHANT_CONFIG:
+        return await this.processMerchantConfig(job)
+      case WORKFLOW_STAGES.AI_ENRICHMENT:
+        return await this.processAIEnrichment(job)
+      case WORKFLOW_STAGES.SHOPIFY_PAYLOAD:
+        return await this.processShopifyPayload(job)
+      case WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION:
+        return await this.processProductDraftCreation(job)
+      case WORKFLOW_STAGES.IMAGE_ATTACHMENT:
+        return await this.processImageAttachment(job)
       case WORKFLOW_STAGES.SHOPIFY_SYNC:
         return await this.processShopifySync(job)
       case WORKFLOW_STAGES.STATUS_UPDATE:
