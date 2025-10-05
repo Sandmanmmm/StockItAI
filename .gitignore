@@ -55,7 +55,6 @@ debug-*.js
 debug-*.cjs
 fix-*.js
 monitor-*.js
-verify-*.js
 investigate-*.js
 examine-*.js
 compare-*.js
@@ -63,6 +62,10 @@ analyze-*.js
 trigger-*.js
 quick-test.js
 latest-test-result.txt
+
+# Allow deployment verification scripts
+!verify-vercel-deployment.js
+!verify-webhook-*.js
 
 # API test files
 api/test-*.js
