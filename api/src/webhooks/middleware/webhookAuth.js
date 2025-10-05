@@ -5,7 +5,7 @@
 
 import crypto from 'crypto'
 import rateLimit from 'express-rate-limit'
-import { webhookService } from '../lib/webhookService.js'
+import { webhookService } from '../../lib/webhookService.js'
 
 /**
  * Rate limiting for webhook endpoints
