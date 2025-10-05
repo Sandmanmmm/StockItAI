@@ -27,9 +27,11 @@ dist-ssr
 .env
 .env.local
 .env.production
+.env.production.vercel
 .env.development.local
 .env.test.local
 .env.production.local
+.env.check
 api/.env.local
 **/agent-eval-report*
 packages
@@ -168,3 +170,4 @@ api/supabase-setup-guide.js
 !WEBHOOK_DEPLOYMENT_STATUS.md
 !VERCEL_DEPLOYMENT_GUIDE.md
 !LICENSE
+.vercel
