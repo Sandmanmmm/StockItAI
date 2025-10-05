@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "build": "echo 'No build step required'",
+    "build": "prisma generate",
+    "postinstall": "prisma generate",
     "test": "echo 'No tests specified'"
   },
   "dependencies": {
@@ -39,7 +40,8 @@
     "redis": "^5.8.2",
     "sharp": "^0.34.4",
     "whatwg-url": "^15.1.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "prisma": "^6.16.2"
   },
   "devDependencies": {
     "nodemon": "^3.1.0",
