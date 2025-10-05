@@ -26,7 +26,7 @@ export async function verifyShopifyRequest(req, res, next) {
     const sessionToken = authHeader.substring(7) // Remove 'Bearer '
     
     // Validate the session token
-    const payload = validateSessionToken(sessionToken)
+    const payload = await validateSessionToken(sessionToken)
     if (!payload) {
       return res.status(401).json({
         success: false,
