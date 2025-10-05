@@ -14,9 +14,9 @@ export default defineConfig({
       '@': resolve(projectRoot, 'src')
     }
   },
-  // Configure build output for Express server
+  // Configure build output
   build: {
-    outDir: 'api/dist',
+    outDir: process.env.VERCEL ? 'dist' : 'api/dist',
     emptyOutDir: true,
     sourcemap: true
   },

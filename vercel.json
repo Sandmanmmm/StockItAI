@@ -1,38 +1,21 @@
 {
   "version": 2,
-  "name": "shopify-po-sync-pro",
-  "builds": [
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "installCommand": "npm install --include=dev && cd api && npm install",
+  "rewrites": [
     {
-      "src": "api/src/server.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "dist"
-      }
+      "source": "/api/:path*",
+      "destination": "/api/src/server.js"
     }
   ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/src/server.js"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/$1"
-    }
-  ],
-  "env": {
-    "NODE_ENV": "production"
-  },
   "functions": {
     "api/src/server.js": {
-      "maxDuration": 30
+      "maxDuration": 30,
+      "memory": 1024
     }
   },
-  "installCommand": "npm install && cd api && npm install",
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist"
+  "env": {
+    "NODE_ENV": "production"
+  }
 }
