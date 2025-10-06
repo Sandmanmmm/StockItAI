@@ -3,7 +3,7 @@
  * Uses App Bridge session tokens for secure API calls
  */
 
-import { getSessionToken as getAppBridgeSessionToken } from '@shopify/app-bridge/utilities'
+import { getSessionToken as getAppBridgeSessionToken } from '@shopify/app-bridge/utilities/session-token'
 
 // Base configuration - automatically use current origin when running through tunnel
 function getApiBaseUrl(): string {
