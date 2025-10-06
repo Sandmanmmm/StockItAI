@@ -62,9 +62,9 @@ export async function validateSessionToken(token) {
 /**
  * Get shop domain from session token
  */
-export function getShopFromToken(token) {
+export async function getShopFromToken(token) {
   try {
-    const payload = shopify.utils.decodeSessionToken(token)
+    const payload = await shopify.utils.decodeSessionToken(token)
     if (!payload || !payload.dest) {
       return null
     }

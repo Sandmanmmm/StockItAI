@@ -36,7 +36,7 @@ export async function verifyShopifyRequest(req, res, next) {
     }
 
     // Extract shop domain from token
-    const shopDomain = getShopFromToken(sessionToken)
+    const shopDomain = await getShopFromToken(sessionToken)
     if (!shopDomain) {
       return res.status(401).json({
         success: false,
