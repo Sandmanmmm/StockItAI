@@ -65,6 +65,7 @@ async function getSessionToken(): Promise<string | null> {
 
 /**
  * Production-ready authenticated API request
+ * Supports both JSON and FormData (for file uploads)
  */
 export async function authenticatedRequest<T>(
   endpoint: string,
@@ -80,9 +81,13 @@ export async function authenticatedRequest<T>(
     // Get session token for authentication
     const sessionToken = await getSessionToken()
     
+    // Check if body is FormData (for file uploads)
+    const isFormData = options.body instanceof FormData
+    
     const config: RequestInit = {
       headers: {
-        'Content-Type': 'application/json',
+        // Only set Content-Type for JSON, let browser set it for FormData
+        ...(!isFormData && { 'Content-Type': 'application/json' }),
         // Include Shopify session token if available
         ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` }),
         ...options.headers,

@@ -11,6 +11,7 @@ import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import { Warning, Check, Gear, CurrencyDollar, Tag, FileText, Copy, FloppyDisk, ArrowsClockwise } from '@phosphor-icons/react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { authenticatedRequest } from '@/lib/shopifyApiService'
 
 interface RefinementConfig {
   isEnabled: boolean
@@ -156,12 +157,9 @@ export function RefinementConfigPanel() {
   const loadConfiguration = async () => {
     setIsLoading(true)
     try {
-      const response = await fetch(`/api/refinement-config?merchantId=${merchantId}`)
-      if (response.ok) {
-        const data = await response.json()
-        if (data.success && data.data) {
-          setConfig(data.data)
-        }
+      const result = await authenticatedRequest<RefinementConfig>(`/refinement-config?merchantId=${merchantId}`)
+      if (result.success && result.data) {
+        setConfig(result.data)
       }
     } catch (error) {
       console.error('Failed to load configuration:', error)
@@ -173,18 +171,14 @@ export function RefinementConfigPanel() {
   const saveConfiguration = async () => {
     setIsSaving(true)
     try {
-      const response = await fetch(`/api/refinement-config?merchantId=${merchantId}`, {
+      const result = await authenticatedRequest<RefinementConfig>(`/refinement-config?merchantId=${merchantId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config)
       })
       
-      if (response.ok) {
-        const data = await response.json()
-        if (data.success) {
-          setConfig(data.data)
-          // Show success notification
-        }
+      if (result.success && result.data) {
+        setConfig(result.data)
+        // Show success notification
       }
     } catch (error) {
       console.error('Failed to save configuration:', error)
@@ -196,9 +190,8 @@ export function RefinementConfigPanel() {
   const testPricingRules = async () => {
     setIsTestingPricing(true)
     try {
-      const response = await fetch(`/api/refinement-config/test-pricing?merchantId=${merchantId}`, {
+      const result = await authenticatedRequest<any>(`/refinement-config/test-pricing?merchantId=${merchantId}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sampleProduct: {
             title: 'Sample Product',
@@ -207,9 +200,8 @@ export function RefinementConfigPanel() {
         })
       })
       
-      if (response.ok) {
-        const data = await response.json()
-        setTestResult(data.data)
+      if (result.success) {
+        setTestResult(result.data)
       }
     } catch (error) {
       console.error('Failed to test pricing rules:', error)

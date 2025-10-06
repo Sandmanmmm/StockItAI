@@ -304,61 +304,21 @@ class ApiService {
       formData.append('customRules', JSON.stringify(options.customRules))
     }
 
-    // TEMPORARY DEBUG: Force direct API calls for now
-    // if (isShopifyEnvironment()) {
-    if (false) {
-      // Use authenticated request in Shopify environment
-      try {
-        const result = await authenticatedRequest<any>('/upload/po-file', {
-          method: 'POST',
-          body: formData
-        })
-        return {
-          success: result.success,
-          data: result.data,
-          error: result.error
-        }
-      } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : 'Upload failed'
-        }
+    // Always use authenticated request (works in both dev and production)
+    try {
+      const result = await authenticatedRequest<any>('/upload/po-file', {
+        method: 'POST',
+        body: formData
+      })
+      return {
+        success: result.success,
+        data: result.data,
+        error: result.error
       }
-    } else {
-      // Development mode - direct API calls
-      try {
-        console.log('🔄 Making direct API call to:', `${API_BASE_URL}/api/upload/po-file`)
-        const response = await fetch(`${API_BASE_URL}/api/upload/po-file`, {
-          method: 'POST',
-          body: formData,
-        })
-
-        console.log('📡 Response status:', response.status, response.statusText)
-
-        if (!response.ok) {
-          const errorText = await response.text()
-          console.error('❌ Error response:', errorText)
-          let errorData
-          try {
-            errorData = JSON.parse(errorText)
-          } catch {
-            errorData = { error: errorText }
-          }
-          throw new Error(errorData.error || `Upload failed: ${response.status}`)
-        }
-
-        const data = await response.json()
-        console.log('✅ Upload success:', data)
-        return { 
-          success: true, 
-          data: data.data 
-        }
-      } catch (error) {
-        console.error('❌ Upload error:', error)
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : 'Upload failed'
-        }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Upload failed'
       }
     }
   }
