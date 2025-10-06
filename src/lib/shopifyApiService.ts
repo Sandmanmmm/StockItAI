@@ -168,7 +168,9 @@ export function isShopifyEnvironment(): boolean {
   const urlParams = new URLSearchParams(window.location.search)
   const shop = urlParams.get('shop')
   const host = urlParams.get('host')
-  return !!(shop && host && !shop.includes('test'))
+  // Check if this is a real Shopify store (ends with .myshopify.com)
+  const isRealShopifyStore = shop && shop.endsWith('.myshopify.com')
+  return !!(shop && host && isRealShopifyStore)
 }
 
 /**
