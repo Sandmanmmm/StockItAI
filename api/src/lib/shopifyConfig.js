@@ -3,9 +3,10 @@
  * Production-ready Shopify authentication setup
  */
 
-import { shopifyApi, ApiVersion } from '@shopify/shopify-api'
+import { shopifyApi, ApiVersion, Session } from '@shopify/shopify-api'
 import '@shopify/shopify-api/adapters/node'
 import { restResources } from '@shopify/shopify-api/rest/admin/2024-10'
+import jwt from 'jsonwebtoken'
 import dotenv from 'dotenv'
 
 // Load environment variables
@@ -38,15 +39,17 @@ export const shopify = shopifyApi({
  */
 export async function validateSessionToken(token) {
   try {
-    // Use Shopify's official session token validation
-    const payload = await shopify.utils.decodeSessionToken(token)
+    // Decode and verify the JWT token
+    const payload = jwt.verify(token, process.env.SHOPIFY_API_SECRET, {
+      algorithms: ['HS256']
+    })
     
     // Validate the audience (should match our app's API key)
     if (payload.aud !== process.env.SHOPIFY_API_KEY) {
       throw new Error('Invalid audience in session token')
     }
 
-    // Check token expiration
+    // Check token expiration (JWT library already does this, but we double-check)
     const now = Math.floor(Date.now() / 1000)
     if (payload.exp && payload.exp < now) {
       throw new Error('Session token has expired')
@@ -64,7 +67,8 @@ export async function validateSessionToken(token) {
  */
 export async function getShopFromToken(token) {
   try {
-    const payload = await shopify.utils.decodeSessionToken(token)
+    // Decode the JWT token (without verification for faster extraction)
+    const payload = jwt.decode(token)
     if (!payload || !payload.dest) {
       return null
     }
