@@ -144,8 +144,68 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
         fallbackModel: aiSettings?.fallbackModel || 'gpt-4o-mini'
       }
 
-      // Return success immediately - don't wait for processing
-      // This prevents 504 timeout errors on Vercel's 30-second function limit
+      // Start workflow processing if autoProcess is enabled
+      // We MUST start the workflow BEFORE sending the response in serverless environments
+      // Otherwise the function terminates and async callbacks never execute
+      if (autoProcess === 'true') {
+        try {
+          const workflowData = {
+            uploadId: uploadRecord.id,
+            fileName: req.file.originalname,
+            originalFileName: req.file.originalname,
+            fileSize: req.file.size,
+            mimeType: req.file.mimetype || 'text/csv',
+            merchantId: merchant.id,
+            supplierId: supplierId || null,
+            buffer: req.file.buffer,
+            aiSettings: processingOptions,
+            purchaseOrderId: purchaseOrder.id
+          }
+
+          console.log(`📝 Starting workflow with data:`, {
+            uploadId: workflowData.uploadId,
+            fileName: workflowData.fileName,
+            mimeType: workflowData.mimeType,
+            fileSize: workflowData.fileSize
+          })
+
+          // Start the workflow (this initiates it but returns quickly)
+          // The heavy processing happens asynchronously in Bull queues
+          const workflowResult = await workflowIntegration.processUploadedFile(workflowData)
+          
+          console.log(`✅ Workflow started for upload ${uploadRecord.id}: ${workflowResult.workflowId}`)
+
+        } catch (workflowError) {
+          console.error(`❌ Failed to start workflow for upload ${uploadRecord.id}:`, workflowError)
+          
+          // Update upload status to failed
+          await db.client.upload.update({
+            where: { id: uploadRecord.id },
+            data: {
+              status: 'failed',
+              errorMessage: workflowError.message
+            }
+          })
+
+          // Update PO status to failed
+          await db.client.purchaseOrder.update({
+            where: { id: purchaseOrder.id },
+            data: {
+              status: 'failed',
+              jobStatus: 'failed',
+              jobError: workflowError.message
+            }
+          })
+
+          // Return error response
+          return res.status(500).json({
+            success: false,
+            error: 'Failed to start workflow: ' + workflowError.message
+          })
+        }
+      }
+
+      // Return success after workflow has been initiated
       res.json({
         success: true,
         data: {
@@ -155,7 +215,7 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
           fileSize: req.file.size,
           status: autoProcess === 'true' ? 'processing' : 'uploaded',
           message: autoProcess === 'true' 
-            ? 'File uploaded successfully. Processing will begin shortly.' 
+            ? 'File uploaded successfully. Processing started.' 
             : 'File uploaded successfully',
           fileUrl: uploadResult.fileUrl // Signed URL for immediate access
         },
@@ -163,65 +223,6 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
           'File uploaded successfully and workflow started for AI processing' : 
           'File uploaded successfully'
       })
-
-      // Start workflow processing asynchronously (non-blocking)
-      // This happens AFTER the HTTP response is sent to avoid timeouts
-      if (autoProcess === 'true') {
-        // Use setImmediate to ensure this runs after response is sent
-        setImmediate(async () => {
-          try {
-            const workflowData = {
-              uploadId: uploadRecord.id,
-              fileName: req.file.originalname,
-              originalFileName: req.file.originalname,
-              fileSize: req.file.size,
-              mimeType: req.file.mimetype || 'text/csv',
-              merchantId: merchant.id,
-              supplierId: supplierId || null,
-              buffer: req.file.buffer,
-              aiSettings: processingOptions,
-              purchaseOrderId: purchaseOrder.id
-            }
-
-            console.log(`📝 Starting async workflow with data:`, {
-              uploadId: workflowData.uploadId,
-              fileName: workflowData.fileName,
-              mimeType: workflowData.mimeType,
-              fileSize: workflowData.fileSize
-            })
-
-            const workflowResult = await workflowIntegration.processUploadedFile(workflowData)
-            
-            console.log(`✅ Workflow started for upload ${uploadRecord.id}: ${workflowResult.workflowId}`)
-
-          } catch (workflowError) {
-            console.error(`❌ Failed to start async workflow for upload ${uploadRecord.id}:`, workflowError)
-            
-            // Update upload status to failed
-            try {
-              await db.client.upload.update({
-                where: { id: uploadRecord.id },
-                data: {
-                  status: 'failed',
-                  errorMessage: workflowError.message
-                }
-              })
-
-              // Update PO status to failed
-              await db.client.purchaseOrder.update({
-                where: { id: purchaseOrder.id },
-                data: {
-                  status: 'failed',
-                  jobStatus: 'failed',
-                  jobError: workflowError.message
-                }
-              })
-            } catch (updateError) {
-              console.error('Failed to update error status:', updateError)
-            }
-          }
-        })
-      }
 
     } catch (dbError) {
       console.error('Database error during upload:', dbError)
