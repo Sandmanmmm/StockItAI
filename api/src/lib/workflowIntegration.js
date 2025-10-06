@@ -111,14 +111,18 @@ export class WorkflowIntegrationService {
    */
   async getUploadWorkflowStatus(uploadId) {
     try {
-      // Get upload record to find workflow ID
+      // Get upload record to find workflow ID and purchase order
       const upload = await db.client.upload.findUnique({
-        where: { id: uploadId }
+        where: { id: uploadId },
+        include: {
+          purchaseOrder: true
+        }
       })
 
       if (!upload || !upload.workflowId) {
         return {
-          status: 'no_workflow',
+          status: 'processing',
+          progress: 0,
           message: 'No workflow found for this upload'
         }
       }
@@ -128,26 +132,45 @@ export class WorkflowIntegrationService {
       
       if (!workflowStatus) {
         return {
-          status: 'workflow_not_found',
+          status: 'processing',
+          progress: 0,
           message: 'Workflow metadata not found'
         }
       }
 
+      // Map orchestrator status to frontend-expected format
+      const progress = this.calculateWorkflowProgress(workflowStatus)
+      let status = 'processing'
+      
+      // Check if workflow is completed or failed based on stages
+      const stages = Object.values(workflowStatus.stages || {})
+      const allCompleted = stages.length > 0 && stages.every(s => s.status === 'completed')
+      const anyFailed = stages.some(s => s.status === 'failed')
+      
+      if (anyFailed) {
+        status = 'failed'
+      } else if (allCompleted) {
+        status = 'completed'
+      }
+
       return {
-        status: 'found',
+        status,
+        progress,
         workflowId: upload.workflowId,
         currentStage: workflowStatus.status,
         stages: workflowStatus.stages,
         startedAt: workflowStatus.startedAt,
         updatedAt: workflowStatus.updatedAt,
-        progress: this.calculateWorkflowProgress(workflowStatus)
+        purchaseOrder: upload.purchaseOrder || undefined,
+        jobError: anyFailed ? stages.find(s => s.status === 'failed')?.error : undefined
       }
 
     } catch (error) {
       console.error('❌ Failed to get workflow status:', error)
       return {
-        status: 'error',
-        message: error.message
+        status: 'failed',
+        progress: 0,
+        jobError: error.message
       }
     }
   }
