@@ -144,64 +144,69 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
         fallbackModel: aiSettings?.fallbackModel || 'gpt-4o-mini'
       }
 
-      // Start workflow processing if autoProcess is enabled
-      // We MUST start the workflow BEFORE sending the response in serverless environments
-      // Otherwise the function terminates and async callbacks never execute
+      // Create a minimal workflow record immediately for tracking
+      // Then trigger actual processing via separate endpoint to avoid timeout
       if (autoProcess === 'true') {
         try {
-          const workflowData = {
-            uploadId: uploadRecord.id,
-            fileName: req.file.originalname,
-            originalFileName: req.file.originalname,
-            fileSize: req.file.size,
-            mimeType: req.file.mimetype || 'text/csv',
-            merchantId: merchant.id,
-            supplierId: supplierId || null,
-            buffer: req.file.buffer,
-            aiSettings: processingOptions,
-            purchaseOrderId: purchaseOrder.id
-          }
-
-          console.log(`📝 Starting workflow with data:`, {
-            uploadId: workflowData.uploadId,
-            fileName: workflowData.fileName,
-            mimeType: workflowData.mimeType,
-            fileSize: workflowData.fileSize
+          // Generate a workflow ID and create the workflow execution record
+          const workflowId = `wf_${Date.now()}_${uploadRecord.id.slice(0, 8)}`
+          
+          await db.client.workflowExecution.create({
+            data: {
+              workflowId,
+              type: 'purchase_order_processing',
+              status: 'pending',
+              currentStage: null,
+              stagesTotal: 4,
+              stagesCompleted: 0,
+              progressPercent: 0,
+              inputData: {
+                uploadId: uploadRecord.id,
+                fileName: req.file.originalname,
+                fileSize: req.file.size,
+                mimeType: req.file.mimetype
+              },
+              merchantId: merchant.id,
+              uploadId: uploadRecord.id,
+              purchaseOrderId: purchaseOrder.id
+            }
           })
 
-          // Start the workflow (this initiates it but returns quickly)
-          // The heavy processing happens asynchronously in Bull queues
-          const workflowResult = await workflowIntegration.processUploadedFile(workflowData)
-          
-          console.log(`✅ Workflow started for upload ${uploadRecord.id}: ${workflowResult.workflowId}`)
-
-        } catch (workflowError) {
-          console.error(`❌ Failed to start workflow for upload ${uploadRecord.id}:`, workflowError)
-          
-          // Update upload status to failed
+          // Update upload with workflow ID
           await db.client.upload.update({
             where: { id: uploadRecord.id },
-            data: {
-              status: 'failed',
-              errorMessage: workflowError.message
-            }
+            data: { workflowId }
           })
 
-          // Update PO status to failed
-          await db.client.purchaseOrder.update({
-            where: { id: purchaseOrder.id },
-            data: {
-              status: 'failed',
-              jobStatus: 'failed',
-              jobError: workflowError.message
-            }
+          console.log(`✅ Workflow record created: ${workflowId} for upload ${uploadRecord.id}`)
+
+          // Trigger processing via internal API call (non-blocking)
+          // This happens after the response is sent to avoid timeout
+          setImmediate(() => {
+            // Make internal HTTP request to trigger endpoint
+            const triggerUrl = `${process.env.API_BASE_URL || 'http://localhost:3001'}/api/workflow/trigger/${uploadRecord.id}`
+            
+            fetch(triggerUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                // Pass through merchant context if needed
+                'x-merchant-id': merchant.id
+              }
+            }).then(response => {
+              if (response.ok) {
+                console.log(`✅ Workflow trigger initiated for upload ${uploadRecord.id}`)
+              } else {
+                console.error(`❌ Failed to trigger workflow: ${response.status}`)
+              }
+            }).catch(error => {
+              console.error(`❌ Error triggering workflow:`, error.message)
+            })
           })
 
-          // Return error response
-          return res.status(500).json({
-            success: false,
-            error: 'Failed to start workflow: ' + workflowError.message
-          })
+        } catch (workflowError) {
+          console.error(`❌ Failed to create workflow record for upload ${uploadRecord.id}:`, workflowError)
+          // Don't fail the upload - just log the error
         }
       }
 

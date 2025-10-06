@@ -36,12 +36,158 @@ router.get('/upload/:uploadId/status', async (req, res) => {
 })
 
 /**
+ * Trigger workflow processing for an upload
+ * POST /api/workflow/trigger/:uploadId
+ */
+router.post('/trigger/:uploadId', async (req, res) => {
+  try {
+    const { uploadId } = req.params
+    
+    console.log(`🚀 Workflow trigger requested for upload: ${uploadId}`)
+
+    // Import here to avoid circular dependencies
+    const { db } = await import('../lib/db.js')
+    const { storageService } = await import('../lib/storageService.js')
+
+    // Get upload record
+    const upload = await db.client.upload.findUnique({
+      where: { id: uploadId }
+    })
+
+    if (!upload) {
+      return res.status(404).json({
+        success: false,
+        error: 'Upload not found'
+      })
+    }
+
+    if (!upload.workflowId) {
+      return res.status(400).json({
+        success: false,
+        error: 'No workflow associated with this upload'
+      })
+    }
+
+    // Get workflow execution record
+    const workflow = await db.client.workflowExecution.findUnique({
+      where: { workflowId: upload.workflowId }
+    })
+
+    if (!workflow) {
+      return res.status(404).json({
+        success: false,
+        error: 'Workflow record not found'
+      })
+    }
+
+    // Don't re-trigger if already processing/completed
+    if (workflow.status === 'processing' || workflow.status === 'completed') {
+      return res.json({
+        success: true,
+        message: `Workflow already ${workflow.status}`,
+        uploadId,
+        workflowId: upload.workflowId,
+        status: workflow.status
+      })
+    }
+
+    // Get file from storage
+    const fileBuffer = await storageService.downloadFile(upload.fileUrl)
+    
+    if (!fileBuffer) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to download file from storage'
+      })
+    }
+
+    // Get merchant AI settings
+    const aiSettings = await db.client.aISettings.findUnique({
+      where: { merchantId: upload.merchantId }
+    })
+
+    const processingOptions = {
+      confidenceThreshold: aiSettings?.confidenceThreshold || 0.8,
+      customRules: aiSettings?.customRules || [],
+      strictMatching: aiSettings?.strictMatching || true,
+      primaryModel: aiSettings?.primaryModel || 'gpt-5-nano',
+      fallbackModel: aiSettings?.fallbackModel || 'gpt-4o-mini'
+    }
+
+    // Prepare workflow data
+    const workflowData = {
+      uploadId: upload.id,
+      fileName: upload.fileName,
+      originalFileName: upload.originalFileName,
+      fileSize: upload.fileSize,
+      mimeType: upload.mimeType,
+      merchantId: upload.merchantId,
+      supplierId: upload.supplierId,
+      buffer: fileBuffer,
+      aiSettings: processingOptions,
+      purchaseOrderId: workflow.purchaseOrderId
+    }
+
+    // Return immediately - processing happens in background
+    res.json({
+      success: true,
+      message: 'Workflow processing triggered',
+      uploadId,
+      workflowId: upload.workflowId
+    })
+
+    // Start processing in background (after response is sent)
+    setImmediate(async () => {
+      try {
+        console.log(`📝 Starting background workflow for upload ${uploadId}`)
+        
+        const result = await workflowIntegration.processUploadedFile(workflowData)
+        
+        console.log(`✅ Workflow processing started: ${result.workflowId}`)
+        
+      } catch (error) {
+        console.error(`❌ Background workflow failed for upload ${uploadId}:`, error)
+        
+        // Update workflow status to failed
+        try {
+          await db.client.workflowExecution.update({
+            where: { workflowId: upload.workflowId },
+            data: {
+              status: 'failed',
+              errorMessage: error.message,
+              failedStage: 'initialization'
+            }
+          })
+
+          await db.client.upload.update({
+            where: { id: uploadId },
+            data: {
+              status: 'failed',
+              errorMessage: error.message
+            }
+          })
+        } catch (updateError) {
+          console.error('Failed to update error status:', updateError)
+        }
+      }
+    })
+
+  } catch (error) {
+    console.error('❌ Failed to trigger workflow:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+/**
  * Get workflow progress by workflow ID
  * GET /api/workflow/:workflowId/progress
  */
 router.get('/:workflowId/progress', async (req, res) => {
   try {
-    const { workflowId } = req.params
+    const { workflowId} = req.params
     
     const progress = await workflowIntegration.getWorkflowProgress(workflowId)
     
