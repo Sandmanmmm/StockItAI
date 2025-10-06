@@ -31,14 +31,20 @@ const API_BASE_URL = getApiBaseUrl()
  */
 async function waitForAppBridge(timeoutMs = 2000): Promise<any> {
   const startTime = Date.now()
+  let attemptCount = 0
+  
   while (Date.now() - startTime < timeoutMs) {
     const app = (window as any).__SHOPIFY_APP__
     if (app) {
+      console.log(`✅ App Bridge found after ${Date.now() - startTime}ms (${attemptCount} attempts)`)
       return app
     }
+    attemptCount++
     // Wait 50ms before checking again
     await new Promise(resolve => setTimeout(resolve, 50))
   }
+  
+  console.warn(`⚠️ App Bridge not found after ${timeoutMs}ms (${attemptCount} attempts)`)
   return null
 }
 
@@ -54,12 +60,15 @@ async function getSessionToken(): Promise<string | null> {
     
     if (app) {
       try {
+        console.log('🔄 Requesting fresh token from App Bridge...')
         const token = await getAppBridgeSessionToken(app)
         console.log('✅ Fresh session token from App Bridge')
         return token
       } catch (error) {
         console.error('❌ Error getting session token from App Bridge:', error)
       }
+    } else {
+      console.warn('⚠️ App Bridge not available, falling back to URL token')
     }
 
     // Fallback: try to get from URL parameters (only for initial load)

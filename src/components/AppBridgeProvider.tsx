@@ -56,6 +56,7 @@ export function AppBridgeProvider({ children }: AppBridgeProviderProps) {
         
         console.log('✅ Shopify App Bridge initialized for real environment')
         console.log('🔧 Config:', { shop, host, apiKey: config.apiKey })
+        console.log('🔧 Global app set:', !!(window as any).__SHOPIFY_APP__)
         
       } catch (error) {
         console.error('❌ Failed to initialize Shopify App Bridge:', error)
