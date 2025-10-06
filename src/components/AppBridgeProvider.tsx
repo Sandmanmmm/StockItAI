@@ -57,20 +57,6 @@ export function AppBridgeProvider({ children }: AppBridgeProviderProps) {
         console.log('✅ Shopify App Bridge initialized for real environment')
         console.log('🔧 Config:', { shop, host, apiKey: config.apiKey })
         
-        // Test session token availability
-        try {
-          // The session token will be available through the URL parameters initially
-          const idToken = urlParams.get('id_token')
-          console.log('🎯 Session token available from URL:', !!idToken)
-          
-          // Store initial token for immediate use
-          if (idToken) {
-            (window as any).__INITIAL_SESSION_TOKEN__ = idToken
-          }
-        } catch (error) {
-          console.warn('⚠️ Session token not immediately available:', error)
-        }
-        
       } catch (error) {
         console.error('❌ Failed to initialize Shopify App Bridge:', error)
         setIsReady(true)

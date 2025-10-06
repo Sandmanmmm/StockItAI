@@ -3,6 +3,8 @@
  * Uses App Bridge session tokens for secure API calls
  */
 
+import { getSessionToken as getAppBridgeSessionToken } from '@shopify/app-bridge/utilities'
+
 // Base configuration - automatically use current origin when running through tunnel
 function getApiBaseUrl(): string {
   // Force use of environment variable for API calls to ensure correct tunnel URL
@@ -25,40 +27,30 @@ function getApiBaseUrl(): string {
 const API_BASE_URL = getApiBaseUrl()
 
 /**
- * Get session token from App Bridge using the correct v3+ API
+ * Get fresh session token from App Bridge
  * IMPORTANT: Shopify session tokens expire after ~60 seconds, so we must get a fresh token for each request
+ * This uses the official App Bridge v3+ getSessionToken utility
  */
 async function getSessionToken(): Promise<string | null> {
   try {
-    // First, check if we have App Bridge available - this should be the primary method
+    // Try to get fresh token from App Bridge utility (App Bridge v3+)
     const app = (window as any).__SHOPIFY_APP__
     if (app) {
       try {
-        // Check if there's a direct method to get the session token
-        if (typeof app.getSessionToken === 'function') {
-          const token = await app.getSessionToken()
-          console.log('✅ Fresh session token from App Bridge getSessionToken()')
-          return token
-        }
-        
-        // Fallback: try getting from app state
-        const state = app.getState()
-        const token = state?.session?.idToken || state?.app?.session?.id_token
-        if (token) {
-          console.log('✅ Session token from App Bridge state')
-          return token
-        }
+        const token = await getAppBridgeSessionToken(app)
+        console.log('✅ Fresh session token from App Bridge')
+        return token
       } catch (error) {
-        console.error('❌ Error accessing App Bridge session token:', error)
+        console.error('❌ Error getting session token from App Bridge:', error)
       }
     }
 
     // Fallback: try to get from URL parameters (only for initial load)
-    // This is a backup method and should not be cached as it will expire
+    // This token will expire quickly, so this is only suitable for the first request
     const urlParams = new URLSearchParams(window.location.search)
     const idToken = urlParams.get('id_token')
     if (idToken) {
-      console.log('⚠️ Using session token from URL parameters (initial load only)')
+      console.log('⚠️ Using session token from URL parameters (will expire soon)')
       return idToken
     }
 
