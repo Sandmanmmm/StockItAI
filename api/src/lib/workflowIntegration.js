@@ -111,12 +111,9 @@ export class WorkflowIntegrationService {
    */
   async getUploadWorkflowStatus(uploadId) {
     try {
-      // Get upload record to find workflow ID and purchase order
+      // Get upload record to find workflow ID
       const upload = await db.client.upload.findUnique({
-        where: { id: uploadId },
-        include: {
-          purchaseOrder: true
-        }
+        where: { id: uploadId }
       })
 
       if (!upload || !upload.workflowId) {
@@ -127,6 +124,19 @@ export class WorkflowIntegrationService {
         }
       }
 
+      // Get workflow execution to find purchase order
+      const workflowExecution = await db.client.workflowExecution.findUnique({
+        where: { workflowId: upload.workflowId }
+      })
+
+      // Get purchase order if available
+      let purchaseOrder = null
+      if (workflowExecution?.purchaseOrderId) {
+        purchaseOrder = await db.client.purchaseOrder.findUnique({
+          where: { id: workflowExecution.purchaseOrderId }
+        })
+      }
+
       // Get workflow status from orchestrator
       const workflowStatus = await this.orchestrator.getWorkflowStatus(upload.workflowId)
       
@@ -134,7 +144,8 @@ export class WorkflowIntegrationService {
         return {
           status: 'processing',
           progress: 0,
-          message: 'Workflow metadata not found'
+          message: 'Workflow metadata not found',
+          purchaseOrder: purchaseOrder || undefined
         }
       }
 
@@ -161,7 +172,7 @@ export class WorkflowIntegrationService {
         stages: workflowStatus.stages,
         startedAt: workflowStatus.startedAt,
         updatedAt: workflowStatus.updatedAt,
-        purchaseOrder: upload.purchaseOrder || undefined,
+        purchaseOrder: purchaseOrder || undefined,
         jobError: anyFailed ? stages.find(s => s.status === 'failed')?.error : undefined
       }
 
