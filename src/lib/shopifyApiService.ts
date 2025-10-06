@@ -26,60 +26,44 @@ const API_BASE_URL = getApiBaseUrl()
 
 /**
  * Get session token from App Bridge using the correct v3+ API
+ * IMPORTANT: Shopify session tokens expire after ~60 seconds, so we must get a fresh token for each request
  */
 async function getSessionToken(): Promise<string | null> {
   try {
-    // First, check for stored initial token
-    const initialToken = (window as any).__INITIAL_SESSION_TOKEN__
-    if (initialToken) {
-      console.log('✅ Using stored initial session token')
-      return initialToken
+    // First, check if we have App Bridge available - this should be the primary method
+    const app = (window as any).__SHOPIFY_APP__
+    if (app) {
+      try {
+        // Check if there's a direct method to get the session token
+        if (typeof app.getSessionToken === 'function') {
+          const token = await app.getSessionToken()
+          console.log('✅ Fresh session token from App Bridge getSessionToken()')
+          return token
+        }
+        
+        // Fallback: try getting from app state
+        const state = app.getState()
+        const token = state?.session?.idToken || state?.app?.session?.id_token
+        if (token) {
+          console.log('✅ Session token from App Bridge state')
+          return token
+        }
+      } catch (error) {
+        console.error('❌ Error accessing App Bridge session token:', error)
+      }
     }
 
-    // Second, try to get from URL parameters for initial load
+    // Fallback: try to get from URL parameters (only for initial load)
+    // This is a backup method and should not be cached as it will expire
     const urlParams = new URLSearchParams(window.location.search)
     const idToken = urlParams.get('id_token')
     if (idToken) {
-      console.log('✅ Using session token from URL parameters')
-      // Store it for future use
-      ;(window as any).__INITIAL_SESSION_TOKEN__ = idToken
+      console.log('⚠️ Using session token from URL parameters (initial load only)')
       return idToken
     }
 
-    // Third, check if we have App Bridge available
-    const app = (window as any).__SHOPIFY_APP__
-    if (!app) {
-      console.warn('⚠️ No App Bridge or URL token available')
-      return null
-    }
-
-    // App Bridge v3+ session token retrieval
-    // For embedded apps, the session token is typically managed by App Bridge
-    // Let's try the standard approach first
-    try {
-      // Check if there's a direct method to get the session token
-      if (typeof app.getSessionToken === 'function') {
-        const token = await app.getSessionToken()
-        console.log('✅ Session token from App Bridge getSessionToken()')
-        return token
-      }
-      
-      // Fallback: try getting from app state
-      const state = app.getState()
-      console.log('🔍 App Bridge state:', state)
-      const token = state?.session?.idToken || state?.app?.session?.id_token
-      if (token) {
-        console.log('✅ Session token from App Bridge state')
-        return token
-      }
-
-      console.warn('⚠️ No session token available from App Bridge')
-      return null
-      
-    } catch (error) {
-      console.error('❌ Error accessing App Bridge session token:', error)
-      return null
-    }
+    console.warn('⚠️ No App Bridge or URL token available')
+    return null
 
   } catch (error) {
     console.error('❌ Failed to get session token:', error)
