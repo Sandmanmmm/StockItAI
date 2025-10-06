@@ -150,7 +150,10 @@ export async function authenticatedRequest<T>(
     }
 
     console.log(`✅ API Success: ${apiEndpoint}`)
-    return { success: true, data: data.data }
+    // Return the entire response object (excluding success flag which we already checked)
+    // This allows different endpoints to have different response structures
+    const { success, ...responseData } = data
+    return { success: true, data: responseData as T }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     console.error(`❌ API request failed for ${endpoint}:`, errorMessage)
