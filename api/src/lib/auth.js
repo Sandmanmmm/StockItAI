@@ -52,8 +52,7 @@ export async function verifyShopifyRequest(req, res, next) {
         where: { 
           OR: [
             { shopDomain: shopDomain },
-            { shopDomain: `${shopDomain}.myshopify.com` },
-            { shopifyShopId: payload.iss }
+            { shopDomain: `${shopDomain}.myshopify.com` }
           ]
         }
       })
@@ -64,7 +63,6 @@ export async function verifyShopifyRequest(req, res, next) {
           data: {
             name: shopDomain,
             shopDomain: `${shopDomain}.myshopify.com`,
-            shopifyShopId: payload.iss,
             email: payload.sub || `${shopDomain}@shopify.com`,
             status: 'active',
             createdAt: new Date(),
