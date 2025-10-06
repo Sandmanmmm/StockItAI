@@ -27,14 +27,31 @@ function getApiBaseUrl(): string {
 const API_BASE_URL = getApiBaseUrl()
 
 /**
+ * Wait for App Bridge to be ready (with timeout)
+ */
+async function waitForAppBridge(timeoutMs = 2000): Promise<any> {
+  const startTime = Date.now()
+  while (Date.now() - startTime < timeoutMs) {
+    const app = (window as any).__SHOPIFY_APP__
+    if (app) {
+      return app
+    }
+    // Wait 50ms before checking again
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+  return null
+}
+
+/**
  * Get fresh session token from App Bridge
  * IMPORTANT: Shopify session tokens expire after ~60 seconds, so we must get a fresh token for each request
  * This uses the official App Bridge v3+ getSessionToken utility
  */
 async function getSessionToken(): Promise<string | null> {
   try {
-    // Try to get fresh token from App Bridge utility (App Bridge v3+)
-    const app = (window as any).__SHOPIFY_APP__
+    // Wait for App Bridge to be ready (with timeout)
+    const app = await waitForAppBridge(2000)
+    
     if (app) {
       try {
         const token = await getAppBridgeSessionToken(app)
