@@ -31,10 +31,11 @@ export function AppBridgeProvider({ children }: AppBridgeProviderProps) {
     console.log('🔍 App Bridge initialization:', { shop, host, embedded })
     setShopDomain(shop || undefined)
     
-    // Check if we're in a mock/development environment
-    const isMockEnvironment = shop && shop.includes('test')
+    // IMPORTANT: All real Shopify stores have .myshopify.com domain
+    // Don't confuse "test" in shop name with development mode
+    const isRealShopifyStore = shop && shop.endsWith('.myshopify.com')
     
-    if (shop && host && !isMockEnvironment) {
+    if (shop && host && isRealShopifyStore) {
       // Real Shopify environment
       const config: AppConfig = {
         apiKey: import.meta.env.VITE_SHOPIFY_API_KEY || '484def5b3b4823489f8ebff0d2e9cadd',
@@ -62,14 +63,13 @@ export function AppBridgeProvider({ children }: AppBridgeProviderProps) {
         console.error('❌ Failed to initialize Shopify App Bridge:', error)
         setIsReady(true)
       }
-    } else if (isMockEnvironment) {
-      // Mock environment - don't initialize real App Bridge to avoid redirects
-      console.log('🎭 Mock Shopify environment detected - using development mode')
-      setApp(null) // No real app bridge
-      setIsReady(true)
     } else {
-      // Development mode without Shopify parameters
-      console.log('🔧 Running in development mode without Shopify App Bridge')
+      // Development mode or non-Shopify environment
+      console.log('🔧 Running without Shopify App Bridge:', { 
+        hasShop: !!shop, 
+        hasHost: !!host,
+        isRealStore: isRealShopifyStore 
+      })
       setIsReady(true)
     }
   }, [])
