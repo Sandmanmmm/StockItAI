@@ -74,9 +74,11 @@ export function useFileUpload(options: UseFileUploadOptions = {}) {
     const pollStatus = async () => {
       try {
         const response = await apiService.getUploadStatus(uploadId)
+        console.log('📊 Upload status response:', JSON.stringify(response, null, 2))
         
-        if (response.success && response.data) {
+        if (response.success && response.data && response.data.workflow) {
           const { workflow } = response.data
+          console.log('📦 Workflow data:', workflow)
           const { status, progress, purchaseOrder, jobError } = workflow
           
           updateProgress({
@@ -110,6 +112,12 @@ export function useFileUpload(options: UseFileUploadOptions = {}) {
             toast.error(`Processing failed: ${errorMessage}`)
           }
         } else {
+          console.error('❌ Invalid status response:', { 
+            success: response.success, 
+            hasData: !!response.data,
+            hasWorkflow: !!(response.data && response.data.workflow),
+            data: response.data 
+          })
           // If we can't get status, stop polling
           if (intervalRef.current) {
             clearInterval(intervalRef.current)
