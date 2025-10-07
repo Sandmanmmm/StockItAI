@@ -183,7 +183,7 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
           // Trigger processing directly (non-blocking)
           // Note: In serverless, we can't rely on setImmediate after response
           // So we start processing before the response but don't await it
-          (async () => {
+          ;(async () => {
             try {
               console.log(`🚀 Starting background workflow for upload ${uploadRecord.id}`)
               
