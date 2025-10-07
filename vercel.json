@@ -11,7 +11,7 @@
   ],
   "crons": [
     {
-      "path": "/api/cron/process-workflows",
+      "path": "/api/process-workflows-cron",
       "schedule": "* * * * *"
     }
   ],
@@ -20,7 +20,7 @@
       "maxDuration": 30,
       "memory": 1024
     },
-    "api/cron/process-workflows.js": {
+    "api/process-workflows-cron.js": {
       "maxDuration": 300,
       "memory": 2048
     }
