@@ -5,12 +5,14 @@
  * without blocking the upload endpoint or hitting timeout limits.
  */
 
-import { queue } from '@vercel/functions'
 import { db } from '../lib/db.js'
 import { storageService } from '../lib/storageService.js'
 import { workflowIntegration } from '../lib/workflowIntegration.js'
 
-export default queue(async ({ uploadId, merchantId }) => {
+export default async function handler(req, res) {
+  // This is a queue handler - extract job data from request body
+  const { uploadId, merchantId } = req.body || {}
+  
   console.log(`📦 Queue processing started for upload: ${uploadId}`)
   
   let workflowId = null
@@ -128,12 +130,12 @@ export default queue(async ({ uploadId, merchantId }) => {
 
     console.log(`🎉 Queue processing completed for upload: ${uploadId}`)
     
-    return {
+    return res.status(200).json({
       success: true,
       uploadId,
       workflowId,
       message: 'File processed successfully'
-    }
+    })
 
   } catch (error) {
     console.error(`❌ Queue processing failed for upload ${uploadId}:`, error)
@@ -164,7 +166,10 @@ export default queue(async ({ uploadId, merchantId }) => {
       console.error(`❌ Failed to update upload status:`, updateError)
     })
 
-    // Re-throw to mark the queue job as failed (enables Vercel retries)
-    throw error
+    // Return error response
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    })
   }
-})
+}

@@ -8,7 +8,6 @@ import { db } from '../lib/db.js'
 import { storageService } from '../lib/storageService.js'
 import { workflowIntegration } from '../lib/workflowIntegration.js'
 import path from 'path'
-import { enqueue } from '@vercel/functions'
 
 const router = express.Router()
 
@@ -181,28 +180,32 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
 
           console.log(`✅ Workflow record created: ${workflowId} for upload ${uploadRecord.id}`)
 
-          // Enqueue processing job to Vercel Queue
-          // This handles background processing without timeout limits
-          try {
-            await enqueue('process-upload', {
-              uploadId: uploadRecord.id,
-              merchantId: merchant.id
-            })
-            console.log(`📬 Upload queued for processing: ${uploadRecord.id}`)
-          } catch (queueError) {
-            console.error(`❌ Failed to enqueue upload ${uploadRecord.id}:`, queueError)
-            // Update workflow status to failed
-            await db.client.workflowExecution.update({
-              where: { workflowId },
-              data: {
-                status: 'failed',
-                error: `Failed to enqueue: ${queueError.message}`,
-                completedAt: new Date()
+          // Trigger queue processing via HTTP call (non-blocking)
+          // This allows background processing with extended timeout
+          setImmediate(async () => {
+            try {
+              const queueUrl = `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3001'}/api/queues/process-upload`
+              
+              const response = await fetch(queueUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  uploadId: uploadRecord.id,
+                  merchantId: merchant.id
+                })
+              })
+
+              if (response.ok) {
+                console.log(`📬 Queue processing initiated for upload: ${uploadRecord.id}`)
+              } else {
+                console.error(`❌ Queue processing failed: ${response.status}`)
               }
-            }).catch(updateError => {
-              console.error(`❌ Failed to update workflow status:`, updateError)
-            })
-          }
+            } catch (queueError) {
+              console.error(`❌ Failed to call queue handler for upload ${uploadRecord.id}:`, queueError)
+            }
+          })
 
         } catch (workflowError) {
           console.error(`❌ Failed to create workflow record for upload ${uploadRecord.id}:`, workflowError)
