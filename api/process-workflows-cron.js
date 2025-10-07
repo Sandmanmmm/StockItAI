@@ -28,6 +28,16 @@ async function processWorkflow(workflow) {
   try {
     // Get a stable reference to the Prisma client
     const prisma = db.client
+    
+    // Debug: Verify prisma client is available
+    if (!prisma) {
+      console.error(`❌ FATAL: Prisma client is undefined!`)
+      console.error(`❌ db object:`, db)
+      console.error(`❌ db.client type:`, typeof db?.client)
+      throw new Error('Prisma client not initialized - db.client is undefined')
+    }
+    
+    console.log(`✅ Prisma client initialized successfully`)
 
     // Update workflow status to 'processing'
     await prisma.workflowExecution.update({
