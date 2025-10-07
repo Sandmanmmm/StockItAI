@@ -4,6 +4,7 @@
 
 import express from 'express'
 import multer from 'multer'
+import https from 'https'
 import { db } from '../lib/db.js'
 import { storageService } from '../lib/storageService.js'
 import { workflowIntegration } from '../lib/workflowIntegration.js'
@@ -181,27 +182,43 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
           console.log(`✅ Workflow record created: ${workflowId} for upload ${uploadRecord.id}`)
 
           // Trigger queue processing via HTTP call (fire-and-forget)
-          // We don't await this to avoid blocking the response
-          const queueUrl = `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3001'}/api/queues/process-upload`
-          
-          fetch(queueUrl, {
+          // Using native https module for better reliability
+          const queueHost = process.env.VERCEL_URL || 'localhost:3001'
+          const queuePath = '/api/queues/process-upload'
+          const queueData = JSON.stringify({
+            uploadId: uploadRecord.id,
+            merchantId: merchant.id
+          })
+
+          console.log(`🔄 Initiating queue call to: https://${queueHost}${queuePath}`)
+
+          const options = {
+            hostname: queueHost.replace('https://', '').replace('http://', ''),
+            port: 443,
+            path: queuePath,
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              uploadId: uploadRecord.id,
-              merchantId: merchant.id
-            })
-          }).then(response => {
-            if (response.ok) {
-              console.log(`📬 Queue processing initiated for upload: ${uploadRecord.id}`)
-            } else {
-              console.error(`❌ Queue processing failed: ${response.status}`)
+              'Content-Type': 'application/json',
+              'Content-Length': Buffer.byteLength(queueData)
             }
-          }).catch(queueError => {
-            console.error(`❌ Failed to call queue handler for upload ${uploadRecord.id}:`, queueError)
+          }
+
+          const req = https.request(options, (queueRes) => {
+            console.log(`📬 Queue response status: ${queueRes.statusCode}`)
+            
+            if (queueRes.statusCode === 200) {
+              console.log(`✅ Queue processing initiated for upload: ${uploadRecord.id}`)
+            } else {
+              console.error(`❌ Queue processing failed with status: ${queueRes.statusCode}`)
+            }
           })
+
+          req.on('error', (queueError) => {
+            console.error(`❌ Failed to call queue handler:`, queueError.message)
+          })
+
+          req.write(queueData)
+          req.end()
 
         } catch (workflowError) {
           console.error(`❌ Failed to create workflow record for upload ${uploadRecord.id}:`, workflowError)
