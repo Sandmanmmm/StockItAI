@@ -67,8 +67,13 @@ async function processWorkflow(workflow) {
     console.log(`📥 Downloading file from: ${upload.fileUrl}`)
 
     // Download the file from Supabase Storage
-    const fileBuffer = await storageService.downloadFile(upload.fileUrl)
+    const downloadResult = await storageService.downloadFile(upload.fileUrl)
     
+    if (!downloadResult.success) {
+      throw new Error(`Failed to download file: ${downloadResult.error}`)
+    }
+    
+    const fileBuffer = downloadResult.buffer
     console.log(`✅ File downloaded successfully (${fileBuffer.length} bytes)`)
 
     // Update progress
