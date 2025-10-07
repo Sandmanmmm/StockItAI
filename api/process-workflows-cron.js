@@ -155,8 +155,8 @@ async function processWorkflow(workflow) {
     await prisma.upload.update({
       where: { id: workflow.uploadId },
       data: {
-        status: 'processed',
-        processedAt: new Date()
+        status: 'processed'
+        // updatedAt will be automatically updated by Prisma
       }
     })
 

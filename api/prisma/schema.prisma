@@ -28,7 +28,6 @@ model Session {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   merchant      Merchant  @relation(fields: [merchantId], references: [id])
-  productDrafts ProductDraft[]
 
   @@index([shop])
   @@index([merchantId])
@@ -363,57 +362,110 @@ model WorkflowStageExecution {
 // Product Draft Models for Refinement Workflow
 model ProductDraft {
   id               String                  @id @default(cuid())
-  sessionId        String
-  merchantId       String
-  purchaseOrderId  String
-  lineItemId       String
-  supplierId       String?
-  originalTitle    String
-  refinedTitle     String?
-  originalDescription String?
-  refinedDescription String?
-  originalPrice    Float
-  priceRefined     Float?
-  estimatedMargin  Float?
-  shopifyProductId String?
-  shopifyVariantId String?
-  status           ProductDraftStatus      @default(DRAFT)
+  
+  // Basic Product Information
+  title            String
+  description      String?
+  vendor           String?
+  productType      String?
   tags             String[]                @default([])
-  categoryId       String?
-  reviewNotes      String?
-  reviewedBy       String?
+  
+  // Pricing Information
+  priceOriginal    Float?
+  priceRefined     Float?
+  currencyOriginal String                  @default("USD")
+  currencyTarget   String                  @default("USD")
+  costPrice        Float?                  // Wholesale/cost price from PO
+  msrp             Float?                  // Manufacturer suggested retail price
+  margin           Float?                  // Profit margin percentage
+  
+  // Product Identifiers
+  sku              String?
+  barcode          String?
+  upc              String?
+  isbn             String?
+  mpn              String?                 // Manufacturer Part Number
+  
+  // Physical Properties
+  weight           Float?
+  weightUnit       String                  @default("lb")
+  dimensions       Json?                   // {length, width, height, unit}
+  
+  // Inventory Management
+  trackQuantity    Boolean                 @default(true)
+  inventoryPolicy  String                  @default("deny") // deny, continue
+  fulfillmentService String                @default("manual")
+  requiresShipping Boolean                 @default(true)
+  taxable          Boolean                 @default(true)
+  taxCode          String?
+  
+  // SEO & Marketing
+  seoTitle         String?
+  seoDescription   String?
+  handle           String?                 // URL handle (auto-generated from title)
+  
+  // Status & Workflow
+  status           ProductDraftStatus      @default(PARSED)
+  workflowStage    ProductWorkflowStage    @default(INITIAL)
+  priority         ProductPriority         @default(MEDIUM)
+  
+  // AI Processing Metadata
+  confidence       Float?                  @default(0.00) // Overall AI confidence score (0.00-1.00)
+  confidenceBreakdown Json?                // Confidence scores per field
+  aiNotes          String?                 // AI processing notes and suggestions
+  extractedData    Json?                   // Original extracted data from AI
+  processingMethod String?                 // AI method used for extraction
+  
+  // Review & Approval
+  reviewedBy       String?                 // User ID who reviewed
   reviewedAt       DateTime?
+  reviewNotes      String?
+  approvedBy       String?                 // User ID who approved
+  approvedAt       DateTime?
+  rejectionReason  String?
   
-  // Shopify-specific fields (auto-populated)
-  productType      String?                 // Product type/category (e.g., "Electronics", "Apparel")
-  vendor           String?                 // Vendor/brand name (defaults to supplier name)
-  sku              String?                 // Stock keeping unit (from PO line item)
-  compareAtPrice   Float?                  // MSRP/original price for showing discount
-  costPerItem      Float?                  // Cost price (from originalPrice)
-  inventoryQty     Int?                    @default(0) // Initial inventory quantity (from PO quantity)
-  hsCode           String?                 // Harmonized System code for customs
-  countryOfOrigin  String?                 // Country where product was made/sourced
+  // Shopify Integration
+  shopifyProductId String?
+  shopifyHandle    String?
+  syncStatus       ShopifySyncStatus       @default(PENDING)
+  syncAttempts     Int                     @default(0)
+  lastSyncAt       DateTime?
+  syncError        String?
+  shopifyUrl       String?
   
+  // Data Relationships
+  merchantId       String
+  purchaseOrderId  String?                 // Optional: linked to originating PO
+  poLineItemId     String?                 // Optional: linked to specific line item
+  supplierId       String?                 // Optional: linked to supplier
+  
+  // Timestamps
   createdAt        DateTime                @default(now())
   updatedAt        DateTime                @updatedAt
 
   // Relations
-  session          Session                 @relation(fields: [sessionId], references: [id])
-  merchant         Merchant                @relation(fields: [merchantId], references: [id])
-  purchaseOrder    PurchaseOrder           @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
-  lineItem         POLineItem              @relation(fields: [lineItemId], references: [id], onDelete: Cascade)
-  supplier         Supplier?               @relation(fields: [supplierId], references: [id])
-  category         ProductCategory?        @relation(fields: [categoryId], references: [id])
+  merchant         Merchant                @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  purchaseOrder    PurchaseOrder?          @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+  lineItem         POLineItem?             @relation(fields: [poLineItemId], references: [id], onDelete: SetNull)
+  supplier         Supplier?               @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   images           ProductImage[]
   variants         ProductVariant[]
+  categories       ProductDraftCategory[]
   reviewHistory    ProductReviewHistory[]
 
-  @@unique([lineItemId])
-  @@index([sessionId])
+  @@unique([merchantId, sku])
+  @@unique([merchantId, handle])
   @@index([merchantId])
   @@index([status])
-  @@index([supplierId])
+  @@index([workflowStage])
+  @@index([syncStatus])
+  @@index([priority])
+  @@index([sku])
+  @@index([barcode])
+  @@index([handle])
   @@index([createdAt])
+  @@index([confidence])
+  @@index([purchaseOrderId])
 }
 
 model ProductImage {
@@ -469,10 +521,23 @@ model ProductCategory {
 
   parent       ProductCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
   children     ProductCategory[] @relation("CategoryHierarchy")
-  products     ProductDraft[]
+  products     ProductDraftCategory[]
 
   @@index([parentId])
   @@index([sortOrder])
+}
+
+model ProductDraftCategory {
+  productDraftId  String
+  categoryId      String
+  createdAt       DateTime     @default(now())
+
+  productDraft    ProductDraft    @relation(fields: [productDraftId], references: [id], onDelete: Cascade)
+  category        ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([productDraftId, categoryId])
+  @@index([productDraftId])
+  @@index([categoryId])
 }
 
 model ProductReviewHistory {
@@ -594,13 +659,35 @@ enum ImageSource {
 }
 
 enum ProductDraftStatus {
-  DRAFT
-  PENDING_REVIEW
-  APPROVED
-  REJECTED
-  SYNCING
-  SYNCED
-  FAILED
+  PARSED           // Just parsed from AI
+  IN_REVIEW        // Under human review
+  APPROVED         // Approved, ready to sync
+  REJECTED         // Rejected, needs fixes
+  SYNCED           // Successfully synced to Shopify
+  SYNC_ERROR       // Error during sync
+}
+
+enum ProductWorkflowStage {
+  INITIAL          // Just created
+  BASIC_REVIEW     // Basic info review
+  DETAILED_REVIEW  // Detailed review
+  PRICING_REVIEW   // Pricing strategy review
+  FINAL_REVIEW     // Final approval
+  APPROVED         // Approved for sync
+}
+
+enum ProductPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum ShopifySyncStatus {
+  PENDING          // Not yet synced
+  SYNCING          // Currently syncing
+  SYNCED           // Successfully synced
+  ERROR            // Error during sync
 }
 
 // ==========================================
