@@ -8,6 +8,7 @@ import { db } from '../lib/db.js'
 import { storageService } from '../lib/storageService.js'
 import { workflowIntegration } from '../lib/workflowIntegration.js'
 import path from 'path'
+import { enqueue } from '@vercel/functions'
 
 const router = express.Router()
 
@@ -180,56 +181,28 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
 
           console.log(`✅ Workflow record created: ${workflowId} for upload ${uploadRecord.id}`)
 
-          // Trigger processing directly (non-blocking)
-          // Note: In serverless, we can't rely on setImmediate after response
-          // So we start processing before the response but don't await it
-          ;(async () => {
-            try {
-              console.log(`🚀 Starting background workflow for upload ${uploadRecord.id}`)
-              
-              // Download file from storage
-              const fileBuffer = await storageService.downloadFile(uploadRecord.fileUrl)
-              
-              // Get merchant AI settings
-              const aiSettings = await db.client.merchantAISettings.findUnique({
-                where: { merchantId: merchant.id }
-              })
-
-              // Prepare workflow data
-              const workflowData = {
-                uploadId: uploadRecord.id,
-                merchantId: merchant.id,
-                fileBuffer,
-                fileName: uploadRecord.fileName,
-                fileType: uploadRecord.fileType,
-                settings: aiSettings || {},
-                metadata: {
-                  uploadedBy: 'user',
-                  source: 'upload-api',
-                  purchaseOrderId: purchaseOrder.id
-                }
+          // Enqueue processing job to Vercel Queue
+          // This handles background processing without timeout limits
+          try {
+            await enqueue('process-upload', {
+              uploadId: uploadRecord.id,
+              merchantId: merchant.id
+            })
+            console.log(`📬 Upload queued for processing: ${uploadRecord.id}`)
+          } catch (queueError) {
+            console.error(`❌ Failed to enqueue upload ${uploadRecord.id}:`, queueError)
+            // Update workflow status to failed
+            await db.client.workflowExecution.update({
+              where: { workflowId },
+              data: {
+                status: 'failed',
+                error: `Failed to enqueue: ${queueError.message}`,
+                completedAt: new Date()
               }
-
-              // Process the uploaded file (this runs async in background)
-              await workflowIntegration.processUploadedFile(workflowData)
-              console.log(`✅ Workflow processing completed for upload ${uploadRecord.id}`)
-            } catch (error) {
-              console.error(`❌ Error processing workflow for upload ${uploadRecord.id}:`, error)
-              // Update workflow status to failed
-              await db.client.workflowExecution.update({
-                where: { workflowId },
-                data: {
-                  status: 'failed',
-                  error: error.message,
-                  completedAt: new Date()
-                }
-              }).catch(updateError => {
-                console.error(`❌ Failed to update workflow status:`, updateError)
-              })
-            }
-          })().catch(error => {
-            console.error(`❌ Unhandled error in workflow processing:`, error)
-          })
+            }).catch(updateError => {
+              console.error(`❌ Failed to update workflow status:`, updateError)
+            })
+          }
 
         } catch (workflowError) {
           console.error(`❌ Failed to create workflow record for upload ${uploadRecord.id}:`, workflowError)

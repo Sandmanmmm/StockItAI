@@ -13,6 +13,17 @@
     "api/src/server.js": {
       "maxDuration": 30,
       "memory": 1024
+    },
+    "api/src/queues/process-upload.js": {
+      "maxDuration": 900,
+      "memory": 2048
+    }
+  },
+  "queues": {
+    "process-upload": {
+      "handler": "api/src/queues/process-upload.js",
+      "maxDuration": 900,
+      "memory": 2048
     }
   },
   "env": {
