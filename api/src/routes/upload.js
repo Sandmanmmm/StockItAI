@@ -180,28 +180,55 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
 
           console.log(`✅ Workflow record created: ${workflowId} for upload ${uploadRecord.id}`)
 
-          // Trigger processing via internal API call (non-blocking)
-          // This happens after the response is sent to avoid timeout
-          setImmediate(() => {
-            // Make internal HTTP request to trigger endpoint
-            const triggerUrl = `${process.env.API_BASE_URL || 'http://localhost:3001'}/api/workflow/trigger/${uploadRecord.id}`
-            
-            fetch(triggerUrl, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                // Pass through merchant context if needed
-                'x-merchant-id': merchant.id
+          // Trigger processing directly (non-blocking)
+          // Note: In serverless, we can't rely on setImmediate after response
+          // So we start processing before the response but don't await it
+          (async () => {
+            try {
+              console.log(`🚀 Starting background workflow for upload ${uploadRecord.id}`)
+              
+              // Download file from storage
+              const fileBuffer = await storageService.downloadFile(uploadRecord.fileUrl)
+              
+              // Get merchant AI settings
+              const aiSettings = await db.client.merchantAISettings.findUnique({
+                where: { merchantId: merchant.id }
+              })
+
+              // Prepare workflow data
+              const workflowData = {
+                uploadId: uploadRecord.id,
+                merchantId: merchant.id,
+                fileBuffer,
+                fileName: uploadRecord.fileName,
+                fileType: uploadRecord.fileType,
+                settings: aiSettings || {},
+                metadata: {
+                  uploadedBy: 'user',
+                  source: 'upload-api',
+                  purchaseOrderId: purchaseOrder.id
+                }
               }
-            }).then(response => {
-              if (response.ok) {
-                console.log(`✅ Workflow trigger initiated for upload ${uploadRecord.id}`)
-              } else {
-                console.error(`❌ Failed to trigger workflow: ${response.status}`)
-              }
-            }).catch(error => {
-              console.error(`❌ Error triggering workflow:`, error.message)
-            })
+
+              // Process the uploaded file (this runs async in background)
+              await workflowIntegration.processUploadedFile(workflowData)
+              console.log(`✅ Workflow processing completed for upload ${uploadRecord.id}`)
+            } catch (error) {
+              console.error(`❌ Error processing workflow for upload ${uploadRecord.id}:`, error)
+              // Update workflow status to failed
+              await db.client.workflowExecution.update({
+                where: { workflowId },
+                data: {
+                  status: 'failed',
+                  error: error.message,
+                  completedAt: new Date()
+                }
+              }).catch(updateError => {
+                console.error(`❌ Failed to update workflow status:`, updateError)
+              })
+            }
+          })().catch(error => {
+            console.error(`❌ Unhandled error in workflow processing:`, error)
           })
 
         } catch (workflowError) {
