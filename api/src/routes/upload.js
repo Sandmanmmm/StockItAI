@@ -184,7 +184,7 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
           // Trigger queue processing via HTTP call (fire-and-forget)
           // Using native https module for better reliability
           const queueHost = process.env.VERCEL_URL || 'localhost:3001'
-          const queuePath = '/api/queues/process-upload'
+          const queuePath = '/api/process-upload-queue'
           const queueData = JSON.stringify({
             uploadId: uploadRecord.id,
             merchantId: merchant.id

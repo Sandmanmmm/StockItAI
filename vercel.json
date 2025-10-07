@@ -5,10 +5,6 @@
   "installCommand": "npm install --include=dev && cd api && npm install",
   "rewrites": [
     {
-      "source": "/api/queues/process-upload",
-      "destination": "/api/process-upload-queue"
-    },
-    {
       "source": "/api/:path*",
       "destination": "/api/src/server.js"
     }
