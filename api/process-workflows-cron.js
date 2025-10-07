@@ -223,9 +223,30 @@ export default async function handler(req, res) {
       take: 5 // Process up to 5 workflows per cron run to avoid timeout
     })
 
-    console.log(`📋 Found ${pendingWorkflows.length} pending workflows`)
+    // Also find stuck "processing" workflows (processing for more than 5 minutes)
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000)
+    const stuckWorkflows = await db.client.workflowExecution.findMany({
+      where: {
+        status: 'processing',
+        updatedAt: {
+          lt: fiveMinutesAgo
+        }
+      },
+      orderBy: {
+        createdAt: 'asc'
+      },
+      take: 5
+    })
 
-    if (pendingWorkflows.length === 0) {
+    // Combine and deduplicate workflows
+    const allWorkflows = [...pendingWorkflows, ...stuckWorkflows]
+    const uniqueWorkflows = allWorkflows.filter((w, index, self) =>
+      index === self.findIndex((t) => t.workflowId === w.workflowId)
+    )
+
+    console.log(`📋 Found ${pendingWorkflows.length} pending + ${stuckWorkflows.length} stuck = ${uniqueWorkflows.length} total workflows`)
+
+    if (uniqueWorkflows.length === 0) {
       console.log(`✅ No pending workflows to process`)
       return res.status(200).json({ 
         success: true, 
@@ -237,7 +258,7 @@ export default async function handler(req, res) {
 
     // Process workflows sequentially (parallel processing can overwhelm serverless)
     const results = []
-    for (const workflow of pendingWorkflows) {
+    for (const workflow of uniqueWorkflows) {
       console.log(`\n🔄 Processing workflow ${workflow.workflowId}...`)
       const result = await processWorkflow(workflow)
       results.push(result)
