@@ -25,6 +25,13 @@
       "memory": 2048
     }
   },
+  "deploymentProtection": {
+    "allowPaths": [
+      {
+        "path": "/api/process-workflows-cron"
+      }
+    ]
+  },
   "env": {
     "NODE_ENV": "production"
   }
