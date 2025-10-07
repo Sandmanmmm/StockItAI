@@ -5,10 +5,34 @@
 
 import Bull from 'bull';
 import { workflowOrchestrator } from './workflowOrchestrator.js';
+import { getRedisConfig } from '../config/redis.production.js';
 
 export class ProcessorRegistrationService {
   constructor() {
     this.registeredProcessors = new Map();
+  }
+
+  /**
+   * Get Redis connection options from environment config
+   */
+  getRedisOptions() {
+    const config = getRedisConfig();
+    return {
+      host: config.connection.host,
+      port: config.connection.port,
+      password: config.connection.password,
+      db: config.connection.db,
+      tls: config.connection.tls,
+      maxRetriesPerRequest: 3,
+      connectTimeout: 10000,
+      retryStrategy: (times) => {
+        if (times > 3) {
+          console.error('❌ [REDIS] Max retry attempts reached');
+          return null; // Stop retrying
+        }
+        return Math.min(times * 100, 3000); // Exponential backoff
+      }
+    };
   }
 
   /**
@@ -19,13 +43,12 @@ export class ProcessorRegistrationService {
     console.log(`🔧 [PERMANENT FIX] Registering processor for ${jobType} on queue ${queueName} with concurrency ${concurrency}`);
     
     try {
-      // Create queue connection
+      // Create queue connection with production Redis config
+      const redisOptions = this.getRedisOptions();
+      console.log(`🔌 [REDIS] Connecting to ${redisOptions.host}:${redisOptions.port}`);
+      
       const queue = new Bull(queueName, {
-        redis: {
-          host: 'localhost',
-          port: 6379,
-          db: 0
-        }
+        redis: redisOptions
       });
 
       // Use the PROVEN WORKING pattern: queue.process(concurrency, processorFunction)
@@ -145,12 +168,10 @@ export class ProcessorRegistrationService {
     if (!queue) {
       console.warn(`⚠️ [PERMANENT FIX] Queue ${queueName} not found (jobType: ${jobType}), creating temporary queue`);
       const Bull = (await import('bull')).default;
+      const redisOptions = this.getRedisOptions();
+      console.log(`🔌 [REDIS] Creating temporary queue with ${redisOptions.host}:${redisOptions.port}`);
       queue = new Bull(queueName, {
-        redis: {
-          port: 6379,
-          host: 'localhost',
-          db: 0
-        }
+        redis: redisOptions
       });
     }
     
