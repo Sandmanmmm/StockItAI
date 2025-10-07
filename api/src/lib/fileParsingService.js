@@ -3,7 +3,6 @@
  * Handles parsing of PDF, Excel, CSV, and image files to extract PO data
  */
 
-import pdfParse from 'pdf-parse'
 import * as XLSX from 'xlsx'
 import csv from 'csv-parser'
 import sharp from 'sharp'
@@ -43,24 +42,46 @@ export class FileParsingService {
   }
 
   /**
-   * Parse PDF files and extract text content using pdf-parse
+   * Parse PDF files and extract text content using pdfjs-dist with dynamic import
+   * This avoids the pdf-parse initialization issue in serverless
    */
   async parsePDF(buffer) {
     try {
-      // Use pdf-parse which works better in serverless environments
-      const data = await pdfParse(buffer)
+      // Dynamic import to avoid initialization issues in serverless
+      const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
+      
+      // Load PDF document
+      const loadingTask = pdfjsLib.getDocument({
+        data: new Uint8Array(buffer),
+        useSystemFonts: true,
+        standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/'
+      })
+      
+      const pdfDocument = await loadingTask.promise
+      const numPages = pdfDocument.numPages
+      const pageTexts = []
+      
+      // Extract text from each page
+      for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+        const page = await pdfDocument.getPage(pageNum)
+        const textContent = await page.getTextContent()
+        const pageText = textContent.items.map(item => item.str).join(' ')
+        pageTexts.push(pageText)
+      }
+      
+      const fullText = pageTexts.join('\n\n')
       
       const result = {
-        text: data.text.trim(),
-        pages: data.numpages,
-        pageTexts: [data.text.trim()], // pdf-parse doesn't separate by page easily
+        text: fullText.trim(),
+        pages: numPages,
+        pageTexts,
         metadata: {
-          numPages: data.numpages,
-          info: data.info
+          numPages,
+          extractedAt: new Date().toISOString()
         },
-        rawContent: data.text.trim(),
-        confidence: 0.9, // High confidence for clean text extraction
-        extractionMethod: 'pdf-parse'
+        rawContent: fullText.trim(),
+        confidence: 0.9,
+        extractionMethod: 'pdfjs-dist-dynamic'
       }
       
       console.log(`PDF parsed successfully: ${result.pages} pages, ${result.text.length} characters`)
