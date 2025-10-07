@@ -1,0 +1,23 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "23e81c0c86894462be615b35f7d6caf3"
+name = "StockIT DEV"
+application_url = "https://forgot-yeah-termination-intelligence.trycloudflare.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+
+[webhooks]
+api_version = "2025-10"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_customers,read_inventory,read_orders,read_products,write_customers,write_inventory,write_orders,write_products"
+
+[auth]
+redirect_urls = [ 
+  "https://forgot-yeah-termination-intelligence.trycloudflare.com/api/auth",
+  "https://forgot-yeah-termination-intelligence.trycloudflare.com/auth/callback",
+  "https://forgot-yeah-termination-intelligence.trycloudflare.com/auth/shopify/callback"
+]

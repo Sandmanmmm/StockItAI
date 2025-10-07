@@ -28,6 +28,12 @@ async function initializePrisma() {
       console.log(`🔌 Connecting Prisma engine...`)
       await prisma.$connect()
       console.log(`✅ Prisma engine connected`)
+      
+      // CRITICAL: Verify engine is ready with a simple query
+      // This ensures the engine is fully initialized before returning the client
+      console.log(`🔍 Verifying engine readiness with test query...`)
+      await prisma.$queryRaw`SELECT 1`
+      console.log(`✅ Engine verified - ready for queries`)
 
       // Handle graceful shutdown
       process.on('beforeExit', async () => {
