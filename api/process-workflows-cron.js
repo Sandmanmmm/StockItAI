@@ -7,9 +7,9 @@
  * Configured in vercel.json under "crons" section.
  */
 
-import { db } from '../src/lib/db.js'
-import { storageService } from '../src/lib/storageService.js'
-import { workflowIntegration } from '../src/lib/workflowIntegration.js'
+import { db } from './src/lib/db.js'
+import { storageService } from './src/lib/storageService.js'
+import { workflowIntegration } from './src/lib/workflowIntegration.js'
 
 /**
  * Process a single workflow execution
