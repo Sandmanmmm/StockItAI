@@ -26,8 +26,11 @@ async function processWorkflow(workflow) {
   let workflowId = workflow.workflowId
 
   try {
+    // Get a stable reference to the Prisma client
+    const prisma = db.client
+
     // Update workflow status to 'processing'
-    await db.client.workflowExecution.update({
+    await prisma.workflowExecution.update({
       where: { workflowId },
       data: { 
         status: 'processing',
@@ -37,7 +40,7 @@ async function processWorkflow(workflow) {
     })
 
     // Get the upload record
-    const upload = await db.client.upload.findUnique({
+    const upload = await prisma.upload.findUnique({
       where: { id: workflow.uploadId },
       include: {
         merchant: true
@@ -48,8 +51,8 @@ async function processWorkflow(workflow) {
       throw new Error(`Upload not found: ${workflow.uploadId}`)
     }
 
-    console.log(`� Processing file: ${upload.fileName} (${upload.fileType || 'unknown'})`)
-    console.log(`�📥 Downloading file from: ${upload.fileUrl}`)
+    console.log(`📦 Processing file: ${upload.fileName} (${upload.fileType || 'unknown'})`)
+    console.log(`📥 Downloading file from: ${upload.fileUrl}`)
 
     // Download the file from Supabase Storage
     const fileBuffer = await storageService.downloadFile(upload.fileUrl)
@@ -57,7 +60,7 @@ async function processWorkflow(workflow) {
     console.log(`✅ File downloaded successfully (${fileBuffer.length} bytes)`)
 
     // Update progress
-    await db.client.workflowExecution.update({
+    await prisma.workflowExecution.update({
       where: { workflowId },
       data: {
         currentStage: 'preparing_workflow',
@@ -66,7 +69,7 @@ async function processWorkflow(workflow) {
     })
 
     // Get merchant AI settings
-    const aiSettings = await db.client.merchantAISettings.findUnique({
+    const aiSettings = await prisma.merchantAISettings.findUnique({
       where: { merchantId: workflow.merchantId }
     })
 
@@ -95,7 +98,7 @@ async function processWorkflow(workflow) {
     }
 
     // Update progress
-    await db.client.workflowExecution.update({
+    await prisma.workflowExecution.update({
       where: { workflowId },
       data: {
         currentStage: 'parsing_file',
@@ -111,13 +114,13 @@ async function processWorkflow(workflow) {
     console.log(`📊 Result:`, JSON.stringify(result, null, 2))
 
     // Double-check workflow status (processUploadedFile should handle this)
-    const finalWorkflow = await db.client.workflowExecution.findUnique({
+    const finalWorkflow = await prisma.workflowExecution.findUnique({
       where: { workflowId }
     })
     
     if (finalWorkflow && finalWorkflow.status !== 'completed') {
       console.log(`⚠️ Workflow not marked complete, updating status...`)
-      await db.client.workflowExecution.update({
+      await prisma.workflowExecution.update({
         where: { workflowId },
         data: {
           status: 'completed',
@@ -128,7 +131,7 @@ async function processWorkflow(workflow) {
     }
 
     // Update upload status
-    await db.client.upload.update({
+    await prisma.upload.update({
       where: { id: workflow.uploadId },
       data: {
         status: 'processed',
@@ -151,17 +154,21 @@ async function processWorkflow(workflow) {
 
     // Mark workflow as failed
     try {
-      await db.client.workflowExecution.update({
+      // Get a fresh client reference in case the original failed
+      const prisma = db.client
+      
+      await prisma.workflowExecution.update({
         where: { workflowId },
         data: {
           status: 'failed',
-          error: error.message,
+          errorMessage: error.message,
+          failedStage: 'processing',
           completedAt: new Date()
         }
       })
 
       // Mark upload as failed
-      await db.client.upload.update({
+      await prisma.upload.update({
         where: { id: workflow.uploadId },
         data: {
           status: 'failed',
