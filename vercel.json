@@ -6,7 +6,7 @@
   "rewrites": [
     {
       "source": "/api/queues/process-upload",
-      "destination": "/api/queues/process-upload.js"
+      "destination": "/api/process-upload-queue"
     },
     {
       "source": "/api/:path*",
@@ -18,7 +18,7 @@
       "maxDuration": 30,
       "memory": 1024
     },
-    "api/queues/process-upload.js": {
+    "api/process-upload-queue.js": {
       "maxDuration": 300,
       "memory": 2048
     }

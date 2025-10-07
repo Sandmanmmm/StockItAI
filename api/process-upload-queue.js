@@ -1,0 +1,179 @@
+/**
+ * Vercel Serverless Function - Queue Handler for Processing Uploaded PO Files
+ * 
+ * This is a direct serverless function (not routed through Express) that handles
+ * background processing of uploaded purchase order files.
+ */
+
+import { db } from '../src/lib/db.js'
+import { storageService } from '../src/lib/storageService.js'
+import { workflowIntegration } from '../src/lib/workflowIntegration.js'
+
+export default async function handler(req, res) {
+  // Only accept POST requests
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' })
+  }
+
+  const { uploadId, merchantId } = req.body || {}
+  
+  console.log(`📦 Queue processing started for upload: ${uploadId}`)
+  
+  let workflowId = null
+  
+  try {
+    // Fetch upload record
+    const upload = await db.client.upload.findUnique({
+      where: { id: uploadId },
+      include: {
+        merchant: true
+      }
+    })
+
+    if (!upload) {
+      console.error(`❌ Upload not found: ${uploadId}`)
+      return res.status(404).json({ error: 'Upload not found' })
+    }
+
+    workflowId = upload.workflowId
+    console.log(`📄 Processing file: ${upload.fileName} (${upload.fileType})`)
+
+    // Update workflow status to processing
+    if (workflowId) {
+      await db.client.workflowExecution.update({
+        where: { workflowId },
+        data: {
+          status: 'processing',
+          currentStage: 'downloading_file',
+          progressPercent: 10
+        }
+      })
+    }
+
+    // Download file from Supabase Storage
+    console.log(`⬇️ Downloading file from: ${upload.fileUrl}`)
+    const fileBuffer = await storageService.downloadFile(upload.fileUrl)
+    
+    if (!fileBuffer) {
+      throw new Error('Failed to download file from storage')
+    }
+
+    console.log(`✅ File downloaded successfully: ${fileBuffer.length} bytes`)
+
+    // Update progress
+    if (workflowId) {
+      await db.client.workflowExecution.update({
+        where: { workflowId },
+        data: {
+          currentStage: 'processing',
+          progressPercent: 30
+        }
+      })
+    }
+
+    // Get merchant AI settings
+    const aiSettings = await db.client.aISettings.findUnique({
+      where: { merchantId }
+    })
+
+    if (!aiSettings) {
+      throw new Error(`AI settings not found for merchant: ${merchantId}`)
+    }
+
+    console.log(`🤖 AI settings loaded for merchant: ${merchantId}`)
+
+    // Update progress
+    if (workflowId) {
+      await db.client.workflowExecution.update({
+        where: { workflowId },
+        data: {
+          currentStage: 'analyzing',
+          progressPercent: 50
+        }
+      })
+    }
+
+    // Process the file through workflow integration
+    console.log(`🔄 Starting file processing...`)
+    const result = await workflowIntegration.processUploadedFile(
+      upload.id,
+      upload.fileName,
+      upload.fileType,
+      fileBuffer,
+      upload.merchant,
+      aiSettings
+    )
+
+    console.log(`✅ File processing completed successfully`)
+
+    // Update workflow to completed
+    if (workflowId) {
+      await db.client.workflowExecution.update({
+        where: { workflowId },
+        data: {
+          status: 'completed',
+          currentStage: 'completed',
+          progressPercent: 100,
+          endTime: new Date()
+        }
+      })
+    }
+
+    // Update upload status
+    await db.client.upload.update({
+      where: { id: uploadId },
+      data: {
+        status: 'processed',
+        processedAt: new Date()
+      }
+    })
+
+    console.log(`📬 Queue processing completed successfully for upload: ${uploadId}`)
+
+    return res.status(200).json({
+      success: true,
+      uploadId,
+      workflowId,
+      result
+    })
+
+  } catch (error) {
+    console.error(`❌ Queue processing error for upload ${uploadId}:`, error)
+
+    // Update workflow to failed
+    if (workflowId) {
+      try {
+        await db.client.workflowExecution.update({
+          where: { workflowId },
+          data: {
+            status: 'failed',
+            error: error.message,
+            endTime: new Date()
+          }
+        })
+      } catch (updateError) {
+        console.error(`Failed to update workflow status:`, updateError)
+      }
+    }
+
+    // Update upload status to failed
+    try {
+      await db.client.upload.update({
+        where: { id: uploadId },
+        data: {
+          status: 'failed',
+          processedAt: new Date()
+        }
+      })
+    } catch (updateError) {
+      console.error(`Failed to update upload status:`, updateError)
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+      uploadId,
+      workflowId
+    })
+  }
+}
