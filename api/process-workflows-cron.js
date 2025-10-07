@@ -37,6 +37,9 @@ async function processWorkflow(workflow) {
     }
     
     console.log(`✅ Prisma client ready for workflow processing`)
+    console.log(`🔍 Prisma client type:`, typeof prisma)
+    console.log(`🔍 Prisma has $connect:`, typeof prisma.$connect)
+    console.log(`🔍 Prisma has workflowExecution:`, typeof prisma.workflowExecution)
 
     // Update workflow status to 'processing'
     await prisma.workflowExecution.update({
