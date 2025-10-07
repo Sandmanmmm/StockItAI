@@ -13,29 +13,40 @@ let prisma
 
 // Initialize Prisma client
 function initializePrisma() {
-  if (!prisma) {
-    prisma = new PrismaClient({
-      log: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
-      errorFormat: 'pretty'
-    })
+  try {
+    console.log(`🔍 initializePrisma called, current prisma:`, prisma ? 'exists' : 'null')
+    
+    if (!prisma) {
+      console.log(`🔧 Creating new PrismaClient...`)
+      prisma = new PrismaClient({
+        log: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
+        errorFormat: 'pretty'
+      })
+      console.log(`✅ PrismaClient created successfully`)
 
-    // Handle graceful shutdown
-    process.on('beforeExit', async () => {
-      await prisma.$disconnect()
-    })
+      // Handle graceful shutdown
+      process.on('beforeExit', async () => {
+        await prisma.$disconnect()
+      })
 
-    process.on('SIGINT', async () => {
-      await prisma.$disconnect()
-      process.exit(0)
-    })
+      process.on('SIGINT', async () => {
+        await prisma.$disconnect()
+        process.exit(0)
+      })
 
-    process.on('SIGTERM', async () => {
-      await prisma.$disconnect()
-      process.exit(0)
-    })
+      process.on('SIGTERM', async () => {
+        await prisma.$disconnect()
+        process.exit(0)
+      })
+    }
+
+    console.log(`✅ Returning prisma client, type:`, typeof prisma)
+    return prisma
+  } catch (error) {
+    console.error(`❌ FATAL ERROR in initializePrisma:`, error)
+    console.error(`❌ Error stack:`, error.stack)
+    throw error
   }
-
-  return prisma
 }
 
 // Database utility functions
