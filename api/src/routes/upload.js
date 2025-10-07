@@ -203,7 +203,7 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
             }
           }
 
-          const req = https.request(options, (queueRes) => {
+          const queueReq = https.request(options, (queueRes) => {
             console.log(`📬 Queue response status: ${queueRes.statusCode}`)
             
             if (queueRes.statusCode === 200) {
@@ -213,12 +213,12 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
             }
           })
 
-          req.on('error', (queueError) => {
+          queueReq.on('error', (queueError) => {
             console.error(`❌ Failed to call queue handler:`, queueError.message)
           })
 
-          req.write(queueData)
-          req.end()
+          queueReq.write(queueData)
+          queueReq.end()
 
         } catch (workflowError) {
           console.error(`❌ Failed to create workflow record for upload ${uploadRecord.id}:`, workflowError)
