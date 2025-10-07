@@ -10,6 +10,10 @@
 import { db } from './src/lib/db.js'
 import { storageService } from './src/lib/storageService.js'
 import { workflowIntegration } from './src/lib/workflowIntegration.js'
+import { processorRegistrationService } from './src/lib/processorRegistrationService.js'
+
+// Track processor initialization state across cron invocations
+let processorsInitialized = false
 
 /**
  * Process a single workflow execution
@@ -235,6 +239,22 @@ export default async function handler(req, res) {
     console.log(`🔌 Initializing database connection...`)
     const prisma = await db.getClient()
     console.log(`✅ Database connected successfully`)
+
+    // Initialize queue processors on first run (or if not yet initialized)
+    if (!processorsInitialized) {
+      console.log(`🚀 Initializing queue processors...`)
+      try {
+        await processorRegistrationService.initializeAllProcessors()
+        processorsInitialized = true
+        console.log(`✅ Queue processors initialized successfully`)
+      } catch (processorError) {
+        console.error(`⚠️ Failed to initialize processors (continuing anyway):`, processorError.message)
+        // Don't fail the cron job if processor initialization fails
+        // The queues will be created on-demand by addJob
+      }
+    } else {
+      console.log(`✅ Queue processors already initialized`)
+    }
 
     // Find all pending workflows
     const pendingWorkflows = await prisma.workflowExecution.findMany({
