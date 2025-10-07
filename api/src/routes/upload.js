@@ -180,31 +180,27 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
 
           console.log(`✅ Workflow record created: ${workflowId} for upload ${uploadRecord.id}`)
 
-          // Trigger queue processing via HTTP call (non-blocking)
-          // This allows background processing with extended timeout
-          setImmediate(async () => {
-            try {
-              const queueUrl = `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3001'}/api/queues/process-upload`
-              
-              const response = await fetch(queueUrl, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                  uploadId: uploadRecord.id,
-                  merchantId: merchant.id
-                })
-              })
-
-              if (response.ok) {
-                console.log(`📬 Queue processing initiated for upload: ${uploadRecord.id}`)
-              } else {
-                console.error(`❌ Queue processing failed: ${response.status}`)
-              }
-            } catch (queueError) {
-              console.error(`❌ Failed to call queue handler for upload ${uploadRecord.id}:`, queueError)
+          // Trigger queue processing via HTTP call (fire-and-forget)
+          // We don't await this to avoid blocking the response
+          const queueUrl = `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3001'}/api/queues/process-upload`
+          
+          fetch(queueUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              uploadId: uploadRecord.id,
+              merchantId: merchant.id
+            })
+          }).then(response => {
+            if (response.ok) {
+              console.log(`📬 Queue processing initiated for upload: ${uploadRecord.id}`)
+            } else {
+              console.error(`❌ Queue processing failed: ${response.status}`)
             }
+          }).catch(queueError => {
+            console.error(`❌ Failed to call queue handler for upload ${uploadRecord.id}:`, queueError)
           })
 
         } catch (workflowError) {
