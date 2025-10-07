@@ -105,6 +105,7 @@ app.use('/api/files', filesRouter) // File serving doesn't need auth verificatio
 
 // Queue handlers - Internal endpoints, no authentication required
 app.post('/api/queues/process-upload', processUploadQueueHandler)
+app.post('/api/process-upload-queue', processUploadQueueHandler) // Also support direct serverless endpoint path
 
 // Production monitoring and analytics (admin access)
 if (process.env.NODE_ENV === 'production') {

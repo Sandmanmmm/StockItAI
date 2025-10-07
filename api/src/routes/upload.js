@@ -190,7 +190,11 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
             merchantId: merchant.id
           })
 
-          console.log(`🔄 Initiating queue call to: https://${queueHost}${queuePath}`)
+          console.log(`🔄 ========== TRIGGERING QUEUE HANDLER ==========`)
+          console.log(`🔄 Host: ${queueHost}`)
+          console.log(`🔄 Path: ${queuePath}`)
+          console.log(`🔄 Full URL: https://${queueHost}${queuePath}`)
+          console.log(`🔄 Payload:`, queueData)
 
           const options = {
             hostname: queueHost.replace('https://', '').replace('http://', ''),
@@ -204,21 +208,36 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
           }
 
           const queueReq = https.request(options, (queueRes) => {
-            console.log(`📬 Queue response status: ${queueRes.statusCode}`)
+            console.log(`📬 ========== QUEUE RESPONSE RECEIVED ==========`)
+            console.log(`📬 Status: ${queueRes.statusCode}`)
+            console.log(`📬 Headers:`, JSON.stringify(queueRes.headers, null, 2))
             
-            if (queueRes.statusCode === 200) {
-              console.log(`✅ Queue processing initiated for upload: ${uploadRecord.id}`)
-            } else {
-              console.error(`❌ Queue processing failed with status: ${queueRes.statusCode}`)
-            }
+            let responseBody = ''
+            queueRes.on('data', (chunk) => {
+              responseBody += chunk
+            })
+            
+            queueRes.on('end', () => {
+              console.log(`📬 Response body:`, responseBody)
+              
+              if (queueRes.statusCode === 200) {
+                console.log(`✅ Queue processing initiated successfully for upload: ${uploadRecord.id}`)
+              } else {
+                console.error(`❌ Queue processing failed with status: ${queueRes.statusCode}`)
+                console.error(`❌ Response:`, responseBody)
+              }
+            })
           })
 
           queueReq.on('error', (queueError) => {
-            console.error(`❌ Failed to call queue handler:`, queueError.message)
+            console.error(`❌ ========== QUEUE REQUEST ERROR ==========`)
+            console.error(`❌ Error message:`, queueError.message)
+            console.error(`❌ Error stack:`, queueError.stack)
           })
 
           queueReq.write(queueData)
           queueReq.end()
+          console.log(`🚀 Queue request sent!`)
 
         } catch (workflowError) {
           console.error(`❌ Failed to create workflow record for upload ${uploadRecord.id}:`, workflowError)

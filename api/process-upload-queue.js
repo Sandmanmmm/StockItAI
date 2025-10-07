@@ -10,14 +10,24 @@ import { storageService } from '../src/lib/storageService.js'
 import { workflowIntegration } from '../src/lib/workflowIntegration.js'
 
 export default async function handler(req, res) {
+  const startTime = Date.now()
+  console.log(`🚀 ========== QUEUE HANDLER INVOKED ==========`)
+  console.log(`⏰ Time: ${new Date().toISOString()}`)
+  console.log(`📍 Method: ${req.method}`)
+  console.log(`📍 URL: ${req.url}`)
+  console.log(`📍 Headers:`, JSON.stringify(req.headers, null, 2))
+  
   // Only accept POST requests
   if (req.method !== 'POST') {
+    console.log(`❌ Rejected: Method ${req.method} not allowed`)
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
   const { uploadId, merchantId } = req.body || {}
   
   console.log(`📦 Queue processing started for upload: ${uploadId}`)
+  console.log(`🏪 Merchant ID: ${merchantId}`)
+  console.log(`📦 Request body:`, JSON.stringify(req.body, null, 2))
   
   let workflowId = null
   
@@ -129,6 +139,8 @@ export default async function handler(req, res) {
     })
 
     console.log(`📬 Queue processing completed successfully for upload: ${uploadId}`)
+    console.log(`⏱️ Total execution time: ${Date.now() - startTime}ms`)
+    console.log(`✅ ========== QUEUE HANDLER COMPLETE ==========`)
 
     return res.status(200).json({
       success: true,
@@ -138,7 +150,12 @@ export default async function handler(req, res) {
     })
 
   } catch (error) {
-    console.error(`❌ Queue processing error for upload ${uploadId}:`, error)
+    console.error(`❌ ========== QUEUE PROCESSING ERROR ==========`)
+    console.error(`❌ Upload ID: ${uploadId}`)
+    console.error(`❌ Workflow ID: ${workflowId}`)
+    console.error(`❌ Error message: ${error.message}`)
+    console.error(`❌ Error stack:`, error.stack)
+    console.error(`❌ Error details:`, JSON.stringify(error, null, 2))
 
     // Update workflow to failed
     if (workflowId) {
