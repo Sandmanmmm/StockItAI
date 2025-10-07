@@ -5,8 +5,8 @@
   "installCommand": "npm install --include=dev && cd api && npm install",
   "rewrites": [
     {
-      "source": "/api/queues/:path*",
-      "destination": "/api/src/queues/:path*.js"
+      "source": "/api/queues/process-upload",
+      "destination": "/api/queues/process-upload.js"
     },
     {
       "source": "/api/:path*",
@@ -18,7 +18,7 @@
       "maxDuration": 30,
       "memory": 1024
     },
-    "api/src/queues/**": {
+    "api/queues/process-upload.js": {
       "maxDuration": 300,
       "memory": 2048
     }
