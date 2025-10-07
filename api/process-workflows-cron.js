@@ -26,18 +26,17 @@ async function processWorkflow(workflow) {
   let workflowId = workflow.workflowId
 
   try {
-    // Get a stable reference to the Prisma client
-    const prisma = db.client
+    // Get a stable reference to the Prisma client (now with proper connection)
+    const prisma = await db.getClient()
     
     // Debug: Verify prisma client is available
     if (!prisma) {
       console.error(`❌ FATAL: Prisma client is undefined!`)
       console.error(`❌ db object:`, db)
-      console.error(`❌ db.client type:`, typeof db?.client)
-      throw new Error('Prisma client not initialized - db.client is undefined')
+      throw new Error('Prisma client not initialized - getClient returned undefined')
     }
     
-    console.log(`✅ Prisma client initialized successfully`)
+    console.log(`✅ Prisma client ready for workflow processing`)
 
     // Update workflow status to 'processing'
     await prisma.workflowExecution.update({
@@ -224,13 +223,13 @@ export default async function handler(req, res) {
   console.log(`✅ Authenticated cron request from: ${userAgent}`)
 
   try {
-    // Initialize database connection
+    // Initialize database connection with proper async handling
     console.log(`🔌 Initializing database connection...`)
-    await db.client.$connect()
+    const prisma = await db.getClient()
     console.log(`✅ Database connected successfully`)
 
     // Find all pending workflows
-    const pendingWorkflows = await db.client.workflowExecution.findMany({
+    const pendingWorkflows = await prisma.workflowExecution.findMany({
       where: {
         status: 'pending'
       },
@@ -242,7 +241,7 @@ export default async function handler(req, res) {
 
     // Also find stuck "processing" workflows (processing for more than 5 minutes)
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000)
-    const stuckWorkflows = await db.client.workflowExecution.findMany({
+    const stuckWorkflows = await prisma.workflowExecution.findMany({
       where: {
         status: 'processing',
         updatedAt: {

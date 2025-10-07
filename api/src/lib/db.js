@@ -12,7 +12,7 @@ import { PrismaClient } from '@prisma/client'
 let prisma
 
 // Initialize Prisma client
-function initializePrisma() {
+async function initializePrisma() {
   try {
     console.log(`🔍 initializePrisma called, current prisma:`, prisma ? 'exists' : 'null')
     
@@ -23,6 +23,11 @@ function initializePrisma() {
         errorFormat: 'pretty'
       })
       console.log(`✅ PrismaClient created successfully`)
+      
+      // CRITICAL: Connect immediately in serverless environment
+      console.log(`🔌 Connecting Prisma engine...`)
+      await prisma.$connect()
+      console.log(`✅ Prisma engine connected`)
 
       // Handle graceful shutdown
       process.on('beforeExit', async () => {
@@ -51,9 +56,24 @@ function initializePrisma() {
 
 // Database utility functions
 export const db = {
-  // Get Prisma client instance
+  // Get Prisma client instance (async to ensure connection)
+  async getClient() {
+    return await initializePrisma()
+  },
+  
+  // Synchronous getter for backward compatibility (but may not be connected)
   get client() {
-    return initializePrisma()
+    // Return existing client if available, otherwise create new one
+    if (prisma) {
+      return prisma
+    }
+    // If no client exists, create one synchronously (but it won't be connected yet)
+    console.warn(`⚠️ Accessing client synchronously - connection may not be established`)
+    prisma = new PrismaClient({
+      log: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
+      errorFormat: 'pretty'
+    })
+    return prisma
   },
 
   // Test database connection
