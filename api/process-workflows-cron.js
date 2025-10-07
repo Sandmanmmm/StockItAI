@@ -81,7 +81,7 @@ async function processWorkflow(workflow) {
     })
 
     // Get merchant AI settings
-    const aiSettings = await prisma.merchantAISettings.findUnique({
+    const aiSettings = await prisma.aISettings.findUnique({
       where: { merchantId: workflow.merchantId }
     })
 
