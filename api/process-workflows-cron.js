@@ -207,6 +207,11 @@ export default async function handler(req, res) {
   console.log(`✅ Authenticated cron request from: ${userAgent}`)
 
   try {
+    // Initialize database connection
+    console.log(`🔌 Initializing database connection...`)
+    await db.client.$connect()
+    console.log(`✅ Database connected successfully`)
+
     // Find all pending workflows
     const pendingWorkflows = await db.client.workflowExecution.findMany({
       where: {
