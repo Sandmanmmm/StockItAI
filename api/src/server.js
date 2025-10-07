@@ -78,6 +78,9 @@ import securityRouter from './routes/security.js'
 import suppliersRouter from './routes/suppliers.js'
 import searchRouter from './routes/search.js'
 
+// Import queue handlers (internal endpoints - no auth required)
+import processUploadQueueHandler from './queues/process-upload.js'
+
 // Import workflow system
 import { workflowIntegration } from './lib/workflowIntegration.js'
 import { processorRegistrationService } from './lib/processorRegistrationService.js'
@@ -99,6 +102,9 @@ app.use('/api/security', process.env.NODE_ENV === 'development' ? devBypassAuth 
 app.use('/api/suppliers', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, suppliersRouter)
 app.use('/api/search', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, searchRouter)
 app.use('/api/files', filesRouter) // File serving doesn't need auth verification
+
+// Queue handlers - Internal endpoints, no authentication required
+app.post('/api/queues/process-upload', processUploadQueueHandler)
 
 // Production monitoring and analytics (admin access)
 if (process.env.NODE_ENV === 'production') {
