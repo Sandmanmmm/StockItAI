@@ -3,10 +3,14 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "installCommand": "npm install --include=dev && cd api && npm install",
-  "rewrites": [
+  "routes": [
     {
-      "source": "/api/((?!process-upload-queue).*)",
-      "destination": "/api/src/server.js"
+      "src": "/api/process-upload-queue",
+      "dest": "/api/process-upload-queue.js"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/src/server.js"
     }
   ],
   "functions": {
