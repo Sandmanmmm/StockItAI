@@ -5,12 +5,14 @@
   "installCommand": "npm install --include=dev && cd api && npm install",
   "routes": [
     {
-      "src": "/api/process-upload-queue",
-      "dest": "/api/process-upload-queue.js"
-    },
-    {
       "src": "/api/(.*)",
       "dest": "/api/src/server.js"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/process-workflows",
+      "schedule": "* * * * *"
     }
   ],
   "functions": {
@@ -18,7 +20,7 @@
       "maxDuration": 30,
       "memory": 1024
     },
-    "api/process-upload-queue.js": {
+    "api/cron/process-workflows.js": {
       "maxDuration": 300,
       "memory": 2048
     }
