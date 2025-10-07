@@ -822,6 +822,17 @@ export class WorkflowOrchestrator {
       const merchantId = data.merchantId || 'cmft3moy50000ultcbqgxzz6d' // Default test merchant
       
       console.log('💾 Persisting AI results to database...')
+      
+      // DEBUG: Log AI result structure
+      console.log('🔍 DEBUG - AI Result Structure:')
+      console.log('   - Has extractedData:', !!aiResult.extractedData)
+      console.log('   - extractedData.lineItems:', aiResult.extractedData?.lineItems?.length || 0)
+      console.log('   - extractedData.items:', aiResult.extractedData?.items?.length || 0)
+      console.log('   - extractedData keys:', Object.keys(aiResult.extractedData || {}))
+      if (aiResult.extractedData) {
+        console.log('   - Full extractedData:', JSON.stringify(aiResult.extractedData, null, 2))
+      }
+      
       job.progress(30)
       
       // Update DB progress: Saving to database
