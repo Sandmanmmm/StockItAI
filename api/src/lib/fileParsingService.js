@@ -3,7 +3,7 @@
  * Handles parsing of PDF, Excel, CSV, and image files to extract PO data
  */
 
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
+import pdfParse from 'pdf-parse'
 import * as XLSX from 'xlsx'
 import csv from 'csv-parser'
 import sharp from 'sharp'
@@ -43,45 +43,24 @@ export class FileParsingService {
   }
 
   /**
-   * Parse PDF files and extract text content using pdf.js
+   * Parse PDF files and extract text content using pdf-parse
    */
   async parsePDF(buffer) {
     try {
-      // Convert Buffer to Uint8Array for PDF.js compatibility
-      const uint8Array = new Uint8Array(buffer)
-      
-      // Load PDF document
-      const loadingTask = pdfjsLib.getDocument({ data: uint8Array })
-      const pdf = await loadingTask.promise
-      
-      let fullText = ''
-      let pageTexts = []
-      
-      // Extract text from all pages
-      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-        const page = await pdf.getPage(pageNum)
-        const textContent = await page.getTextContent()
-        
-        const pageText = textContent.items
-          .map(item => item.str)
-          .join(' ')
-          .trim()
-        
-        pageTexts.push(pageText)
-        fullText += pageText + '\n'
-      }
+      // Use pdf-parse which works better in serverless environments
+      const data = await pdfParse(buffer)
       
       const result = {
-        text: fullText.trim(),
-        pages: pdf.numPages,
-        pageTexts: pageTexts,
+        text: data.text.trim(),
+        pages: data.numpages,
+        pageTexts: [data.text.trim()], // pdf-parse doesn't separate by page easily
         metadata: {
-          numPages: pdf.numPages,
-          fingerprint: pdf.fingerprint
+          numPages: data.numpages,
+          info: data.info
         },
-        rawContent: fullText.trim(),
+        rawContent: data.text.trim(),
         confidence: 0.9, // High confidence for clean text extraction
-        extractionMethod: 'pdfjs-text'
+        extractionMethod: 'pdf-parse'
       }
       
       console.log(`PDF parsed successfully: ${result.pages} pages, ${result.text.length} characters`)
