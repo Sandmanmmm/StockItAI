@@ -50,11 +50,17 @@ export class FileParsingService {
       // Dynamic import to avoid initialization issues in serverless
       const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
       
+      // Disable worker for serverless environment (worker files not bundled properly)
+      pdfjsLib.GlobalWorkerOptions.workerSrc = null
+      
       // Load PDF document
       const loadingTask = pdfjsLib.getDocument({
         data: new Uint8Array(buffer),
         useSystemFonts: true,
-        standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/'
+        standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/',
+        // Disable worker - run in main thread for serverless
+        disableWorker: true,
+        isEvalSupported: false
       })
       
       const pdfDocument = await loadingTask.promise
@@ -81,7 +87,7 @@ export class FileParsingService {
         },
         rawContent: fullText.trim(),
         confidence: 0.9,
-        extractionMethod: 'pdfjs-dist-dynamic'
+        extractionMethod: 'pdfjs-dist-dynamic-no-worker'
       }
       
       console.log(`PDF parsed successfully: ${result.pages} pages, ${result.text.length} characters`)
