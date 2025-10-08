@@ -48,23 +48,20 @@ async function initializePrisma() {
         console.log(`✅ Prisma $connect() succeeded (attempt ${connectAttempts + 1})`)
         
         // CRITICAL: Wait for engine to fully initialize after connection
-        // Even though $connect() succeeded, engine needs time to be query-ready
-        const engineWarmupDelay = 300 // 300ms warmup time
+        // Under concurrent load, engines need MORE time to stabilize
+        // Increased from 300ms to 1000ms to handle cold starts and concurrent workflows
+        const engineWarmupDelay = 1000 // 1 second warmup (was 300ms - too short!)
         console.log(`⏳ Waiting ${engineWarmupDelay}ms for engine warmup...`)
         await new Promise(resolve => setTimeout(resolve, engineWarmupDelay))
         
-        // CRITICAL: Verify engine is ready with multiple test queries
-        // This ensures the engine is fully initialized before returning the client
-        console.log(`🔍 Verifying engine readiness with test queries...`)
+        // CRITICAL: Verify engine is ready with test query
+        // Under load, skip multiple test queries to reduce connection strain
+        console.log(`🔍 Verifying engine readiness with test query...`)
         
-        // Wrap test queries with retry logic
+        // Single test query with generous retry (was 2 queries causing more load)
         await withPrismaRetry(
-          () => prisma.$queryRaw`SELECT 1`,
-          { operationName: 'Test query 1', maxRetries: 3, initialDelayMs: 200 }
-        )
-        await withPrismaRetry(
-          () => prisma.$queryRaw`SELECT 1`,
-          { operationName: 'Test query 2', maxRetries: 3, initialDelayMs: 200 }
+          () => prisma.$queryRaw`SELECT 1 as healthcheck`,
+          { operationName: 'Engine health check', maxRetries: 5, initialDelayMs: 300 }
         )
         
         console.log(`✅ Engine verified - ready for queries`)
