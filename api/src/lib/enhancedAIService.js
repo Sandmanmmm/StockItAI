@@ -164,32 +164,50 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
         response = await this._processWithOpenAI(parseResult.text)
         
       } else if (['jpeg', 'png', 'gif', 'webp'].includes(fileType.type)) {
-        // For images, use vision API
-        console.log(`� Processing image with vision API...`)
+        // For images, use vision API with timeout protection
+        console.log(`📊 Processing image with vision API...`)
+        console.log(`📊 Image size: ${fileContent.length} bytes`)
+        console.log(`📊 MIME type: ${fileType.mimeType}`)
         
-        response = await openai.chat.completions.create({
-          model: "gpt-4o",
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "text",
-                  text: this.defaultPrompt
-                },
-                {
-                  type: "image_url",
-                  image_url: {
-                    url: `data:${fileType.mimeType};base64,${fileContent.toString('base64')}`,
-                    detail: "high"
+        try {
+          // Create timeout promise (50s - safe margin before Vercel 60s limit)
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Vision API timeout after 50 seconds')), 50000)
+          })
+          
+          // Create API call promise
+          const apiCallPromise = openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: this.defaultPrompt },
+                  {
+                    type: "image_url",
+                    image_url: {
+                      url: `data:${fileType.mimeType};base64,${fileContent.toString('base64')}`,
+                      detail: "high"
+                    }
                   }
-                }
-              ]
-            }
-          ],
-          max_tokens: 4000,
-          temperature: 0.1
-        })
+                ]
+              }
+            ],
+            max_tokens: 4000,
+            temperature: 0.1
+          })
+          
+          console.log('⏳ Waiting for vision API response (50s timeout)...')
+          response = await Promise.race([apiCallPromise, timeoutPromise])
+          console.log('✅ Vision API response received successfully')
+          
+        } catch (error) {
+          console.error('❌ Vision API call failed:', error.message)
+          if (error.message.includes('timeout')) {
+            throw new Error(`Vision API timed out after 50 seconds. Image may be too large or API is slow.`)
+          }
+          throw error
+        }
         
       } else if (fileType.type === 'csv' || mimeType === 'text/csv') {
         // Handle CSV files with direct text content processing
