@@ -267,7 +267,16 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
             throw new Error('No JSON found in AI response')
           }
         } else {
-          parsedResult = JSON.parse(jsonMatch[0])
+          // Strip JavaScript-style comments from JSON (AI sometimes adds them)
+          let jsonString = jsonMatch[0]
+          // Remove single-line comments: // comment
+          jsonString = jsonString.replace(/\/\/.*$/gm, '')
+          // Remove multi-line comments: /* comment */
+          jsonString = jsonString.replace(/\/\*[\s\S]*?\*\//g, '')
+          // Remove trailing commas before closing brackets (common AI mistake)
+          jsonString = jsonString.replace(/,(\s*[}\]])/g, '$1')
+          
+          parsedResult = JSON.parse(jsonString)
         }
       } catch (parseError) {
         console.error('Failed to parse AI response as JSON:', parseError)
@@ -533,7 +542,14 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
     // Process result similar to main parsing
     const aiResponse = response.choices[0]?.message?.content
     const jsonMatch = aiResponse.match(/\{[\s\S]*\}/)
-    const parsedResult = JSON.parse(jsonMatch[0])
+    
+    // Strip JavaScript-style comments from JSON (AI sometimes adds them)
+    let jsonString = jsonMatch[0]
+    jsonString = jsonString.replace(/\/\/.*$/gm, '') // Remove single-line comments
+    jsonString = jsonString.replace(/\/\*[\s\S]*?\*\//g, '') // Remove multi-line comments
+    jsonString = jsonString.replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
+    
+    const parsedResult = JSON.parse(jsonString)
     
     return await this.enhanceAIResult(parsedResult, workflowId)
   }
