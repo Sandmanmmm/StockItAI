@@ -170,9 +170,9 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
         console.log(`📊 MIME type: ${fileType.mimeType}`)
         
         try {
-          // Create timeout promise (50s - safe margin before Vercel 60s limit)
+          // Create timeout promise (200s - observed API times up to 177s in production)
           const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Vision API timeout after 50 seconds')), 50000)
+            setTimeout(() => reject(new Error('Vision API timeout after 200 seconds')), 200000)
           })
           
           // Create API call promise
@@ -197,14 +197,14 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
             temperature: 0.1
           })
           
-          console.log('⏳ Waiting for vision API response (50s timeout)...')
+          console.log('⏳ Waiting for vision API response (200s timeout)...')
           response = await Promise.race([apiCallPromise, timeoutPromise])
           console.log('✅ Vision API response received successfully')
           
         } catch (error) {
           console.error('❌ Vision API call failed:', error.message)
           if (error.message.includes('timeout')) {
-            throw new Error(`Vision API timed out after 50 seconds. Image may be too large or API is slow.`)
+            throw new Error(`Vision API timed out after 200 seconds. Image may be too large or API is slow.`)
           }
           throw error
         }
