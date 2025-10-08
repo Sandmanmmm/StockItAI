@@ -12,11 +12,11 @@ const router = express.Router()
 // POST /api/process/po-file/:uploadId - Process uploaded PO file
 router.post('/po-file/:uploadId', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -92,11 +92,11 @@ router.post('/po-file/:uploadId', async (req, res) => {
 // GET /api/process/status/:uploadId - Get processing status
 router.get('/status/:uploadId', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -174,11 +174,11 @@ router.get('/status/:uploadId', async (req, res) => {
 // POST /api/process/retry/:uploadId - Retry failed processing
 router.post('/retry/:uploadId', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 

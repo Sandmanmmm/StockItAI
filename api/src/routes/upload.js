@@ -42,11 +42,11 @@ const upload = multer({
 // POST /api/upload/po-file - Upload PO file with AI processing
 router.post('/po-file', upload.single('file'), async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -301,11 +301,11 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
 // GET /api/upload/:poId/status - Get upload and processing status
 router.get('/:poId/status', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -396,11 +396,11 @@ router.get('/:poId/status', async (req, res) => {
 // POST /api/upload/:poId/process - Manually trigger processing
 router.post('/:poId/process', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -495,11 +495,11 @@ router.post('/:poId/process', async (req, res) => {
 // GET /api/upload/:poId/download - Download original file
 router.get('/:poId/download', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -553,11 +553,11 @@ router.get('/:uploadId/workflow-status', async (req, res) => {
   try {
     const { uploadId } = req.params
     
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 

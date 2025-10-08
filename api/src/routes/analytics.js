@@ -10,11 +10,11 @@ const router = express.Router()
 // GET /api/analytics/dashboard - Get dashboard statistics
 router.get('/dashboard', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -111,11 +111,11 @@ router.get('/dashboard', async (req, res) => {
 // GET /api/analytics/suppliers - Get supplier analytics
 router.get('/suppliers', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -177,11 +177,11 @@ router.get('/suppliers', async (req, res) => {
 // GET /api/analytics/trends - Get processing trends
 router.get('/trends', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 

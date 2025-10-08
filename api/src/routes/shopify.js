@@ -10,11 +10,11 @@ const router = express.Router()
 // POST /api/shopify/sync - Start Shopify sync
 router.post('/sync', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -69,11 +69,11 @@ router.post('/sync', async (req, res) => {
 // GET /api/shopify/sync/:syncId/status - Get sync status
 router.get('/sync/:syncId/status', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -159,11 +159,11 @@ async function simulateSync(syncId) {
 // GET /api/shopify/products - Get Shopify products for matching
 router.get('/products', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 

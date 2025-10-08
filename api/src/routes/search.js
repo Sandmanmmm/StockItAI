@@ -23,11 +23,11 @@ router.get('/', async (req, res) => {
       })
     }
 
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 

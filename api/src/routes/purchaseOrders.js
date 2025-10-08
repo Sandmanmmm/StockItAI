@@ -25,33 +25,18 @@ router.get('/', async (req, res) => {
       })
     }
 
-    // Get merchant - with fallback for development
-    let merchant
-    try {
-      merchant = await db.getCurrentMerchant()
-      if (!merchant) {
-        console.log('No merchant found, attempting to create development merchant')
-        // Create a test merchant for development
-        merchant = await db.client.merchant.upsert({
-          where: { shopDomain: 'dev-test.myshopify.com' },
-          update: {},
-          create: {
-            name: 'Development Test Store',
-            shopDomain: 'dev-test.myshopify.com',
-            email: 'dev-test@shopify.com',
-            status: 'active',
-            currency: 'USD',
-            plan: 'basic'
-          }
-        })
-      }
-    } catch (merchantError) {
-      console.error('Merchant lookup/creation error:', merchantError)
-      return res.status(500).json({
+    // Get merchant from authenticated request (set by verifyShopifyRequest middleware)
+    const merchant = req.merchant
+    
+    if (!merchant || !merchant.id) {
+      console.error('No authenticated merchant found in request')
+      return res.status(401).json({
         success: false,
-        error: 'Failed to authenticate merchant'
+        error: 'Merchant authentication required'
       })
     }
+    
+    console.log(`📋 Fetching purchase orders for merchant: ${merchant.shopDomain} (${merchant.id})`)
 
     // Parse and validate query parameters
     const limit = Math.min(parseInt(req.query.limit) || 50, 10000) // Cap at 10000 to load all orders
@@ -186,11 +171,11 @@ router.get('/', async (req, res) => {
 // GET /api/purchase-orders/:id - Get single purchase order with full details
 router.get('/:id', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -233,11 +218,11 @@ router.get('/:id', async (req, res) => {
 // POST /api/purchase-orders - Create new purchase order
 router.post('/', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -279,11 +264,11 @@ router.post('/', async (req, res) => {
 // PUT /api/purchase-orders/:id - Update purchase order
 router.put('/:id', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -330,11 +315,11 @@ router.put('/:id', async (req, res) => {
 // DELETE /api/purchase-orders/:id - Delete purchase order
 router.delete('/:id', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -448,11 +433,11 @@ router.delete('/:id', async (req, res) => {
 // POST /api/purchase-orders/:id/deny - Deny a purchase order
 router.post('/:id/deny', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -492,11 +477,11 @@ router.post('/:id/deny', async (req, res) => {
 // POST /api/purchase-orders/:id/approve - Approve and sync to Shopify
 router.post('/:id/approve', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -558,11 +543,11 @@ router.post('/:id/approve', async (req, res) => {
 // POST /api/purchase-orders/:id/edit - Save edited purchase order data
 router.post('/:id/edit', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 

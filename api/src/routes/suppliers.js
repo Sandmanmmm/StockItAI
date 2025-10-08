@@ -12,11 +12,11 @@ const router = express.Router()
 // GET /api/suppliers - Get all suppliers
 router.get('/', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -41,11 +41,11 @@ router.get('/', async (req, res) => {
 // GET /api/suppliers/:id - Get single supplier
 router.get('/:id', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -85,11 +85,11 @@ router.get('/:id', async (req, res) => {
 // POST /api/suppliers - Create new supplier
 router.post('/', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -149,11 +149,11 @@ router.post('/', async (req, res) => {
 // PUT /api/suppliers/:id - Update supplier
 router.put('/:id', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -196,11 +196,11 @@ router.put('/:id', async (req, res) => {
 // DELETE /api/suppliers/:id - Delete supplier
 router.delete('/:id', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -249,11 +249,11 @@ router.delete('/:id', async (req, res) => {
 // GET /api/suppliers/:id/metrics - Get supplier performance metrics
 router.get('/:id/metrics', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -299,11 +299,11 @@ router.get('/:id/metrics', async (req, res) => {
 // POST /api/suppliers/:id/metrics/refresh - Force recalculate metrics
 router.post('/:id/metrics/refresh', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -342,11 +342,11 @@ router.post('/:id/metrics/refresh', async (req, res) => {
 // POST /api/suppliers/match - Find matching suppliers for parsed supplier data
 router.post('/match', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -389,11 +389,11 @@ router.post('/match', async (req, res) => {
 // POST /api/suppliers/suggest/:purchaseOrderId - Get supplier suggestions for PO
 router.post('/suggest/:purchaseOrderId', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -459,11 +459,11 @@ router.post('/suggest/:purchaseOrderId', async (req, res) => {
 // POST /api/suppliers/auto-match/:purchaseOrderId - Auto-match and link supplier
 router.post('/auto-match/:purchaseOrderId', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -530,11 +530,11 @@ router.post('/auto-match/:purchaseOrderId', async (req, res) => {
 // PUT /api/suppliers/link/:purchaseOrderId/:supplierId - Manually link supplier to PO
 router.put('/link/:purchaseOrderId/:supplierId', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 

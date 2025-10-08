@@ -19,11 +19,11 @@ const upload = multer({ storage: multer.memoryStorage() })
  */
 router.post('/analyze-po', upload.single('file'), async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -132,11 +132,11 @@ router.post('/analyze-po', upload.single('file'), async (req, res) => {
  */
 router.post('/apply-po-changes', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -245,11 +245,11 @@ router.post('/apply-po-changes', async (req, res) => {
  */
 router.get('/po-job-status/:purchaseOrderId', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -350,11 +350,11 @@ router.get('/po-job-status/:purchaseOrderId', async (req, res) => {
  */
 router.get('/po-processing-queue', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -421,11 +421,11 @@ router.get('/po-processing-queue', async (req, res) => {
  */
 router.post('/retry-failed-po/:purchaseOrderId', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 

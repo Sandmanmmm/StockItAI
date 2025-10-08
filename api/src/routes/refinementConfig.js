@@ -12,12 +12,12 @@ const refinementConfigService = new RefinementConfigService(db.client);
  */
 router.get('/', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant();
+    const merchant = req.merchant;
     
-    if (!merchant) {
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       });
     }
 
@@ -59,13 +59,13 @@ router.get('/', async (req, res) => {
  */
 router.put('/', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant();
+    const merchant = req.merchant;
     const configUpdates = req.body;
     
-    if (!merchant) {
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       });
     }
 
@@ -95,13 +95,13 @@ router.put('/', async (req, res) => {
  */
 router.post('/category-mappings', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant();
+    const merchant = req.merchant;
     const mappingData = req.body;
     
-    if (!merchant) {
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       });
     }
 
@@ -131,14 +131,14 @@ router.post('/category-mappings', async (req, res) => {
  */
 router.put('/category-mappings/:id', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant();
+    const merchant = req.merchant;
     const { id } = req.params;
     const mappingData = req.body;
     
-    if (!merchant) {
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       });
     }
 
@@ -169,13 +169,13 @@ router.put('/category-mappings/:id', async (req, res) => {
  */
 router.post('/pricing-rules', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant();
+    const merchant = req.merchant;
     const ruleData = req.body;
     
-    if (!merchant) {
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       });
     }
 
@@ -205,13 +205,13 @@ router.post('/pricing-rules', async (req, res) => {
  */
 router.post('/content-rules', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant();
+    const merchant = req.merchant;
     const ruleData = req.body;
     
-    if (!merchant) {
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       });
     }
 
@@ -241,13 +241,13 @@ router.post('/content-rules', async (req, res) => {
  */
 router.post('/deduplication-rules', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant();
+    const merchant = req.merchant;
     const ruleData = req.body;
     
-    if (!merchant) {
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       });
     }
 
@@ -277,17 +277,17 @@ router.post('/deduplication-rules', async (req, res) => {
  */
 router.post('/test-pricing', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant();
+    const merchant = req.merchant;
     const { sampleProduct } = req.body;
     
     console.log('🔧 TEST-PRICING API Called:');
     console.log('  merchantId:', merchant?.id);
     console.log('  sampleProduct:', JSON.stringify(sampleProduct));
     
-    if (!merchant) {
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       });
     }
 
@@ -374,13 +374,13 @@ router.post('/validate', async (req, res) => {
  */
 router.delete('/category-mappings/:id', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant();
+    const merchant = req.merchant;
     const { id } = req.params;
     
-    if (!merchant) {
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       });
     }
 
@@ -410,13 +410,13 @@ router.delete('/category-mappings/:id', async (req, res) => {
  */
 router.delete('/pricing-rules/:id', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant();
+    const merchant = req.merchant;
     const { id } = req.params;
     
-    if (!merchant) {
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       });
     }
 
@@ -446,13 +446,13 @@ router.delete('/pricing-rules/:id', async (req, res) => {
  */
 router.delete('/content-rules/:id', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant();
+    const merchant = req.merchant;
     const { id } = req.params;
     
-    if (!merchant) {
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       });
     }
 
@@ -482,13 +482,13 @@ router.delete('/content-rules/:id', async (req, res) => {
  */
 router.delete('/deduplication-rules/:id', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant();
+    const merchant = req.merchant;
     const { id } = req.params;
     
-    if (!merchant) {
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       });
     }
 

@@ -10,11 +10,11 @@ const router = express.Router()
 // GET /api/line-items/purchase-order/:poId - Get line items for a purchase order
 router.get('/purchase-order/:poId', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -54,11 +54,11 @@ router.get('/purchase-order/:poId', async (req, res) => {
 // PUT /api/line-items/:id - Update line item
 router.put('/:id', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
@@ -100,11 +100,11 @@ router.put('/:id', async (req, res) => {
 // POST /api/line-items/:id/match-shopify - Match line item to Shopify product
 router.post('/:id/match-shopify', async (req, res) => {
   try {
-    const merchant = await db.getCurrentMerchant()
-    if (!merchant) {
+    const merchant = req.merchant
+    if (!merchant || !merchant.id) {
       return res.status(401).json({
         success: false,
-        error: 'Merchant not found'
+        error: 'Merchant authentication required'
       })
     }
 
