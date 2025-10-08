@@ -44,28 +44,31 @@ export function useRealtimePOData() {
   const [isConnected, setIsConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Fetch initial pipeline status from database
+  // Fetch initial pipeline status from API
   const fetchPipelineStatus = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from(TABLES.PURCHASE_ORDERS)
-        .select('status')
+      const response = await fetch('/api/analytics/dashboard', {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include'
+      })
 
-      if (error) throw error
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`)
+      }
 
-      if (data) {
-        const statusCounts = data.reduce((acc, po) => {
-          const status = po.status?.toLowerCase() || 'unknown'
-          if (status === 'queued' || status === 'pending') acc.queued++
-          else if (status === 'processing' || status === 'analyzing') acc.processing++
-          else if (status === 'completed' || status === 'success') acc.completed++
-          else if (status === 'failed' || status === 'error') acc.failed++
-          return acc
-        }, { queued: 0, processing: 0, completed: 0, failed: 0 })
+      const result = await response.json()
+      const stats = result.data
 
+      if (stats) {
+        // Calculate status counts from the stats
         setPipelineStatus({
-          ...statusCounts,
-          total: data.length
+          queued: stats.pendingPOs || 0,
+          processing: 0, // Will be calculated from active POs
+          completed: (stats.totalPOs || 0) - (stats.pendingPOs || 0),
+          failed: 0, // Not currently tracked in dashboard stats
+          total: stats.totalPOs || 0
         })
       }
     } catch (err) {
@@ -74,42 +77,43 @@ export function useRealtimePOData() {
     }
   }, [])
 
-  // Fetch active POs being processed
+  // Fetch active POs being processed via API
   const fetchActivePOs = useCallback(async () => {
     try {
-      const { data, error} = await supabase
-        .from(TABLES.PURCHASE_ORDERS)
-        .select(`
-          id, 
-          number, 
-          status, 
-          createdAt, 
-          updatedAt,
-          processingNotes,
-          jobStatus,
-          POLineItem(id)
-        `)
-        .order('createdAt', { ascending: false })
-        .limit(10)
+      // Fetch processing POs from API
+      const response = await fetch('/api/purchase-orders?status=processing&limit=20', {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include'
+      })
 
-      if (error) throw error
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`)
+      }
 
-      if (data) {
-        const poProgress: POProgress[] = data.map((po: any) => {
+      const result = await response.json()
+      const orders = result.data?.orders || []
+
+      if (orders && Array.isArray(orders)) {
+        const poProgress: POProgress[] = orders.map((po: any) => {
           const status = po.status?.toLowerCase() || 'queued'
           let mappedStatus: POProgress['status'] = 'queued'
           let progress = 0
           let stage = 'Waiting in queue'
 
-          // Get line item count from the array of line items
-          const totalItems = po.POLineItem?.length || 0
+          // Get line item count
+          const totalItems = po.totalItems || po._count?.lineItems || 0
           let itemsProcessed = 0
 
           // Parse processing notes for detailed status
           let detailedStage = stage
           if (po.processingNotes) {
             try {
-              const notes = JSON.parse(po.processingNotes)
+              const notes = typeof po.processingNotes === 'string' 
+                ? JSON.parse(po.processingNotes) 
+                : po.processingNotes
+              
               if (notes.currentStep) {
                 detailedStage = notes.currentStep
               }
@@ -149,11 +153,13 @@ export function useRealtimePOData() {
           }
 
           // Calculate items processed based on progress
-          itemsProcessed = Math.floor((progress / 100) * totalItems)
+          if (itemsProcessed === 0 && totalItems > 0) {
+            itemsProcessed = Math.floor((progress / 100) * totalItems)
+          }
 
           return {
             id: po.id,
-            poNumber: po.number,
+            poNumber: po.number || 'N/A',
             status: mappedStatus,
             progress,
             stage,
@@ -170,84 +176,57 @@ export function useRealtimePOData() {
     }
   }, [])
 
-  // Fetch recent activity logs
+  // Fetch recent activity logs via API
   const fetchActivityLogs = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from(TABLES.PURCHASE_ORDERS)
-        .select(`
-          id, 
-          number, 
-          status, 
-          createdAt, 
-          updatedAt,
-          processingNotes,
-          jobStatus,
-          syncResults
-        `)
-        .order('updatedAt', { ascending: false })
-        .limit(50)
+      const response = await fetch('/api/analytics/dashboard', {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include'
+      })
 
-      if (error) throw error
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`)
+      }
 
-      if (data) {
-        const logs: ActivityLog[] = data.map((po: any) => {
-          const status = po.status?.toLowerCase() || 'unknown'
+      const result = await response.json()
+      const recentActivity = result.data?.recentActivity || []
+
+      if (recentActivity && Array.isArray(recentActivity)) {
+        const logs: ActivityLog[] = recentActivity.map((activity: any) => {
+          const status = activity.status?.toLowerCase() || 'unknown'
           let type: ActivityLog['type'] = 'processing'
-          let message = 'Processing purchase order'
-          let details = `Status: ${status}`
-
-          // Parse processing notes for detailed messages
-          if (po.processingNotes) {
-            try {
-              const notes = JSON.parse(po.processingNotes)
-              if (notes.message) {
-                message = notes.message
-              }
-              if (notes.details) {
-                details = notes.details
-              }
-            } catch {
-              // If not JSON, use as details
-              details = po.processingNotes
-            }
-          }
-
-          // Map status to type and message
+          
+          // Map status to activity type
           if (status === 'completed' || status === 'success') {
             type = 'success'
-            message = message || 'Successfully processed and synced'
-            
-            // Add sync results if available
-            if (po.syncResults) {
-              try {
-                const results = JSON.parse(po.syncResults)
-                if (results.productsCreated) {
-                  details = `Created ${results.productsCreated} products in Shopify`
-                }
-              } catch {}
-            }
           } else if (status === 'failed' || status === 'error') {
             type = 'error'
-            message = message || 'Processing failed'
           } else if (status === 'syncing') {
             type = 'sync'
-            message = message || 'Syncing products to Shopify'
           } else if (status === 'processing' || status === 'analyzing') {
             type = 'processing'
-            message = message || 'Analyzing PDF with AI'
-          } else if (status === 'queued' || status === 'pending') {
-            type = 'processing'
-            message = 'Queued for processing'
+          } else if (activity.type === 'upload') {
+            type = 'upload'
+          }
+
+          // Extract PO number from message if not provided
+          let poNumber = 'N/A'
+          if (activity.message) {
+            const poMatch = activity.message.match(/PO[#\s]*(\S+)/)
+            if (poMatch) {
+              poNumber = poMatch[1]
+            }
           }
 
           return {
-            id: po.id,
-            timestamp: new Date(po.updatedAt),
+            id: activity.id,
+            timestamp: new Date(activity.timestamp),
             type,
-            poNumber: po.number,
-            message,
-            details
+            poNumber,
+            message: activity.message || 'Processing purchase order',
+            details: `Status: ${status}`
           }
         })
 
