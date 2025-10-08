@@ -11,14 +11,32 @@ import { withPrismaRetry, createRetryablePrismaClient, prismaOperation } from '.
 
 // Prisma client singleton
 let prisma
+const PRISMA_CLIENT_VERSION = 'v3_pooler_directurl' // Increment to force recreation
 
 // Initialize Prisma client - FORCED REBUILD v2
 async function initializePrisma() {
   try {
     console.log(`🔍 [v2] initializePrisma called, current prisma:`, prisma ? 'exists' : 'null')
     
+    // FORCE RECREATION: Always recreate to ensure new code is used
+    if (prisma) {
+      console.log(`🔄 Force disconnecting old Prisma client (version upgrade to ${PRISMA_CLIENT_VERSION})`)
+      try {
+        await prisma.$disconnect()
+      } catch (e) {
+        console.warn(`⚠️ Error disconnecting old client:`, e.message)
+      }
+      prisma = null
+    }
+    
     if (!prisma) {
       console.log(`🔧 Creating new PrismaClient...`)
+      console.log(`📊 Environment check:`)
+      console.log(`   DATABASE_URL present: ${!!process.env.DATABASE_URL}`)
+      console.log(`   DIRECT_URL present: ${!!process.env.DIRECT_URL}`)
+      console.log(`   DATABASE_URL port: ${process.env.DATABASE_URL?.includes('5432') ? '5432 (direct)' : process.env.DATABASE_URL?.includes('6543') ? '6543 (pooler)' : 'unknown'}`)
+      console.log(`   DIRECT_URL port: ${process.env.DIRECT_URL?.includes('5432') ? '5432 (direct)' : process.env.DIRECT_URL?.includes('6543') ? '6543 (pooler)' : 'unknown'}`)
+      
       prisma = new PrismaClient({
         log: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
         errorFormat: 'pretty',
