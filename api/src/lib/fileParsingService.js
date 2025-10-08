@@ -43,33 +43,58 @@ export class FileParsingService {
   }
 
   /**
-   * Parse PDF files and extract text content using pdf-parse
-   * Simple, reliable Node.js-native PDF parser without worker complications
+   * Parse PDF files and extract text content using pdf2json
+   * Serverless-friendly PDF parser that works in Lambda/Vercel environments
    */
   async parsePDF(buffer) {
     try {
-      // Dynamic import to avoid initialization issues in serverless
-      const pdfParse = (await import('pdf-parse')).default
+      // Use pdf2json which is serverless-compatible
+      const PDFParser = (await import('pdf2json')).default
       
-      // Parse PDF with pdf-parse - no worker configuration needed!
-      const pdfData = await pdfParse(buffer)
-      
-      const result = {
-        text: pdfData.text.trim(),
-        pages: pdfData.numpages,
-        pageTexts: [pdfData.text.trim()], // pdf-parse doesn't split by page
-        metadata: {
-          numPages: pdfData.numpages,
-          info: pdfData.info || {},
-          extractedAt: new Date().toISOString()
-        },
-        rawContent: pdfData.text.trim(),
-        confidence: 0.9,
-        extractionMethod: 'pdf-parse-v1'
-      }
-      
-      console.log(`PDF parsed successfully: ${result.pages} pages, ${result.text.length} characters`)
-      return result
+      return new Promise((resolve, reject) => {
+        const pdfParser = new PDFParser()
+        
+        pdfParser.on('pdfParser_dataError', (errData) => {
+          console.error('PDF parsing error:', errData.parserError)
+          reject(new Error(`PDF parsing failed: ${errData.parserError}`))
+        })
+        
+        pdfParser.on('pdfParser_dataReady', (pdfData) => {
+          try {
+            // Extract text from all pages
+            const pages = pdfData.Pages || []
+            const pageTexts = pages.map(page => {
+              const texts = page.Texts || []
+              return texts.map(text => {
+                return decodeURIComponent(text.R[0].T || '')
+              }).join(' ')
+            })
+            
+            const fullText = pageTexts.join('\n\n')
+            
+            const result = {
+              text: fullText.trim(),
+              pages: pages.length,
+              pageTexts,
+              metadata: {
+                numPages: pages.length,
+                extractedAt: new Date().toISOString()
+              },
+              rawContent: fullText.trim(),
+              confidence: 0.9,
+              extractionMethod: 'pdf2json-v3'
+            }
+            
+            console.log(`PDF parsed successfully: ${result.pages} pages, ${result.text.length} characters`)
+            resolve(result)
+          } catch (error) {
+            reject(new Error(`PDF text extraction failed: ${error.message}`))
+          }
+        })
+        
+        // Parse the PDF buffer
+        pdfParser.parseBuffer(buffer)
+      })
     } catch (error) {
       console.error('PDF parsing error:', error)
       throw new Error(`PDF parsing failed: ${error.message}`)
