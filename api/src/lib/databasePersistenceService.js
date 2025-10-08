@@ -135,7 +135,7 @@ export class DatabasePersistenceService {
       })
       
       // Verify line items persisted after transaction commit
-      const postCommitCount = await prisma.pOLineItem.count({
+      const postCommitCount = await this.prisma.pOLineItem.count({
         where: { purchaseOrderId: result.purchaseOrder.id }
       })
       console.log(`✅ POST-COMMIT VERIFICATION: ${postCommitCount} line items found for PO ${result.purchaseOrder.id}`)
@@ -156,11 +156,9 @@ export class DatabasePersistenceService {
       
     } catch (error) {
       console.error('❌ Database persistence failed:', error.message)
-      return {
-        success: false,
-        error: error.message,
-        processingTime: Date.now() - startTime
-      }
+      // RE-THROW error to ensure proper error propagation
+      // This prevents false success messages from being logged
+      throw new Error(`Database persistence failed: ${error.message}`)
     }
   }
 
@@ -325,29 +323,85 @@ export class DatabasePersistenceService {
     else if (overallConfidence >= 50) status = 'review_needed'
     else status = 'failed'
     
-    const purchaseOrder = await tx.purchaseOrder.create({
-      data: {
-        number: extractedData.poNumber || extractedData.number || `AI-${Date.now()}`,
-        supplierName: extractedData.vendor?.name || extractedData.supplierName || 'Unknown',
-        orderDate: parseDate(extractedData.orderDate || extractedData.date),
-        dueDate: parseDate(extractedData.dueDate || extractedData.deliveryDate),
-        totalAmount: totalAmount,
-        currency: extractedData.currency || 'USD',
-        status: status,
-        confidence: overallConfidence / 100, // Store as 0-1 range
-        rawData: extractedData, // Store all extracted data
-        processingNotes: aiResult.processingNotes || (aiResult.model ? `Processed by ${aiResult.model}` : 'Processing in progress...'),
-        fileName: fileName,
-        fileSize: options.fileSize || null,
-        fileUrl: options.fileUrl || null,
-        merchantId: merchantId,
-        supplierId: supplierId,
-        jobStatus: 'completed'
-      }
-    })
+    // Extract PO number from AI result
+    const extractedPoNumber = extractedData.poNumber || extractedData.number || `AI-${Date.now()}`
     
-    console.log(`📋 Created purchase order: ${purchaseOrder.number} (${status})`)
-    return purchaseOrder
+    console.log(`📝 Creating purchase order with number: ${extractedPoNumber}`)
+    
+    try {
+      // Try to create the purchase order
+      const purchaseOrder = await tx.purchaseOrder.create({
+        data: {
+          number: extractedPoNumber,
+          supplierName: extractedData.vendor?.name || extractedData.supplierName || 'Unknown',
+          orderDate: parseDate(extractedData.orderDate || extractedData.date),
+          dueDate: parseDate(extractedData.dueDate || extractedData.deliveryDate),
+          totalAmount: totalAmount,
+          currency: extractedData.currency || 'USD',
+          status: status,
+          confidence: overallConfidence / 100, // Store as 0-1 range
+          rawData: extractedData, // Store all extracted data
+          processingNotes: aiResult.processingNotes || (aiResult.model ? `Processed by ${aiResult.model}` : 'Processing in progress...'),
+          fileName: fileName,
+          fileSize: options.fileSize || null,
+          fileUrl: options.fileUrl || null,
+          merchantId: merchantId,
+          supplierId: supplierId,
+          jobStatus: 'completed'
+        }
+      })
+      
+      console.log(`📋 Created purchase order: ${purchaseOrder.number} (${status})`)
+      return purchaseOrder
+      
+    } catch (error) {
+      // Handle unique constraint violation (duplicate PO number)
+      if (error.code === 'P2002') {
+        console.log(`⚠️ PO number ${extractedPoNumber} already exists, finding and updating instead...`)
+        
+        // Find the existing PO
+        const existingPO = await tx.purchaseOrder.findFirst({
+          where: {
+            merchantId: merchantId,
+            number: extractedPoNumber
+          }
+        })
+        
+        if (existingPO) {
+          console.log(`✅ Found existing PO ${existingPO.id}, updating with new AI data...`)
+          // Update the existing PO instead
+          return await this.updatePurchaseOrder(tx, existingPO.id, aiResult, merchantId, fileName, supplierId, options)
+        } else {
+          // Shouldn't happen, but fallback to unique number
+          console.error(`❌ Unique constraint failed but couldn't find existing PO, generating unique number...`)
+          const uniqueNumber = `${extractedPoNumber}-${Date.now()}`
+          const purchaseOrder = await tx.purchaseOrder.create({
+            data: {
+              number: uniqueNumber,
+              supplierName: extractedData.vendor?.name || extractedData.supplierName || 'Unknown',
+              orderDate: parseDate(extractedData.orderDate || extractedData.date),
+              dueDate: parseDate(extractedData.dueDate || extractedData.deliveryDate),
+              totalAmount: totalAmount,
+              currency: extractedData.currency || 'USD',
+              status: status,
+              confidence: overallConfidence / 100,
+              rawData: extractedData,
+              processingNotes: aiResult.processingNotes || (aiResult.model ? `Processed by ${aiResult.model}` : 'Processing in progress...'),
+              fileName: fileName,
+              fileSize: options.fileSize || null,
+              fileUrl: options.fileUrl || null,
+              merchantId: merchantId,
+              supplierId: supplierId,
+              jobStatus: 'completed'
+            }
+          })
+          console.log(`📋 Created purchase order with unique number: ${purchaseOrder.number}`)
+          return purchaseOrder
+        }
+      }
+      // Re-throw other errors
+      throw error
+    }
   }
 
   /**

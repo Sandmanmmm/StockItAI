@@ -882,10 +882,23 @@ export class WorkflowOrchestrator {
       console.log('   dbResult.purchaseOrder exists:', !!dbResult.purchaseOrder)
       console.log('   dbResult.purchaseOrder.id:', dbResult.purchaseOrder?.id)
       
+      // CRITICAL VALIDATION: Ensure database save actually succeeded
+      if (!dbResult.purchaseOrder || !dbResult.purchaseOrder.id) {
+        throw new Error(`Database save validation failed: No purchase order created (PO ID: ${dbResult.purchaseOrder?.id})`)
+      }
+      
+      if (!dbResult.lineItems || dbResult.lineItems.length === 0) {
+        throw new Error(`Database save validation failed: No line items saved (PO ID: ${dbResult.purchaseOrder.id})`)
+      }
+      
+      console.log(`✅ Database save validation passed:`)
+      console.log(`   - Purchase Order ID: ${dbResult.purchaseOrder.id}`)
+      console.log(`   - Line Items: ${dbResult.lineItems.length}`)
+      
       // Save database result to stage store and prepare next stage data
       const stageResult = {
         dbResult,
-        purchaseOrderId: dbResult.purchaseOrder?.id || 'unknown',
+        purchaseOrderId: dbResult.purchaseOrder.id, // Now guaranteed to exist
         merchantId,
         fileName,
         uploadId,
@@ -897,7 +910,7 @@ export class WorkflowOrchestrator {
         ...data,
         aiResult,
         dbResult,
-        purchaseOrderId: dbResult.purchaseOrder?.id || 'unknown'
+        purchaseOrderId: dbResult.purchaseOrder.id // Now guaranteed to exist
       }
       
       // Save and accumulate data for next stage
