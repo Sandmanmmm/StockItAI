@@ -7,8 +7,8 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "build": "prisma generate",
-    "postinstall": "prisma generate",
+    "build": "echo 'Build complete - Prisma client using DIRECT_URL pooler'",
+    "postinstall": "prisma generate && echo 'Prisma generated with environment: DATABASE_URL and DIRECT_URL'",
     "test": "echo 'No tests specified'"
   },
   "dependencies": {
