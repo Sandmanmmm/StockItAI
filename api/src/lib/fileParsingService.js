@@ -59,11 +59,9 @@ export class FileParsingService {
       const loadingTask = pdfjsLib.getDocument({
         data: new Uint8Array(buffer),
         useSystemFonts: true,
-        standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/',
-        // Disable worker - run in main thread for serverless
-        disableWorker: true,
+        standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/standard_fonts/',
+        // Worker will be used via workerSrc path above
         isEvalSupported: false,
-        // Additional safeguard against worker initialization
         useWorkerFetch: false
       })
       
@@ -91,7 +89,7 @@ export class FileParsingService {
         },
         rawContent: fullText.trim(),
         confidence: 0.9,
-        extractionMethod: 'pdfjs-dist-dynamic-no-worker'
+        extractionMethod: 'pdfjs-dist-legacy-v4'
       }
       
       console.log(`PDF parsed successfully: ${result.pages} pages, ${result.text.length} characters`)
