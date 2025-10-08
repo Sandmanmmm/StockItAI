@@ -818,8 +818,11 @@ export class WorkflowOrchestrator {
     await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.DATABASE_SAVE, 10)
     
     try {
-      // Get merchant ID (defaulting to a test merchant for now)
-      const merchantId = data.merchantId || 'cmft3moy50000ultcbqgxzz6d' // Default test merchant
+      // Get merchant ID - REQUIRED for database save
+      if (!data.merchantId) {
+        throw new Error('merchantId is required but not provided in workflow data')
+      }
+      const merchantId = data.merchantId
       
       console.log('💾 Persisting AI results to database...')
       
@@ -900,7 +903,7 @@ export class WorkflowOrchestrator {
         nextStageData
       )
       
-      console.log('📋 About to schedule Product Draft Creation with enriched data:', {
+      console.log('📋 About to schedule Data Normalization with enriched data:', {
         workflowId,
         hasDbResult: !!enrichedNextStageData.dbResult,
         hasAiResult: !!enrichedNextStageData.aiResult,
@@ -915,7 +918,7 @@ export class WorkflowOrchestrator {
         success: true,
         stage: WORKFLOW_STAGES.DATABASE_SAVE,
         dbResult,
-        nextStage: WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION
+        nextStage: WORKFLOW_STAGES.DATA_NORMALIZATION
       }
       
     } catch (error) {
@@ -1001,12 +1004,27 @@ export class WorkflowOrchestrator {
           }
 
           // Find a session for this merchant (required by our schema)
-          const session = await db.client.session.findFirst({
+          let session = await db.client.session.findFirst({
             where: { merchantId: merchantId }
           });
 
           if (!session) {
-            throw new Error(`No session found for merchant ${merchantId}`)
+            console.warn(`⚠️ No session found for merchant ${merchantId}, creating temporary session`)
+            try {
+              session = await db.client.session.create({
+                data: {
+                  shop: `temp-${merchantId}-${Date.now()}`,
+                  state: 'temporary',
+                  isOnline: false,
+                  accessToken: 'temp-token-for-processing',
+                  merchantId: merchantId
+                }
+              })
+              console.log(`✅ Created temporary session: ${session.id}`)
+            } catch (sessionError) {
+              console.error(`❌ Failed to create temporary session:`, sessionError)
+              throw new Error(`No session found for merchant ${merchantId} and failed to create temporary session: ${sessionError.message}`)
+            }
           }
 
           // Apply refinement rules to pricing
