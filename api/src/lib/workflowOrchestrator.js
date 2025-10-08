@@ -520,20 +520,24 @@ export class WorkflowOrchestrator {
         ? `${stageName} - ${itemsProcessed}/${totalItems} items (${progress}% complete)`
         : `${stageName} - ${progress}% complete`
       
-      await db.client.purchaseOrder.update({
-        where: { id: purchaseOrderId },
-        data: {
-          processingNotes: JSON.stringify({
-            currentStep: stageName,
-            progress: progress,
-            itemsProcessed: itemsProcessed,
-            totalItems: totalItems,
-            message: progressNote,
-            updatedAt: new Date().toISOString()
-          }),
-          updatedAt: new Date()
-        }
-      })
+      // Use retry wrapper for transient connection errors
+      await db.prismaOperation(
+        () => db.client.purchaseOrder.update({
+          where: { id: purchaseOrderId },
+          data: {
+            processingNotes: JSON.stringify({
+              currentStep: stageName,
+              progress: progress,
+              itemsProcessed: itemsProcessed,
+              totalItems: totalItems,
+              message: progressNote,
+              updatedAt: new Date().toISOString()
+            }),
+            updatedAt: new Date()
+          }
+        }),
+        `Update PO progress for ${purchaseOrderId}`
+      )
       
       console.log(`📊 Updated PO ${purchaseOrderId} progress: ${progressNote}`)
     } catch (error) {

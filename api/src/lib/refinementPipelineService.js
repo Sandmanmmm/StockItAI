@@ -498,10 +498,13 @@ export class RefinementPipelineService {
   }
 
   async getMerchantShopifyConfig(merchantId) {
-    // Get merchant's Shopify configuration
-    const merchant = await db.client.merchant.findUnique({
-      where: { id: merchantId }
-    })
+    // Get merchant's Shopify configuration with retry logic
+    const merchant = await db.prismaOperation(
+      () => db.client.merchant.findUnique({
+        where: { id: merchantId }
+      }),
+      `Get merchant Shopify config for ${merchantId}`
+    )
     
     return {
       defaultVendor: merchant?.name || 'Unknown Vendor',

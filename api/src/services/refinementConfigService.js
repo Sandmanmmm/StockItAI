@@ -10,9 +10,13 @@ export class RefinementConfigService {
    * Get merchant's refinement configuration
    */
   async getMerchantConfig(merchantId) {
-    const config = await this.prisma.merchantRefinementConfig.findUnique({
-      where: { merchantId }
-    });
+    // Use retry wrapper for transient connection errors
+    const config = await db.prismaOperation(
+      () => this.prisma.merchantRefinementConfig.findUnique({
+        where: { merchantId }
+      }),
+      `Get merchant refinement config for ${merchantId}`
+    );
 
     if (!config) return null;
 
@@ -23,19 +27,25 @@ export class RefinementConfigService {
    * Create or update merchant's refinement configuration
    */
   async updateMerchantConfig(merchantId, updates) {
-    const merchant = await this.prisma.merchant.findUnique({
-      where: { id: merchantId },
-      select: { shopDomain: true }
-    });
+    const merchant = await db.prismaOperation(
+      () => this.prisma.merchant.findUnique({
+        where: { id: merchantId },
+        select: { shopDomain: true }
+      }),
+      `Find merchant ${merchantId}`
+    );
 
     if (!merchant) {
       throw new Error(`Merchant ${merchantId} not found`);
     }
 
     // Check if config exists
-    const existingConfig = await this.prisma.merchantRefinementConfig.findUnique({
-      where: { merchantId }
-    });
+    const existingConfig = await db.prismaOperation(
+      () => this.prisma.merchantRefinementConfig.findUnique({
+        where: { merchantId }
+      }),
+      `Find existing refinement config for ${merchantId}`
+    );
 
     let config;
     if (existingConfig) {

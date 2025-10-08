@@ -7,6 +7,7 @@
 // This ensures proper module resolution and dependency management
 
 import { PrismaClient } from '@prisma/client'
+import { withPrismaRetry, createRetryablePrismaClient, prismaOperation } from './prismaRetryWrapper.js'
 
 // Prisma client singleton
 let prisma
@@ -55,8 +56,17 @@ async function initializePrisma() {
         // CRITICAL: Verify engine is ready with multiple test queries
         // This ensures the engine is fully initialized before returning the client
         console.log(`🔍 Verifying engine readiness with test queries...`)
-        await prisma.$queryRaw`SELECT 1`
-        await prisma.$queryRaw`SELECT 1` // Second verification
+        
+        // Wrap test queries with retry logic
+        await withPrismaRetry(
+          () => prisma.$queryRaw`SELECT 1`,
+          { operationName: 'Test query 1', maxRetries: 3, initialDelayMs: 200 }
+        )
+        await withPrismaRetry(
+          () => prisma.$queryRaw`SELECT 1`,
+          { operationName: 'Test query 2', maxRetries: 3, initialDelayMs: 200 }
+        )
+        
         console.log(`✅ Engine verified - ready for queries`)
         break // Success!
       } catch (error) {
@@ -303,5 +313,8 @@ export const db = {
     }
   }
 }
+
+// Export retry utilities for direct use
+export { withPrismaRetry, createRetryablePrismaClient, prismaOperation }
 
 export default db
