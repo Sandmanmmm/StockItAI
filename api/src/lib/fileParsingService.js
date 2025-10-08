@@ -1,6 +1,7 @@
 /**
  * File Processing Service
  * Handles parsing of PDF, Excel, CSV, and image files to extract PO data
+ * Updated: Fixed PDF.js worker configuration for serverless
  */
 
 import * as XLSX from 'xlsx'
