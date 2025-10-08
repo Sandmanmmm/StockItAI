@@ -51,17 +51,16 @@ export class FileParsingService {
       // Dynamic import to avoid initialization issues in serverless
       const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
       
-      // CRITICAL: PDF.js requires workerSrc to be a non-empty string even when worker is disabled
-      // We set a dummy value because disableWorker:true means it won't actually be loaded
-      // Real options: 1) Bundle worker file, 2) Use CDN (ESM loader rejects https:), 3) Disable worker (this approach)
-      pdfjsLib.GlobalWorkerOptions.workerSrc = 'data:text/javascript;base64,""'
+      // CRITICAL FIX: Don't set workerSrc at all when disabling worker
+      // PDF.js will handle the undefined workerSrc when disableWorker=true
+      // Setting it causes PDF.js to try loading it even with disableWorker enabled
       
-      // Load PDF document with worker disabled
+      // Load PDF document with worker completely disabled
       const loadingTask = pdfjsLib.getDocument({
         data: new Uint8Array(buffer),
         useSystemFonts: true,
         standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/standard_fonts/',
-        // CRITICAL: disableWorker forces synchronous parsing (no worker thread)
+        // CRITICAL: disableWorker forces synchronous parsing - NO workerSrc needed
         disableWorker: true,
         isEvalSupported: false,
         useWorkerFetch: false
