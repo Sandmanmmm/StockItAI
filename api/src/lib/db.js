@@ -11,10 +11,10 @@ import { PrismaClient } from '@prisma/client'
 // Prisma client singleton
 let prisma
 
-// Initialize Prisma client
+// Initialize Prisma client - FORCED REBUILD v2
 async function initializePrisma() {
   try {
-    console.log(`🔍 initializePrisma called, current prisma:`, prisma ? 'exists' : 'null')
+    console.log(`🔍 [v2] initializePrisma called, current prisma:`, prisma ? 'exists' : 'null')
     
     if (!prisma) {
       console.log(`🔧 Creating new PrismaClient...`)
@@ -76,8 +76,6 @@ async function initializePrisma() {
       throw new Error('Prisma client is null after initialization')
     }
 
-    // Handle graceful shutdown (only register once)
-    if (!prisma._handlersRegistered) {
     // Handle graceful shutdown (only register once)
     if (!prisma._handlersRegistered) {
       process.on('beforeExit', async () => {
