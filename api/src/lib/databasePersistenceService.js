@@ -95,6 +95,11 @@ export class DatabasePersistenceService {
           aiResult.confidence?.lineItems || {}
         )
         
+        console.log(`✅ Line items created in transaction:`)
+        console.log(`   Count: ${lineItems.length}`)
+        console.log(`   PO ID: ${purchaseOrder.id}`)
+        console.log(`   Sample line item IDs: ${lineItems.slice(0, 2).map(li => li.id).join(', ')}`)
+        
         // 5. Create AI processing audit record
         const auditRecord = await this.createAIAuditRecord(
           tx,
@@ -108,6 +113,13 @@ export class DatabasePersistenceService {
         console.log(`   PO ID: ${purchaseOrder.id}`)
         console.log(`   Supplier: ${supplier?.name || 'Not matched'}`)
         console.log(`   Line Items: ${lineItems.length}`)
+        console.log(`   Line Items saved with PO ID: ${purchaseOrder.id}`)
+        
+        // Verify line items are actually in the transaction
+        const verifyCount = await tx.pOLineItem.count({
+          where: { purchaseOrderId: purchaseOrder.id }
+        })
+        console.log(`   ✓ Verification: ${verifyCount} line items in transaction before commit`)
         console.log(`   Audit ID: ${auditRecord.id}`)
         
         return {
@@ -121,6 +133,16 @@ export class DatabasePersistenceService {
         maxWait: 30000, // Maximum time to wait to start transaction (30s)
         timeout: 120000 // Maximum transaction time (120s = 2 minutes)
       })
+      
+      // Verify line items persisted after transaction commit
+      const postCommitCount = await prisma.pOLineItem.count({
+        where: { purchaseOrderId: result.purchaseOrder.id }
+      })
+      console.log(`✅ POST-COMMIT VERIFICATION: ${postCommitCount} line items found for PO ${result.purchaseOrder.id}`)
+      
+      if (postCommitCount === 0 && result.lineItems.length > 0) {
+        console.error(`❌ CRITICAL: Line items lost after commit! Created ${result.lineItems.length}, found ${postCommitCount}`)
+      }
       
       // Update supplier performance metrics
       if (result.supplier) {
