@@ -204,10 +204,58 @@ export class RefinementPipelineService {
         console.log(`📋 Creating image review session for ${itemsNeedingReview.length} items`)
         
         try {
+          // Transform enriched items into format expected by createImageReviewSession
+          const lineItemsForReview = itemsNeedingReview.map((item, index) => {
+            const imageResult = enhancedImageResults[enrichedItems.indexOf(item)] || {}
+            
+            // Flatten all image sources into a single array with proper structure
+            const allImages = []
+            
+            // Add vendor images
+            if (imageResult.vendorImages && Array.isArray(imageResult.vendorImages)) {
+              allImages.push(...imageResult.vendorImages.map(img => ({
+                url: img.url || img,
+                type: 'vendor',
+                source: 'vendor',
+                altText: item.productName || item.description,
+                metadata: img.metadata || {}
+              })))
+            }
+            
+            // Add web scraped images
+            if (imageResult.webScraped && Array.isArray(imageResult.webScraped)) {
+              allImages.push(...imageResult.webScraped.map(img => ({
+                url: img.url || img,
+                type: 'web_scraped',
+                source: img.source || 'google',
+                altText: item.productName || item.description,
+                metadata: img.metadata || {}
+              })))
+            }
+            
+            // Add processed images
+            if (imageResult.processed && Array.isArray(imageResult.processed)) {
+              allImages.push(...imageResult.processed.map(img => ({
+                url: img.url || img,
+                type: 'processed',
+                source: img.source || 'processed',
+                altText: item.productName || item.description,
+                metadata: img.metadata || {}
+              })))
+            }
+            
+            return {
+              productName: item.productName || item.description,
+              sku: item.sku || item.id,
+              barcode: item.barcode || null,
+              images: allImages
+            }
+          })
+          
           const reviewSession = await merchantImageReviewService.createImageReviewSession({
             purchaseOrderId: purchaseOrderData.purchaseOrderId,
             merchantId: merchantId,
-            lineItems: enhancedImageResults.filter((_, index) => enrichedItems[index].images?.needsReview)
+            lineItems: lineItemsForReview
           })
           
           // Add review session info to enrichment results
