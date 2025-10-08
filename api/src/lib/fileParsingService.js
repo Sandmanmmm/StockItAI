@@ -51,16 +51,18 @@ export class FileParsingService {
       // Dynamic import to avoid initialization issues in serverless
       const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
       
-      // CRITICAL: Use CDN for worker file to avoid Vercel bundling issues
-      // The local node_modules path doesn't exist in deployed serverless functions
-      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/legacy/build/pdf.worker.min.mjs'
+      // CRITICAL: Disable worker completely for Vercel serverless environment
+      // Node.js ESM loader doesn't support https: imports, and worker file isn't bundled
+      // Force synchronous parsing instead (slightly slower but works reliably)
+      pdfjsLib.GlobalWorkerOptions.workerSrc = ''
       
-      // Load PDF document
+      // Load PDF document with worker disabled
       const loadingTask = pdfjsLib.getDocument({
         data: new Uint8Array(buffer),
         useSystemFonts: true,
         standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/standard_fonts/',
-        // Worker will be loaded from CDN via workerSrc above
+        // Force synchronous parsing - no worker needed
+        disableWorker: true,
         isEvalSupported: false,
         useWorkerFetch: false
       })
