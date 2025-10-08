@@ -12,7 +12,7 @@ export class SimpleProductDraftService {
   async createProductDraft(data) {
     // Build include object based on what's available
     const include = {
-      session: true,
+      Session: true,
       merchant: true,
       purchaseOrder: true,
       POLineItem: true,
@@ -39,7 +39,7 @@ export class SimpleProductDraftService {
     return await this.prisma.productDraft.findMany({
       where: { merchantId },
       include: {
-        session: true,
+        Session: true,
         supplier: true,
         purchaseOrder: true,
         POLineItem: true,
@@ -63,7 +63,7 @@ export class SimpleProductDraftService {
       where: { id },
       data: updateData,
       include: {
-        session: true,
+        Session: true,
         merchant: true,
         supplier: true,
         purchaseOrder: true,

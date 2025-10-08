@@ -50,8 +50,9 @@ export class FileParsingService {
       // Dynamic import to avoid initialization issues in serverless
       const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
       
-      // Disable worker for serverless environment (worker files not bundled properly)
-      pdfjsLib.GlobalWorkerOptions.workerSrc = null
+      // CRITICAL: Set workerSrc to empty string to prevent fake worker setup
+      // This must be done BEFORE getDocument is called
+      pdfjsLib.GlobalWorkerOptions.workerSrc = ''
       
       // Load PDF document
       const loadingTask = pdfjsLib.getDocument({
@@ -60,7 +61,9 @@ export class FileParsingService {
         standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/',
         // Disable worker - run in main thread for serverless
         disableWorker: true,
-        isEvalSupported: false
+        isEvalSupported: false,
+        // Additional safeguard against worker initialization
+        useWorkerFetch: false
       })
       
       const pdfDocument = await loadingTask.promise
