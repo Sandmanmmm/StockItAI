@@ -1,0 +1,7 @@
+# Force Rebuild - Environment Variable Application
+
+This file triggers a rebuild to ensure Prisma client is regenerated with DIRECT_URL.
+
+Date: 2025-10-08T17:23:00Z
+Reason: Apply DIRECT_URL pooler configuration
+Expected: Prisma will use port 6543 (pooler) instead of port 5432 (direct)

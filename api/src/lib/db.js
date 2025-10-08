@@ -22,17 +22,12 @@ async function initializePrisma() {
       prisma = new PrismaClient({
         log: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
         errorFormat: 'pretty',
-        // CRITICAL: Increase connection pool for serverless concurrent operations
-        datasources: {
-          db: {
-            url: process.env.DATABASE_URL
-          }
-        },
-        // Increase connection pool size for concurrent workflow processing
-        // Default is 5, increase to 20 for better concurrency
-        // Format: postgresql://USER:PASSWORD@HOST:PORT/DATABASE?connection_limit=20&pool_timeout=30
+        // REMOVED: datasources override - let Prisma use schema.prisma configuration
+        // This allows directUrl (DIRECT_URL env var) to be used for connection pooling
+        // DATABASE_URL: Direct connection for migrations (port 5432)
+        // DIRECT_URL: Transaction pooler for runtime queries (port 6543)
       })
-      console.log(`✅ PrismaClient created with enhanced connection pool`)
+      console.log(`✅ PrismaClient created - using schema datasource config (pooler: port 6543)`)
     }
     
     // CRITICAL: ALWAYS verify connection, even if client exists
