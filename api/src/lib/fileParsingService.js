@@ -43,55 +43,29 @@ export class FileParsingService {
   }
 
   /**
-   * Parse PDF files and extract text content using pdfjs-dist with dynamic import
-   * This avoids the pdf-parse initialization issue in serverless
+   * Parse PDF files and extract text content using pdf-parse
+   * Simple, reliable Node.js-native PDF parser without worker complications
    */
   async parsePDF(buffer) {
     try {
       // Dynamic import to avoid initialization issues in serverless
-      const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
+      const pdfParse = (await import('pdf-parse')).default
       
-      // CRITICAL FIX: Set workerSrc to false (not undefined) to prevent worker loading
-      // PDF.js v4.x still tries to resolve worker path even with disableWorker=true
-      // Setting to false explicitly tells PDF.js not to look for worker file
-      pdfjsLib.GlobalWorkerOptions.workerSrc = false
-      
-      // Load PDF document with worker completely disabled
-      const loadingTask = pdfjsLib.getDocument({
-        data: new Uint8Array(buffer),
-        useSystemFonts: true,
-        standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/standard_fonts/',
-        // CRITICAL: disableWorker forces synchronous parsing - NO workerSrc needed
-        disableWorker: true,
-        isEvalSupported: false,
-        useWorkerFetch: false
-      })
-      
-      const pdfDocument = await loadingTask.promise
-      const numPages = pdfDocument.numPages
-      const pageTexts = []
-      
-      // Extract text from each page
-      for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-        const page = await pdfDocument.getPage(pageNum)
-        const textContent = await page.getTextContent()
-        const pageText = textContent.items.map(item => item.str).join(' ')
-        pageTexts.push(pageText)
-      }
-      
-      const fullText = pageTexts.join('\n\n')
+      // Parse PDF with pdf-parse - no worker configuration needed!
+      const pdfData = await pdfParse(buffer)
       
       const result = {
-        text: fullText.trim(),
-        pages: numPages,
-        pageTexts,
+        text: pdfData.text.trim(),
+        pages: pdfData.numpages,
+        pageTexts: [pdfData.text.trim()], // pdf-parse doesn't split by page
         metadata: {
-          numPages,
+          numPages: pdfData.numpages,
+          info: pdfData.info || {},
           extractedAt: new Date().toISOString()
         },
-        rawContent: fullText.trim(),
+        rawContent: pdfData.text.trim(),
         confidence: 0.9,
-        extractionMethod: 'pdfjs-dist-legacy-v4'
+        extractionMethod: 'pdf-parse-v1'
       }
       
       console.log(`PDF parsed successfully: ${result.pages} pages, ${result.text.length} characters`)
