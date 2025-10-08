@@ -49,8 +49,9 @@ async function initializePrisma() {
         
         // CRITICAL: Wait for engine to fully initialize after connection
         // Under concurrent load, engines need MORE time to stabilize
-        // Increased from 300ms to 1000ms to handle cold starts and concurrent workflows
-        const engineWarmupDelay = 1000 // 1 second warmup (was 300ms - too short!)
+        // Increased from 300ms → 1000ms → 2000ms due to concurrent workflow crashes
+        // Multiple workflows creating product drafts simultaneously cause engine overload
+        const engineWarmupDelay = 2000 // 2 seconds warmup (was 1000ms - still too short under load!)
         console.log(`⏳ Waiting ${engineWarmupDelay}ms for engine warmup...`)
         await new Promise(resolve => setTimeout(resolve, engineWarmupDelay))
         
@@ -58,10 +59,11 @@ async function initializePrisma() {
         // Under load, skip multiple test queries to reduce connection strain
         console.log(`🔍 Verifying engine readiness with test query...`)
         
-        // Single test query with generous retry (was 2 queries causing more load)
+        // Single test query with even more generous retry (was 5 attempts)
+        // Under concurrent load, health check itself can fail due to pool exhaustion
         await withPrismaRetry(
           () => prisma.$queryRaw`SELECT 1 as healthcheck`,
-          { operationName: 'Engine health check', maxRetries: 5, initialDelayMs: 300 }
+          { operationName: 'Engine health check', maxRetries: 8, initialDelayMs: 500 }
         )
         
         console.log(`✅ Engine verified - ready for queries`)
