@@ -1208,8 +1208,45 @@ export class WorkflowOrchestrator {
         throw new Error('No purchase order ID found for image attachment')
       }
 
+      // Check if we have product drafts from accumulated data
       if (!productDrafts || productDrafts.length === 0) {
-        throw new Error('No product drafts found for image attachment')
+        console.log('⚠️ No product drafts in accumulated data, checking database...')
+        
+        // Try to get product drafts from database
+        const draftsFromDb = await db.client.productDraft.findMany({
+          where: { purchaseOrderId },
+          include: {
+            POLineItem: true,
+            images: true
+          }
+        })
+        
+        if (!draftsFromDb || draftsFromDb.length === 0) {
+          console.log('⚠️ No product drafts found in database either - skipping image attachment')
+          console.log('   This is expected for workflows that haven\'t created product drafts yet')
+          
+          // Schedule next stage instead of failing
+          const enrichedNextStageData = await this.saveAndAccumulateStageData(
+            workflowId,
+            WORKFLOW_STAGES.IMAGE_ATTACHMENT,
+            { success: true, skipped: true, reason: 'No product drafts available' },
+            data
+          )
+          
+          await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.SHOPIFY_SYNC, enrichedNextStageData)
+          
+          return {
+            success: true,
+            stage: WORKFLOW_STAGES.IMAGE_ATTACHMENT,
+            skipped: true,
+            message: 'No product drafts available - skipped image attachment',
+            nextStage: WORKFLOW_STAGES.SHOPIFY_SYNC
+          }
+        }
+        
+        // Use database drafts
+        productDrafts = draftsFromDb
+        console.log(`✅ Loaded ${draftsFromDb.length} product drafts from database`)
       }
 
       // Get product drafts from database to ensure we have latest data
