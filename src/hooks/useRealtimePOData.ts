@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, TABLES, CHANNELS } from '@/lib/supabaseClient'
+import { authenticatedRequest } from '@/lib/shopifyApiService'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
 export interface PipelineStatus {
@@ -47,18 +48,12 @@ export function useRealtimePOData() {
   // Fetch initial pipeline status from API
   const fetchPipelineStatus = useCallback(async () => {
     try {
-      const response = await fetch('/api/analytics/dashboard', {
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        credentials: 'include'
-      })
+      const result = await authenticatedRequest<any>('/analytics/dashboard')
 
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`)
+      if (!result.success || !result.data) {
+        throw new Error(result.error || 'Failed to fetch dashboard stats')
       }
 
-      const result = await response.json()
       const stats = result.data
 
       if (stats) {
@@ -80,19 +75,13 @@ export function useRealtimePOData() {
   // Fetch active POs being processed via API
   const fetchActivePOs = useCallback(async () => {
     try {
-      // Fetch processing POs from API
-      const response = await fetch('/api/purchase-orders?status=processing&limit=20', {
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        credentials: 'include'
-      })
+      // Fetch processing POs from API using authenticated request
+      const result = await authenticatedRequest<any>('/purchase-orders?status=processing&limit=20')
 
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`)
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to fetch purchase orders')
       }
 
-      const result = await response.json()
       const orders = result.data?.orders || []
 
       if (orders && Array.isArray(orders)) {
@@ -179,19 +168,13 @@ export function useRealtimePOData() {
   // Fetch recent activity logs via API
   const fetchActivityLogs = useCallback(async () => {
     try {
-      const response = await fetch('/api/analytics/dashboard', {
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        credentials: 'include'
-      })
+      const result = await authenticatedRequest<any>('/analytics/dashboard')
 
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`)
+      if (!result.success || !result.data) {
+        throw new Error(result.error || 'Failed to fetch dashboard stats')
       }
 
-      const result = await response.json()
-      const recentActivity = result.data?.recentActivity || []
+      const recentActivity = result.data.recentActivity || []
 
       if (recentActivity && Array.isArray(recentActivity)) {
         const logs: ActivityLog[] = recentActivity.map((activity: any) => {
