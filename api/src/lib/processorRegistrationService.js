@@ -23,14 +23,33 @@ export class ProcessorRegistrationService {
       password: config.connection.password,
       db: config.connection.db,
       tls: config.connection.tls,
-      maxRetriesPerRequest: 3,
-      connectTimeout: 10000,
+      maxRetriesPerRequest: 5, // Increased from 3
+      connectTimeout: 15000, // Increased from 10000
+      enableReadyCheck: true,
+      enableOfflineQueue: true,
       retryStrategy: (times) => {
-        if (times > 3) {
+        if (times > 10) { // Increased from 3
           console.error('❌ [REDIS] Max retry attempts reached');
           return null; // Stop retrying
         }
-        return Math.min(times * 100, 3000); // Exponential backoff
+        const delay = Math.min(times * 200, 5000); // Exponential backoff up to 5s
+        console.log(`🔄 [REDIS] Retry attempt ${times} in ${delay}ms...`);
+        return delay;
+      },
+      reconnectOnError: (err) => {
+        // Reconnect on specific errors like TLS failures
+        const targetErrors = [
+          'READONLY',
+          'ECONNRESET',
+          'ETIMEDOUT',
+          'ENOTFOUND',
+          'Client network socket disconnected'
+        ];
+        if (targetErrors.some(e => err.message.includes(e))) {
+          console.log(`🔄 [REDIS] Reconnecting on error: ${err.message}`);
+          return true; // Reconnect
+        }
+        return false;
       }
     };
   }
@@ -50,6 +69,28 @@ export class ProcessorRegistrationService {
       const queue = new Bull(queueName, {
         redis: redisOptions
       });
+
+      // Add error handlers for Redis connection issues
+      queue.on('error', (error) => {
+        console.error(`❌ [REDIS] Queue ${jobType} error:`, error.message);
+        // Don't throw - Bull will retry automatically
+      });
+
+      const client = queue.client;
+      if (client) {
+        client.on('error', (error) => {
+          console.error(`❌ [REDIS] Client error for ${jobType}:`, error.message);
+          // Redis client will auto-reconnect with retryStrategy
+        });
+        
+        client.on('reconnecting', () => {
+          console.log(`🔄 [REDIS] Reconnecting client for ${jobType}...`);
+        });
+        
+        client.on('connect', () => {
+          console.log(`✅ [REDIS] Client connected for ${jobType}`);
+        });
+      }
 
       // Use the PROVEN WORKING pattern: queue.process(concurrency, processorFunction)
       queue.process(concurrency, processorFunction);
