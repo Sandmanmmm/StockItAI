@@ -15,7 +15,7 @@ export class SimpleProductDraftService {
       session: true,
       merchant: true,
       purchaseOrder: true,
-      lineItem: true,
+      POLineItem: true,
       images: true,
       variants: true,
       reviewHistory: true
@@ -42,7 +42,7 @@ export class SimpleProductDraftService {
         session: true,
         supplier: true,
         purchaseOrder: true,
-        lineItem: true,
+        POLineItem: true,
         images: true,
         variants: true
       },
@@ -67,7 +67,7 @@ export class SimpleProductDraftService {
         merchant: true,
         supplier: true,
         purchaseOrder: true,
-        lineItem: true,
+        POLineItem: true,
         images: true,
         variants: true
       }

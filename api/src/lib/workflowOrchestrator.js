@@ -989,8 +989,9 @@ export class WorkflowOrchestrator {
           })
 
           // Check if a product draft already exists for this line item
-          const existingDraft = await db.client.productDraft.findUnique({
-            where: { poLineItemId: lineItem.id }  // FIX: Use poLineItemId not lineItemId
+          // NOTE: lineItemId is NOT unique, so we use findFirst instead of findUnique
+          const existingDraft = await db.client.productDraft.findFirst({
+            where: { lineItemId: lineItem.id }  // FIXED: Use lineItemId (actual DB field) and findFirst
           });
 
           if (existingDraft) {
@@ -1042,7 +1043,7 @@ export class WorkflowOrchestrator {
             sessionId: session.id,
             merchantId: merchantId,
             purchaseOrderId: purchaseOrder.id,
-            poLineItemId: lineItem.id,  // FIX: Use poLineItemId not lineItemId
+            lineItemId: lineItem.id,  // FIXED: Use lineItemId (actual DB field name)
             supplierId: purchaseOrder.supplierId,
             originalTitle: lineItem.productName || `Product from PO ${purchaseOrder.number}`,
             originalDescription: lineItem.description || `Product imported from Purchase Order ${purchaseOrder.number}`,
@@ -1163,7 +1164,7 @@ export class WorkflowOrchestrator {
       const draftsFromDb = await db.client.productDraft.findMany({
         where: { purchaseOrderId },
         include: {
-          lineItem: true,
+          POLineItem: true,
           images: true
         }
       })
@@ -1287,7 +1288,7 @@ export class WorkflowOrchestrator {
             include: {
               productDraft: {
                 include: {
-                  lineItem: true
+                  POLineItem: true
                 }
               }
             }

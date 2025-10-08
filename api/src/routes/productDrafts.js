@@ -17,7 +17,7 @@ router.get('/by-line-item/:lineItemId', devBypassAuth, async (req, res) => {
         session: true,
         merchant: true,
         purchaseOrder: true,
-        lineItem: true,
+        POLineItem: true,
         images: true,
         variants: true,
         reviewHistory: true
@@ -65,10 +65,10 @@ router.get('/by-line-item/:lineItemId', devBypassAuth, async (req, res) => {
         id: productDraft.merchant.id,
         name: productDraft.merchant.name
       } : null,
-      lineItem: productDraft.lineItem ? {
-        id: productDraft.lineItem.id,
-        productName: productDraft.lineItem.productName,
-        sku: productDraft.lineItem.sku
+      lineItem: productDraft.POLineItem ? {
+        id: productDraft.POLineItem.id,
+        productName: productDraft.POLineItem.productName,
+        sku: productDraft.POLineItem.sku
       } : null
     }
 
@@ -134,7 +134,7 @@ router.get('/', devBypassAuth, async (req, res) => {
       include: {
         images: true,
         variants: true,
-        lineItem: {
+        POLineItem: {
           select: {
             id: true,
             productName: true,
@@ -450,7 +450,7 @@ router.post('/sync', devBypassAuth, async (req, res) => {
       include: {
         images: true,
         variants: true,
-        lineItem: true
+        POLineItem: true
       }
     })
     

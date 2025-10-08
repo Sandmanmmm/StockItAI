@@ -36,8 +36,10 @@ export class ProductDraftService {
     if (!data.purchaseOrderId) {
       throw new Error('purchaseOrderId is required');
     }
-    if (!data.poLineItemId) {
-      throw new Error('poLineItemId (lineItemId in DB) is required');
+    // Accept either poLineItemId (code convention) or lineItemId (DB field name)
+    const lineItemId = (data as any).lineItemId || data.poLineItemId;
+    if (!lineItemId) {
+      throw new Error('lineItemId is required');
     }
 
     // Calculate margin if both prices available
@@ -49,10 +51,10 @@ export class ProductDraftService {
       // Create the product draft
       const productDraft = await tx.productDraft.create({
         data: {
-          sessionId: data.sessionId || `manual_${Date.now()}`,
+          sessionId: (data as any).sessionId || `manual_${Date.now()}`,
           merchantId,
           purchaseOrderId: data.purchaseOrderId,
-          lineItemId: data.poLineItemId, // Maps poLineItemId → lineItemId
+          lineItemId: lineItemId, // Use actual DB field name
           supplierId: data.supplierId || null,
           
           // Title and Description
@@ -141,11 +143,7 @@ export class ProductDraftService {
         variants: {
           orderBy: { position: 'asc' }
         },
-        categories: {
-          include: {
-            category: true
-          }
-        },
+        ProductCategory: true, // Single category relation, not array
         reviewHistory: {
           orderBy: { createdAt: 'desc' },
           take: 10 // Latest 10 reviews
@@ -298,10 +296,11 @@ export class ProductDraftService {
     
     if (search) {
       where.OR = [
-        { title: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } },
+        { originalTitle: { contains: search, mode: 'insensitive' } },
+        { refinedTitle: { contains: search, mode: 'insensitive' } },
+        { originalDescription: { contains: search, mode: 'insensitive' } },
+        { refinedDescription: { contains: search, mode: 'insensitive' } },
         { sku: { contains: search, mode: 'insensitive' } },
-        { barcode: { contains: search, mode: 'insensitive' } },
         { vendor: { contains: search, mode: 'insensitive' } }
       ];
     }
@@ -321,12 +320,8 @@ export class ProductDraftService {
             take: 1, // Just first image for list view
             orderBy: { position: 'asc' }
           },
-          categories: {
-            include: {
-              category: {
-                select: { name: true }
-              }
-            }
+          ProductCategory: {
+            select: { name: true }
           },
           purchaseOrder: {
             select: { number: true, supplierName: true }
