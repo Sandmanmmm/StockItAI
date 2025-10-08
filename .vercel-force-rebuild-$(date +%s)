@@ -1,0 +1,21 @@
+# FORCE VERCEL REBUILD - CACHE BUSTER
+
+This file forces Vercel to ignore ALL caches and do a completely fresh build.
+
+Timestamp: 2025-10-08T17:40:00Z
+Build ID: FORCE_FRESH_BUILD_NO_CACHE_d66e45a
+Reason: Prisma client still using old code with datasources override
+Expected: New code without datasources override, using DIRECT_URL from schema
+
+## Critical Changes That Must Be Applied:
+1. api/src/lib/db.js line 22: Removed datasources.db.url override
+2. Prisma should now use directUrl from schema.prisma
+3. Should connect to port 6543 (pooler) NOT port 5432 (direct)
+
+## Verification:
+After deployment, logs should show:
+- ✅ "PrismaClient created - using schema datasource config (pooler: port 6543)"
+- ✅ Connection to aws-1-ca-central-1.pooler.supabase.com:6543
+
+NOT:
+- ❌ "Can't reach database server at db.omvdgqbmgxxutbjhnamf.supabase.co:5432"
