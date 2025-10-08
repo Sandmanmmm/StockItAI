@@ -51,9 +51,9 @@ export class FileParsingService {
       // Dynamic import to avoid initialization issues in serverless
       const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
       
-      // CRITICAL: Set workerSrc to false to completely disable worker
-      // Empty string or null still tries to set up fake worker
-      pdfjsLib.GlobalWorkerOptions.workerSrc = false
+      // CRITICAL: Must set workerSrc to a valid path (library requires string type)
+      // In Vercel serverless, the worker file is at this path
+      pdfjsLib.GlobalWorkerOptions.workerSrc = '/var/task/api/node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'
       
       // Load PDF document
       const loadingTask = pdfjsLib.getDocument({
