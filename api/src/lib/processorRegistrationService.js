@@ -73,8 +73,16 @@ export class ProcessorRegistrationService {
       const redisOptions = this.getRedisOptions();
       console.log(`🔌 [REDIS] Connecting to ${redisOptions.host}:${redisOptions.port}`);
       
+      // Queue settings with extended lock duration for long-running jobs
+      const queueSettings = {
+        lockDuration: 120000, // 2 minutes (default: 30 seconds)
+        lockRenewTime: 60000,  // Renew lock every 60 seconds
+        stalledInterval: 30000, // Check for stalled jobs every 30 seconds
+      };
+      
       const queue = new Bull(queueName, {
-        redis: redisOptions
+        redis: redisOptions,
+        settings: queueSettings
       });
 
       // Add error handlers for Redis connection issues
