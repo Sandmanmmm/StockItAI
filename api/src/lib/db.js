@@ -46,6 +46,12 @@ async function initializePrisma() {
         await prisma.$connect()
         console.log(`✅ Prisma $connect() succeeded (attempt ${connectAttempts + 1})`)
         
+        // CRITICAL: Wait for engine to fully initialize after connection
+        // Even though $connect() succeeded, engine needs time to be query-ready
+        const engineWarmupDelay = 300 // 300ms warmup time
+        console.log(`⏳ Waiting ${engineWarmupDelay}ms for engine warmup...`)
+        await new Promise(resolve => setTimeout(resolve, engineWarmupDelay))
+        
         // CRITICAL: Verify engine is ready with multiple test queries
         // This ensures the engine is fully initialized before returning the client
         console.log(`🔍 Verifying engine readiness with test queries...`)
@@ -67,8 +73,10 @@ async function initializePrisma() {
           prisma = null // Force recreation on next call
           throw new Error(`Failed to connect Prisma engine after ${maxAttempts} attempts`)
         }
-        // Wait before retry (exponential backoff)
-        await new Promise(resolve => setTimeout(resolve, 100 * connectAttempts))
+        // Wait before retry with longer delays for cold starts (500ms, 1000ms, 1500ms)
+        const retryDelay = 500 * connectAttempts
+        console.log(`⏳ Waiting ${retryDelay}ms before retry ${connectAttempts + 1}...`)
+        await new Promise(resolve => setTimeout(resolve, retryDelay))
       }
     }
 
