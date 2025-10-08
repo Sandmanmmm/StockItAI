@@ -6,6 +6,8 @@ datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
+  // Increase connection pool for serverless concurrency
+  // Add to DATABASE_URL: ?connection_limit=20&pool_timeout=30
 }
 
 model Session {

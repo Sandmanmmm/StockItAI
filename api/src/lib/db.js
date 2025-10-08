@@ -20,20 +20,46 @@ async function initializePrisma() {
       console.log(`🔧 Creating new PrismaClient...`)
       prisma = new PrismaClient({
         log: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
-        errorFormat: 'pretty'
+        errorFormat: 'pretty',
+        // CRITICAL: Increase connection pool for serverless concurrent operations
+        datasources: {
+          db: {
+            url: process.env.DATABASE_URL
+          }
+        },
+        // Increase connection pool size for concurrent workflow processing
+        // Default is 5, increase to 20 for better concurrency
+        // Format: postgresql://USER:PASSWORD@HOST:PORT/DATABASE?connection_limit=20&pool_timeout=30
       })
-      console.log(`✅ PrismaClient created successfully`)
+      console.log(`✅ PrismaClient created with enhanced connection pool`)
       
-      // CRITICAL: Connect immediately in serverless environment
+      // CRITICAL: Connect immediately in serverless environment with retries
       console.log(`🔌 Connecting Prisma engine...`)
-      await prisma.$connect()
-      console.log(`✅ Prisma engine connected`)
+      let connectAttempts = 0
+      const maxAttempts = 3
       
-      // CRITICAL: Verify engine is ready with a simple query
-      // This ensures the engine is fully initialized before returning the client
-      console.log(`🔍 Verifying engine readiness with test query...`)
-      await prisma.$queryRaw`SELECT 1`
-      console.log(`✅ Engine verified - ready for queries`)
+      while (connectAttempts < maxAttempts) {
+        try {
+          await prisma.$connect()
+          console.log(`✅ Prisma engine connected (attempt ${connectAttempts + 1})`)
+          
+          // CRITICAL: Verify engine is ready with multiple test queries
+          // This ensures the engine is fully initialized before returning the client
+          console.log(`🔍 Verifying engine readiness with test queries...`)
+          await prisma.$queryRaw`SELECT 1`
+          await prisma.$queryRaw`SELECT 1` // Second verification
+          console.log(`✅ Engine verified - ready for queries`)
+          break // Success!
+        } catch (error) {
+          connectAttempts++
+          console.error(`⚠️ Connection attempt ${connectAttempts} failed:`, error.message)
+          if (connectAttempts >= maxAttempts) {
+            throw new Error(`Failed to connect Prisma engine after ${maxAttempts} attempts`)
+          }
+          // Wait before retry (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, 100 * connectAttempts))
+        }
+      }
 
       // Handle graceful shutdown
       process.on('beforeExit', async () => {

@@ -990,7 +990,7 @@ export class WorkflowOrchestrator {
 
           // Check if a product draft already exists for this line item
           const existingDraft = await db.client.productDraft.findUnique({
-            where: { lineItemId: lineItem.id }
+            where: { poLineItemId: lineItem.id }  // FIX: Use poLineItemId not lineItemId
           });
 
           if (existingDraft) {
@@ -1042,7 +1042,7 @@ export class WorkflowOrchestrator {
             sessionId: session.id,
             merchantId: merchantId,
             purchaseOrderId: purchaseOrder.id,
-            lineItemId: lineItem.id,
+            poLineItemId: lineItem.id,  // FIX: Use poLineItemId not lineItemId
             supplierId: purchaseOrder.supplierId,
             originalTitle: lineItem.productName || `Product from PO ${purchaseOrder.number}`,
             originalDescription: lineItem.description || `Product imported from Purchase Order ${purchaseOrder.number}`,
