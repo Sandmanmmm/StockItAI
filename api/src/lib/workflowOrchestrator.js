@@ -1773,11 +1773,46 @@ export class WorkflowOrchestrator {
       
       // Get accumulated workflow data
       const accumulatedData = await stageResultStore.getAccumulatedData(workflowId)
-      const lineItems = accumulatedData.dbResult?.lineItems || []
+      let lineItems = accumulatedData.dbResult?.lineItems || []
+      
+      // FALLBACK: If no line items in accumulated data, fetch from database
+      if (!lineItems.length) {
+        console.log('⚠️ No line items in accumulated data, fetching from database...')
+        const purchaseOrderId = accumulatedData.purchaseOrderId || 
+                               accumulatedData.dbResult?.purchaseOrder?.id ||
+                               data.purchaseOrderId
+        
+        if (purchaseOrderId) {
+          console.log(`🔍 Fetching line items from database for PO: ${purchaseOrderId}`)
+          const dbLineItems = await db.client.pOLineItem.findMany({
+            where: { purchaseOrderId },
+            select: {
+              id: true,
+              sku: true,
+              productName: true,
+              description: true,
+              quantity: true,
+              unitCost: true,
+              totalCost: true,
+              confidence: true,
+              status: true
+            }
+          })
+          
+          if (dbLineItems.length > 0) {
+            console.log(`✅ Fetched ${dbLineItems.length} line items from database`)
+            lineItems = dbLineItems
+          } else {
+            console.error(`❌ No line items found in database for PO: ${purchaseOrderId}`)
+          }
+        }
+      }
       
       if (!lineItems.length) {
-        throw new Error('No line items found for normalization')
+        throw new Error('No line items found for normalization - checked both accumulated data and database')
       }
+      
+      console.log(`📦 Processing ${lineItems.length} line items for normalization`)
 
       // Get merchant ID and fetch merchant config
       const merchantId = data.merchantId || accumulatedData.dbResult?.merchantId || 'cmft3moy50000ultcbqgxzz6d'
