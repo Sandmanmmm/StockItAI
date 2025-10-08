@@ -25,7 +25,7 @@ export class DatabasePersistenceService {
       console.log(`📊 Persisting AI results to database for ${fileName}`)
       console.log(`   Model: ${aiResult.model}, Confidence: ${(aiResult.confidence?.overall || 0)}%`)
       
-      // Start database transaction
+      // Start database transaction with extended timeout for large POs
       const result = await this.prisma.$transaction(async (tx) => {
         
         // 1. Find or create supplier
@@ -90,6 +90,9 @@ export class DatabasePersistenceService {
           auditRecord,
           processingTime: Date.now() - startTime
         }
+      }, {
+        maxWait: 30000, // Maximum time to wait to start transaction (30s)
+        timeout: 120000 // Maximum transaction time (120s = 2 minutes)
       })
       
       // Update supplier performance metrics
