@@ -19,7 +19,7 @@ const REDIS_CONFIG = {
     
     // Retry configuration
     retryDelayOnFailover: 100,
-    maxRetriesPerRequest: 3,
+    // REMOVED: maxRetriesPerRequest - Bull v3 bclient/subscriber don't support this
     retryConnectOnFailure: true,
     
     // Enable TLS for production
