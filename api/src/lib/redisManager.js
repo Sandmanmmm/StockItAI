@@ -92,7 +92,7 @@ export class RedisManager {
       // Connection settings
       connectTimeout: 10000,
       lazyConnect: true,
-      maxRetriesPerRequest: 3,
+      // REMOVED: maxRetriesPerRequest - Bull bclient/subscriber don't support this
       retryDelayOnFailover: 100,
       enableOfflineQueue: false,
       
@@ -105,7 +105,7 @@ export class RedisManager {
       keyPrefix: process.env.REDIS_KEY_PREFIX || 'po_sync:',
       
       // Clustering support (if using Redis Cluster)
-      enableReadyCheck: true,
+      // REMOVED: enableReadyCheck - Bull bclient/subscriber don't support this
       maxLoadingTimeout: 5000
     }
 
