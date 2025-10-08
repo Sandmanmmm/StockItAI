@@ -51,9 +51,9 @@ export class FileParsingService {
       // Dynamic import to avoid initialization issues in serverless
       const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
       
-      // CRITICAL: Set workerSrc to empty string to prevent fake worker setup
-      // This must be done BEFORE getDocument is called
-      pdfjsLib.GlobalWorkerOptions.workerSrc = ''
+      // CRITICAL: Set workerSrc to false to completely disable worker
+      // Empty string or null still tries to set up fake worker
+      pdfjsLib.GlobalWorkerOptions.workerSrc = false
       
       // Load PDF document
       const loadingTask = pdfjsLib.getDocument({
