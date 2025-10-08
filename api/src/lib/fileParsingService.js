@@ -51,16 +51,16 @@ export class FileParsingService {
       // Dynamic import to avoid initialization issues in serverless
       const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
       
-      // CRITICAL: Must set workerSrc to a valid path (library requires string type)
-      // In Vercel serverless, the worker file is at this path
-      pdfjsLib.GlobalWorkerOptions.workerSrc = '/var/task/api/node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'
+      // CRITICAL: Use CDN for worker file to avoid Vercel bundling issues
+      // The local node_modules path doesn't exist in deployed serverless functions
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/legacy/build/pdf.worker.min.mjs'
       
       // Load PDF document
       const loadingTask = pdfjsLib.getDocument({
         data: new Uint8Array(buffer),
         useSystemFonts: true,
         standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/standard_fonts/',
-        // Worker will be used via workerSrc path above
+        // Worker will be loaded from CDN via workerSrc above
         isEvalSupported: false,
         useWorkerFetch: false
       })
