@@ -51,9 +51,10 @@ export class FileParsingService {
       // Dynamic import to avoid initialization issues in serverless
       const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
       
-      // CRITICAL FIX: Don't set workerSrc at all when disabling worker
-      // PDF.js will handle the undefined workerSrc when disableWorker=true
-      // Setting it causes PDF.js to try loading it even with disableWorker enabled
+      // CRITICAL FIX: Set workerSrc to false (not undefined) to prevent worker loading
+      // PDF.js v4.x still tries to resolve worker path even with disableWorker=true
+      // Setting to false explicitly tells PDF.js not to look for worker file
+      pdfjsLib.GlobalWorkerOptions.workerSrc = false
       
       // Load PDF document with worker completely disabled
       const loadingTask = pdfjsLib.getDocument({
