@@ -3,7 +3,6 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "installCommand": "npm install --include=dev && cd api && npm install && cd api && npx prisma generate",
-  "cacheDirectories": [],
   "rewrites": [
     {
       "source": "/api/process-workflows-cron",
