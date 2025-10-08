@@ -204,11 +204,11 @@ export class RefinementPipelineService {
         console.log(`📋 Creating image review session for ${itemsNeedingReview.length} items`)
         
         try {
-          const reviewSession = await merchantImageReviewService.createImageReviewSession(
-            purchaseOrderData.purchaseOrderId,
-            enhancedImageResults.filter((_, index) => enrichedItems[index].images?.needsReview),
-            merchantId
-          )
+          const reviewSession = await merchantImageReviewService.createImageReviewSession({
+            purchaseOrderId: purchaseOrderData.purchaseOrderId,
+            merchantId: merchantId,
+            lineItems: enhancedImageResults.filter((_, index) => enrichedItems[index].images?.needsReview)
+          })
           
           // Add review session info to enrichment results
           for (const item of enrichedItems) {

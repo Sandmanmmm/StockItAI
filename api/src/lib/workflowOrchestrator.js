@@ -961,12 +961,28 @@ export class WorkflowOrchestrator {
 
       const purchaseOrder = dbResult.purchaseOrder
       
+      console.log(`🔍 DEBUG - Looking for line items:`)
+      console.log(`   PO ID from dbResult: ${purchaseOrder.id}`)
+      console.log(`   PO ID from job data: ${data.purchaseOrderId}`)
+      
       // Get the saved line items from the database
       const lineItemsFromDb = await db.client.pOLineItem.findMany({
         where: { purchaseOrderId: purchaseOrder.id }
       })
       
+      console.log(`🔍 DEBUG - Line items query result: ${lineItemsFromDb.length} items found`)
+      
       if (!lineItemsFromDb || lineItemsFromDb.length === 0) {
+        // Debug: Check if line items exist for any PO
+        const allLineItems = await db.client.pOLineItem.findMany({
+          take: 10,
+          orderBy: { createdAt: 'desc' }
+        })
+        console.log(`🔍 DEBUG - Recent line items in database: ${allLineItems.length}`)
+        if (allLineItems.length > 0) {
+          console.log(`🔍 DEBUG - Sample line item PO IDs:`, allLineItems.slice(0, 3).map(li => li.purchaseOrderId))
+        }
+        
         throw new Error('No line items found in database for this purchase order')
       }
 
