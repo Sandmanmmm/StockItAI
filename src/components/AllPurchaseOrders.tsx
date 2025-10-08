@@ -333,7 +333,8 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
           rawData.total?.amount ||
           po.totalAmount || 0
         ),
-        lineItemsCount: extractedData.lineItems?.length || rawData.lineItems?.length || po._count?.lineItems || 0,
+        // FIXED: Always use database line items count first (po.lineItems.length), then _count, then fallback to AI extracted data
+        lineItemsCount: po.lineItems?.length || po._count?.lineItems || po.totalItems || extractedData.lineItems?.length || rawData.lineItems?.length || 0,
         confidence: (() => {
           const conf = rawData.confidence || extractedData.confidence
           if (typeof conf === 'object' && conf?.overall) {
@@ -350,7 +351,8 @@ export function AllPurchaseOrders({ onBack }: AllPurchaseOrdersProps) {
     return {
       supplierName: po.supplierName || 'Unknown Supplier',
       totalAmount: safeToNumber(po.totalAmount || 0),
-      lineItemsCount: po._count?.lineItems || 0,
+      // FIXED: Use actual database line items first, then counts
+      lineItemsCount: po.lineItems?.length || po._count?.lineItems || po.totalItems || 0,
       confidence: (po.confidence || 0) * 100 // Convert to percentage
     }
   }
