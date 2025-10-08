@@ -75,7 +75,7 @@ export class ProcessorRegistrationService {
       
       // Queue settings with extended lock duration for long-running jobs
       const queueSettings = {
-        lockDuration: 120000, // 2 minutes (default: 30 seconds)
+        lockDuration: 180000, // 3 minutes (increased from 2min due to vision API taking up to 177s)
         lockRenewTime: 60000,  // Renew lock every 60 seconds
         stalledInterval: 30000, // Check for stalled jobs every 30 seconds
       };
