@@ -92,7 +92,9 @@ export class RedisManager {
       // Connection settings
       connectTimeout: 10000,
       lazyConnect: true,
-      // REMOVED: maxRetriesPerRequest - Bull bclient/subscriber don't support this
+      // CRITICAL: Explicitly set to null to prevent ioredis from adding defaults that Bull rejects
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
       retryDelayOnFailover: 100,
       enableOfflineQueue: false,
       
@@ -105,7 +107,6 @@ export class RedisManager {
       keyPrefix: process.env.REDIS_KEY_PREFIX || 'po_sync:',
       
       // Clustering support (if using Redis Cluster)
-      // REMOVED: enableReadyCheck - Bull bclient/subscriber don't support this
       maxLoadingTimeout: 5000
     }
 

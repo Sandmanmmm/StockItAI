@@ -14,30 +14,37 @@ export class ProcessorRegistrationService {
 
   /**
    * Get Redis connection options from environment config
+   * 
+   * CRITICAL FIX: Bull v3 does NOT support enableReadyCheck or maxRetriesPerRequest
+   * These options cause errors when Bull creates bclient/subscriber connections
+   * See: https://github.com/OptimalBits/bull/issues/1873
+   * 
+   * Solution: Explicitly set these to null/false to prevent ioredis from adding defaults
    */
   getRedisOptions() {
     const config = getRedisConfig();
+    
     return {
       host: config.connection.host,
       port: config.connection.port,
       password: config.connection.password,
       db: config.connection.db,
       tls: config.connection.tls,
-      maxRetriesPerRequest: 5, // Increased from 3
-      connectTimeout: 15000, // Increased from 10000
-      enableReadyCheck: true,
+      connectTimeout: 15000,
+      // CRITICAL: Explicitly set to null/false to prevent ioredis defaults that Bull rejects
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
       enableOfflineQueue: true,
       retryStrategy: (times) => {
-        if (times > 10) { // Increased from 3
+        if (times > 10) {
           console.error('❌ [REDIS] Max retry attempts reached');
-          return null; // Stop retrying
+          return null;
         }
-        const delay = Math.min(times * 200, 5000); // Exponential backoff up to 5s
+        const delay = Math.min(times * 200, 5000);
         console.log(`🔄 [REDIS] Retry attempt ${times} in ${delay}ms...`);
         return delay;
       },
       reconnectOnError: (err) => {
-        // Reconnect on specific errors like TLS failures
         const targetErrors = [
           'READONLY',
           'ECONNRESET',
@@ -47,7 +54,7 @@ export class ProcessorRegistrationService {
         ];
         if (targetErrors.some(e => err.message.includes(e))) {
           console.log(`🔄 [REDIS] Reconnecting on error: ${err.message}`);
-          return true; // Reconnect
+          return true;
         }
         return false;
       }
