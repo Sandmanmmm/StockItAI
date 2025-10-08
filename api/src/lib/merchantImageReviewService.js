@@ -9,10 +9,8 @@
  * - Integration with dashboard UI
  */
 
-import { PrismaClient } from '@prisma/client'
+import { db, prismaOperation } from './db.js'
 import { imageProcessingService } from './imageProcessingService.js'
-
-const prisma = new PrismaClient()
 
 export class MerchantImageReviewService {
   constructor() {
@@ -26,49 +24,72 @@ export class MerchantImageReviewService {
     console.log(`📋 Creating image review session for PO ${sessionData.purchaseOrderId}`)
     
     try {
+      // Verify PO exists before creating session
+      const poExists = await prismaOperation(
+        () => db.client.purchaseOrder.findUnique({
+          where: { id: sessionData.purchaseOrderId },
+          select: { id: true }
+        }),
+        `Check if PO ${sessionData.purchaseOrderId} exists`
+      )
+      
+      if (!poExists) {
+        console.warn(`⚠️ Cannot create image review session: PO ${sessionData.purchaseOrderId} not found`)
+        return null
+      }
+      
       // Generate unique session ID
       const sessionId = `img_session_${Date.now()}`
       
       // Create the image review session
-      const reviewSession = await prisma.imageReviewSession.create({
-        data: {
-          sessionId: sessionId,
-          purchaseOrderId: sessionData.purchaseOrderId,
-          merchantId: sessionData.merchantId,
-          status: 'PENDING',
-          totalProducts: sessionData.lineItems.length,
-          reviewedProducts: 0,
-          autoApproveAt: new Date(Date.now() + this.reviewTimeoutHours * 60 * 60 * 1000)
-        }
-      })
+      const reviewSession = await prismaOperation(
+        () => db.client.imageReviewSession.create({
+          data: {
+            sessionId: sessionId,
+            purchaseOrderId: sessionData.purchaseOrderId,
+            merchantId: sessionData.merchantId,
+            status: 'PENDING',
+            totalProducts: sessionData.lineItems.length,
+            reviewedProducts: 0,
+            autoApproveAt: new Date(Date.now() + this.reviewTimeoutHours * 60 * 60 * 1000)
+          }
+        }),
+        `Create image review session for PO ${sessionData.purchaseOrderId}`
+      )
 
       // Create products and their images for the session
       for (const lineItem of sessionData.lineItems) {
-        const reviewProduct = await prisma.imageReviewProduct.create({
-          data: {
-            sessionId: reviewSession.id,
-            productName: lineItem.productName,
-            productSku: lineItem.sku,
-            barcode: lineItem.barcode || null,
-            originalProductData: lineItem,
-            status: 'PENDING'
-          }
-        })
+        const reviewProduct = await prismaOperation(
+          () => db.client.imageReviewProduct.create({
+            data: {
+              sessionId: reviewSession.id,
+              productName: lineItem.productName,
+              productSku: lineItem.sku,
+              barcode: lineItem.barcode || null,
+              originalProductData: lineItem,
+              status: 'PENDING'
+            }
+          }),
+          `Create review product for ${lineItem.productName}`
+        )
 
         // Create images for this product
         for (const imageData of lineItem.images) {
-          await prisma.imageReviewProductImage.create({
-            data: {
-              productReviewId: reviewProduct.id,
-              imageUrl: imageData.url,
-              imageType: imageData.type,
-              source: imageData.source,
-              altText: imageData.altText,
-              isSelected: false,
-              isApproved: false,
-              metadata: imageData.metadata || {}
-            }
-          })
+          await prismaOperation(
+            () => db.client.imageReviewProductImage.create({
+              data: {
+                productReviewId: reviewProduct.id,
+                imageUrl: imageData.url,
+                imageType: imageData.type,
+                source: imageData.source,
+                altText: imageData.altText,
+                isSelected: false,
+                isApproved: false,
+                metadata: imageData.metadata || {}
+              }
+            }),
+            `Create image for product ${lineItem.productName}`
+          )
         }
       }
 
@@ -94,18 +115,21 @@ export class MerchantImageReviewService {
    */
   async getImageReviewSessionByPurchaseOrder(purchaseOrderId) {
     try {
-      const session = await prisma.imageReviewSession.findFirst({
-        where: {
-          purchaseOrderId: purchaseOrderId
-        },
-        include: {
-          products: {
-            include: {
-              images: true
+      const session = await prismaOperation(
+        () => db.client.imageReviewSession.findFirst({
+          where: {
+            purchaseOrderId: purchaseOrderId
+          },
+          include: {
+            products: {
+              include: {
+                images: true
+              }
             }
           }
-        }
-      })
+        }),
+        `Get image review session for PO ${purchaseOrderId}`
+      )
 
       return session
     } catch (error) {
@@ -480,22 +504,25 @@ export class MerchantImageReviewService {
    */
   async getSessionByPurchaseOrder(poId, merchantId) {
     try {
-      const session = await prisma.imageReviewSession.findFirst({
-        where: {
-          purchaseOrderId: poId,
-          merchantId: merchantId
-        },
-        include: {
-          products: {
-            include: {
-              images: true
+      const session = await prismaOperation(
+        () => db.client.imageReviewSession.findFirst({
+          where: {
+            purchaseOrderId: poId,
+            merchantId: merchantId
+          },
+          include: {
+            products: {
+              include: {
+                images: true
+              }
             }
+          },
+          orderBy: {
+            createdAt: 'desc'
           }
-        },
-        orderBy: {
-          createdAt: 'desc'
-        }
-      })
+        }),
+        `Get session for PO ${poId} and merchant ${merchantId}`
+      )
 
       return session
       
