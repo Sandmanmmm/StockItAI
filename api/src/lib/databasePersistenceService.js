@@ -25,6 +25,24 @@ export class DatabasePersistenceService {
       console.log(`📊 Persisting AI results to database for ${fileName}`)
       console.log(`   Model: ${aiResult.model}, Confidence: ${(aiResult.confidence?.overall || 0)}%`)
       
+      // Validate extracted data
+      if (!aiResult.extractedData) {
+        throw new Error('No extracted data in AI result')
+      }
+      
+      // Log line items data for debugging
+      const lineItemsData = aiResult.extractedData?.lineItems || aiResult.extractedData?.items || []
+      console.log(`🔍 DEBUG - AI Result Structure:`)
+      console.log(`   - Has extractedData: ${!!aiResult.extractedData}`)
+      console.log(`   - extractedData.lineItems: ${aiResult.extractedData?.lineItems?.length || 0}`)
+      console.log(`   - extractedData.items: ${aiResult.extractedData?.items?.length || 0}`)
+      console.log(`   - extractedData keys:`, Object.keys(aiResult.extractedData || {}))
+      console.log(`   - Full extractedData:`, JSON.stringify(aiResult.extractedData, null, 2))
+      
+      if (lineItemsData.length === 0) {
+        console.warn(`⚠️ WARNING: No line items found in extracted data!`)
+      }
+      
       // Start database transaction with extended timeout for large POs
       const result = await this.prisma.$transaction(async (tx) => {
         
@@ -60,7 +78,16 @@ export class DatabasePersistenceService {
               options
             )
         
-        // 3. Create line items
+        // 3. Delete existing line items if updating (to avoid duplicates/stale data)
+        if (options.purchaseOrderId) {
+          console.log(`🗑️ Deleting existing line items for PO update...`)
+          const deletedCount = await tx.pOLineItem.deleteMany({
+            where: { purchaseOrderId: purchaseOrder.id }
+          })
+          console.log(`✅ Deleted ${deletedCount.count} existing line items`)
+        }
+        
+        // 4. Create line items (fresh or initial creation)
         const lineItems = await this.createLineItems(
           tx,
           aiResult.extractedData?.lineItems || aiResult.extractedData?.items || [],
@@ -68,7 +95,7 @@ export class DatabasePersistenceService {
           aiResult.confidence?.lineItems || {}
         )
         
-        // 4. Create AI processing audit record
+        // 5. Create AI processing audit record
         const auditRecord = await this.createAIAuditRecord(
           tx,
           aiResult,

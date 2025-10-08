@@ -12,7 +12,7 @@
  */
 
 import { RefinementConfigService } from '../services/refinementConfigService.js'
-import { db } from './db.js'
+import { db, prismaOperation } from './db.js'
 import { imageProcessingService } from './imageProcessingService.js'
 import { merchantImageReviewService } from './merchantImageReviewService.js'
 
@@ -499,7 +499,7 @@ export class RefinementPipelineService {
 
   async getMerchantShopifyConfig(merchantId) {
     // Get merchant's Shopify configuration with retry logic
-    const merchant = await db.prismaOperation(
+    const merchant = await prismaOperation(
       () => db.client.merchant.findUnique({
         where: { id: merchantId }
       }),

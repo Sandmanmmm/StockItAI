@@ -1,5 +1,5 @@
 // Refinement Configuration Service
-import { db } from '../lib/db.js';
+import { db, prismaOperation } from '../lib/db.js';
 
 export class RefinementConfigService {
   constructor(prisma) {
@@ -11,7 +11,7 @@ export class RefinementConfigService {
    */
   async getMerchantConfig(merchantId) {
     // Use retry wrapper for transient connection errors
-    const config = await db.prismaOperation(
+    const config = await prismaOperation(
       () => this.prisma.merchantRefinementConfig.findUnique({
         where: { merchantId }
       }),
@@ -27,7 +27,7 @@ export class RefinementConfigService {
    * Create or update merchant's refinement configuration
    */
   async updateMerchantConfig(merchantId, updates) {
-    const merchant = await db.prismaOperation(
+    const merchant = await prismaOperation(
       () => this.prisma.merchant.findUnique({
         where: { id: merchantId },
         select: { shopDomain: true }
@@ -40,7 +40,7 @@ export class RefinementConfigService {
     }
 
     // Check if config exists
-    const existingConfig = await db.prismaOperation(
+    const existingConfig = await prismaOperation(
       () => this.prisma.merchantRefinementConfig.findUnique({
         where: { merchantId }
       }),

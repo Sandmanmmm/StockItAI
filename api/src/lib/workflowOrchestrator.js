@@ -18,6 +18,7 @@ import { enhancedShopifyService } from './enhancedShopifyService.js'
 import { errorHandlingService, MERCHANT_MESSAGES } from './errorHandlingService.js'
 import { DatabasePersistenceService } from './databasePersistenceService.js'
 import { db } from './db.js'
+import { prismaOperation } from './db.js'
 import { SupabaseStorageService } from './storageService.js'
 import { processorRegistrationService } from './processorRegistrationService.js'
 import { FileParsingService } from './fileParsingService.js'
@@ -521,7 +522,7 @@ export class WorkflowOrchestrator {
         : `${stageName} - ${progress}% complete`
       
       // Use retry wrapper for transient connection errors
-      await db.prismaOperation(
+      await prismaOperation(
         () => db.client.purchaseOrder.update({
           where: { id: purchaseOrderId },
           data: {
