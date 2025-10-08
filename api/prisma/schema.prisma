@@ -6,15 +6,13 @@ datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
-  // Increase connection pool for serverless concurrency
-  // Add to DATABASE_URL: ?connection_limit=20&pool_timeout=30
 }
 
 model Session {
-  id            String    @id @default(cuid())
-  shop          String    @unique
+  id            String         @id @default(cuid())
+  shop          String         @unique
   state         String
-  isOnline      Boolean   @default(false)
+  isOnline      Boolean        @default(false)
   scope         String?
   expires       DateTime?
   accessToken   String
@@ -22,65 +20,66 @@ model Session {
   firstName     String?
   lastName      String?
   email         String?
-  accountOwner  Boolean   @default(false)
+  accountOwner  Boolean        @default(false)
   locale        String?
-  collaborator  Boolean?  @default(false)
-  emailVerified Boolean?  @default(false)
+  collaborator  Boolean?       @default(false)
+  emailVerified Boolean?       @default(false)
   merchantId    String
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  merchant      Merchant  @relation(fields: [merchantId], references: [id])
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  ProductDraft  ProductDraft[]
+  merchant      Merchant       @relation(fields: [merchantId], references: [id])
 
   @@index([shop])
   @@index([merchantId])
 }
 
 model Merchant {
-  id             String              @id @default(cuid())
-  shopDomain     String              @unique
-  name           String
-  email          String?
-  phone          String?
-  address        String?
-  timezone       String?
-  currency       String              @default("USD")
-  plan           String              @default("basic")
-  status         String              @default("active")
-  settings       Json                @default("{}")
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
-  accessToken    String?             // Encrypted Shopify API token
-  scope          String?
-  webhookSecret  String?             // Encrypted webhook secret
-  dataEncryption Boolean             @default(true)
-  auditLogging   Boolean             @default(true)
-  aiSettings     AISettings?
-  purchaseOrders PurchaseOrder[]
-  sessions       Session[]
-  suppliers      Supplier[]
-  uploads        Upload[]
-  workflows      WorkflowExecution[]
-  productDrafts  ProductDraft[]
-  refinementConfig MerchantRefinementConfig?
+  id                  String                    @id @default(cuid())
+  shopDomain          String                    @unique
+  name                String
+  email               String?
+  phone               String?
+  address             String?
+  timezone            String?
+  currency            String                    @default("USD")
+  plan                String                    @default("basic")
+  status              String                    @default("active")
+  settings            Json                      @default("{}")
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+  accessToken         String?
+  scope               String?
+  auditLogging        Boolean                   @default(true)
+  dataEncryption      Boolean                   @default(true)
+  webhookSecret       String?
+  aiSettings          AISettings?
   imageReviewSessions ImageReviewSession[]
+  refinementConfig    MerchantRefinementConfig?
+  productDrafts       ProductDraft[]
+  purchaseOrders      PurchaseOrder[]
+  sessions            Session[]
+  suppliers           Supplier[]
+  uploads             Upload[]
+  workflows           WorkflowExecution[]
 
   @@index([shopDomain])
   @@index([status])
 }
 
 model PurchaseOrder {
-  id                  String              @id @default(cuid())
+  id                  String               @id @default(cuid())
   supplierName        String
   orderDate           DateTime?
   dueDate             DateTime?
   totalAmount         Float
-  currency            String              @default("USD")
-  status              String              @default("pending")
-  confidence          Float               @default(0.0)
+  currency            String               @default("USD")
+  status              String               @default("pending")
+  confidence          Float                @default(0.0)
   rawData             Json?
   processingNotes     String?
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
   merchantId          String
   supplierId          String?
   fileName            String?
@@ -91,20 +90,20 @@ model PurchaseOrder {
   jobCompletedAt      DateTime?
   jobError            String?
   jobStartedAt        DateTime?
-  jobStatus           String              @default("pending")
+  jobStatus           String               @default("pending")
   syncJobId           String?
   syncCompletedAt     DateTime?
   syncResults         Json?
   syncStartedAt       DateTime?
   totalProcessingTime Int?
   aiAuditTrail        AIProcessingAudit[]
+  imageReviewSessions ImageReviewSession[]
   lineItems           POLineItem[]
-  merchant            Merchant            @relation(fields: [merchantId], references: [id])
-  supplier            Supplier?           @relation(fields: [supplierId], references: [id])
+  productDrafts       ProductDraft[]
+  merchant            Merchant             @relation(fields: [merchantId], references: [id])
+  supplier            Supplier?            @relation(fields: [supplierId], references: [id])
   syncAudits          ShopifySyncAudit[]
   syncJobs            SyncJob[]
-  productDrafts       ProductDraft[]
-  imageReviewSessions ImageReviewSession[]
 
   @@unique([merchantId, number])
   @@index([merchantId])
@@ -136,7 +135,7 @@ model POLineItem {
   shopifySyncAt    DateTime?
   syncError        String?
   purchaseOrder    PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
-  productDrafts    ProductDraft[]
+  ProductDraft     ProductDraft?
 
   @@index([purchaseOrderId])
   @@index([sku])
@@ -162,15 +161,15 @@ model Supplier {
   averageAccuracy   Float?
   avgProcessingTime Int?
   category          String?
-  categories        String[]        @default([])
   connectionType    String          @default("manual")
   priority          String          @default("medium")
   syncTime          String?
   totalPOs          Int             @default(0)
+  categories        String[]        @default([])
+  productDrafts     ProductDraft[]
   purchaseOrders    PurchaseOrder[]
   merchant          Merchant        @relation(fields: [merchantId], references: [id])
   uploads           Upload[]
-  productDrafts     ProductDraft[]
 
   @@unique([merchantId, name])
   @@index([merchantId])
@@ -361,113 +360,53 @@ model WorkflowStageExecution {
   @@index([startedAt])
 }
 
-// Product Draft Models for Refinement Workflow
 model ProductDraft {
-  id               String                  @id @default(cuid())
-  
-  // Basic Product Information
-  title            String
-  description      String?
-  vendor           String?
-  productType      String?
-  tags             String[]                @default([])
-  
-  // Pricing Information
-  priceOriginal    Float?
-  priceRefined     Float?
-  currencyOriginal String                  @default("USD")
-  currencyTarget   String                  @default("USD")
-  costPrice        Float?                  // Wholesale/cost price from PO
-  msrp             Float?                  // Manufacturer suggested retail price
-  margin           Float?                  // Profit margin percentage
-  
-  // Product Identifiers
-  sku              String?
-  barcode          String?
-  upc              String?
-  isbn             String?
-  mpn              String?                 // Manufacturer Part Number
-  
-  // Physical Properties
-  weight           Float?
-  weightUnit       String                  @default("lb")
-  dimensions       Json?                   // {length, width, height, unit}
-  
-  // Inventory Management
-  trackQuantity    Boolean                 @default(true)
-  inventoryPolicy  String                  @default("deny") // deny, continue
-  fulfillmentService String                @default("manual")
-  requiresShipping Boolean                 @default(true)
-  taxable          Boolean                 @default(true)
-  taxCode          String?
-  
-  // SEO & Marketing
-  seoTitle         String?
-  seoDescription   String?
-  handle           String?                 // URL handle (auto-generated from title)
-  
-  // Status & Workflow
-  status           ProductDraftStatus      @default(PARSED)
-  workflowStage    ProductWorkflowStage    @default(INITIAL)
-  priority         ProductPriority         @default(MEDIUM)
-  
-  // AI Processing Metadata
-  confidence       Float?                  @default(0.00) // Overall AI confidence score (0.00-1.00)
-  confidenceBreakdown Json?                // Confidence scores per field
-  aiNotes          String?                 // AI processing notes and suggestions
-  extractedData    Json?                   // Original extracted data from AI
-  processingMethod String?                 // AI method used for extraction
-  
-  // Review & Approval
-  reviewedBy       String?                 // User ID who reviewed
-  reviewedAt       DateTime?
-  reviewNotes      String?
-  approvedBy       String?                 // User ID who approved
-  approvedAt       DateTime?
-  rejectionReason  String?
-  
-  // Shopify Integration
-  shopifyProductId String?
-  shopifyHandle    String?
-  syncStatus       ShopifySyncStatus       @default(PENDING)
-  syncAttempts     Int                     @default(0)
-  lastSyncAt       DateTime?
-  syncError        String?
-  shopifyUrl       String?
-  
-  // Data Relationships
-  merchantId       String
-  purchaseOrderId  String?                 // Optional: linked to originating PO
-  poLineItemId     String?                 // Optional: linked to specific line item
-  supplierId       String?                 // Optional: linked to supplier
-  
-  // Timestamps
-  createdAt        DateTime                @default(now())
-  updatedAt        DateTime                @updatedAt
+  id                  String                 @id @default(cuid())
+  sessionId           String
+  merchantId          String
+  purchaseOrderId     String
+  lineItemId          String                 @unique
+  supplierId          String?
+  originalTitle       String
+  refinedTitle        String?
+  originalDescription String?
+  refinedDescription  String?
+  originalPrice       Float
+  priceRefined        Float?
+  estimatedMargin     Float?
+  shopifyProductId    String?
+  shopifyVariantId    String?
+  status              ProductDraftStatus     @default(DRAFT)
+  tags                String[]               @default([])
+  categoryId          String?
+  reviewNotes         String?
+  reviewedBy          String?
+  reviewedAt          DateTime?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+  compareAtPrice      Float?
+  costPerItem         Float?
+  countryOfOrigin     String?
+  hsCode              String?
+  inventoryQty        Int?                   @default(0)
+  productType         String?
+  sku                 String?
+  vendor              String?
+  ProductCategory     ProductCategory?       @relation(fields: [categoryId], references: [id])
+  POLineItem          POLineItem             @relation(fields: [lineItemId], references: [id], onDelete: Cascade)
+  merchant            Merchant               @relation(fields: [merchantId], references: [id])
+  purchaseOrder       PurchaseOrder          @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  Session             Session                @relation(fields: [sessionId], references: [id])
+  supplier            Supplier?              @relation(fields: [supplierId], references: [id])
+  images              ProductImage[]
+  reviewHistory       ProductReviewHistory[]
+  variants            ProductVariant[]
 
-  // Relations
-  merchant         Merchant                @relation(fields: [merchantId], references: [id], onDelete: Cascade)
-  purchaseOrder    PurchaseOrder?          @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
-  lineItem         POLineItem?             @relation(fields: [poLineItemId], references: [id], onDelete: SetNull)
-  supplier         Supplier?               @relation(fields: [supplierId], references: [id], onDelete: SetNull)
-  images           ProductImage[]
-  variants         ProductVariant[]
-  categories       ProductDraftCategory[]
-  reviewHistory    ProductReviewHistory[]
-
-  @@unique([merchantId, sku])
-  @@unique([merchantId, handle])
   @@index([merchantId])
   @@index([status])
-  @@index([workflowStage])
-  @@index([syncStatus])
-  @@index([priority])
-  @@index([sku])
-  @@index([barcode])
-  @@index([handle])
   @@index([createdAt])
-  @@index([confidence])
-  @@index([purchaseOrderId])
+  @@index([sessionId])
+  @@index([supplierId])
 }
 
 model ProductImage {
@@ -481,7 +420,6 @@ model ProductImage {
   enhancementData Json?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
-
   productDraft    ProductDraft @relation(fields: [productDraftId], references: [id], onDelete: Cascade)
 
   @@index([productDraftId])
@@ -489,22 +427,21 @@ model ProductImage {
 }
 
 model ProductVariant {
-  id              String       @id @default(cuid())
-  productDraftId  String
-  sku             String
-  title           String
-  price           Float
-  compareAtPrice  Float?
-  inventoryQty    Int?
-  weight          Float?
-  weightUnit      String       @default("kg")
-  requiresShipping Boolean     @default(true)
-  taxable         Boolean      @default(true)
-  barcode         String?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-
-  productDraft    ProductDraft @relation(fields: [productDraftId], references: [id], onDelete: Cascade)
+  id               String       @id @default(cuid())
+  productDraftId   String
+  sku              String
+  title            String
+  price            Float
+  compareAtPrice   Float?
+  inventoryQty     Int?
+  weight           Float?
+  weightUnit       String       @default("kg")
+  requiresShipping Boolean      @default(true)
+  taxable          Boolean      @default(true)
+  barcode          String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  productDraft     ProductDraft @relation(fields: [productDraftId], references: [id], onDelete: Cascade)
 
   @@unique([productDraftId, sku])
   @@index([productDraftId])
@@ -512,72 +449,52 @@ model ProductVariant {
 }
 
 model ProductCategory {
-  id           String         @id @default(cuid())
-  name         String         @unique
+  id           String            @id @default(cuid())
+  name         String            @unique
   description  String?
   parentId     String?
-  isActive     Boolean        @default(true)
-  sortOrder    Int            @default(0)
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-
+  isActive     Boolean           @default(true)
+  sortOrder    Int               @default(0)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
   parent       ProductCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
   children     ProductCategory[] @relation("CategoryHierarchy")
-  products     ProductDraftCategory[]
+  ProductDraft ProductDraft[]
 
   @@index([parentId])
   @@index([sortOrder])
 }
 
-model ProductDraftCategory {
-  productDraftId  String
-  categoryId      String
-  createdAt       DateTime     @default(now())
-
-  productDraft    ProductDraft    @relation(fields: [productDraftId], references: [id], onDelete: Cascade)
-  category        ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-
-  @@id([productDraftId, categoryId])
-  @@index([productDraftId])
-  @@index([categoryId])
-}
-
 model ProductReviewHistory {
-  id              String       @id @default(cuid())
-  productDraftId  String
-  action          String       // 'created', 'updated', 'approved', 'rejected', 'synced'
-  changes         Json         // What fields were changed
-  reviewedBy      String?
-  reviewNotes     String?
-  createdAt       DateTime     @default(now())
-
-  productDraft    ProductDraft @relation(fields: [productDraftId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  productDraftId String
+  action         String
+  changes        Json
+  reviewedBy     String?
+  reviewNotes    String?
+  createdAt      DateTime     @default(now())
+  productDraft   ProductDraft @relation(fields: [productDraftId], references: [id], onDelete: Cascade)
 
   @@index([productDraftId])
   @@index([action])
   @@index([createdAt])
 }
 
-// ==========================================
-// IMAGE REVIEW SESSION MODELS
-// ==========================================
-
 model ImageReviewSession {
-  id               String                    @id @default(cuid())
-  sessionId        String                    @unique // User-friendly session ID like "img_session_1759207404519"
+  id               String               @id @default(cuid())
+  sessionId        String               @unique
   purchaseOrderId  String
   merchantId       String
-  status           ImageReviewStatus         @default(PENDING)
-  totalProducts    Int                       @default(0)
-  reviewedProducts Int                       @default(0)
-  autoApproveAt    DateTime?                 // Auto-approve timeout
+  status           ImageReviewStatus    @default(PENDING)
+  totalProducts    Int                  @default(0)
+  reviewedProducts Int                  @default(0)
+  autoApproveAt    DateTime?
   completedAt      DateTime?
-  createdAt        DateTime                  @default(now())
-  updatedAt        DateTime                  @updatedAt
-
-  purchaseOrder    PurchaseOrder             @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
-  merchant         Merchant                  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
   products         ImageReviewProduct[]
+  merchant         Merchant             @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  purchaseOrder    PurchaseOrder        @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
 
   @@index([purchaseOrderId])
   @@index([merchantId])
@@ -586,21 +503,20 @@ model ImageReviewSession {
 }
 
 model ImageReviewProduct {
-  id                String                    @id @default(cuid())
-  sessionId         String
-  productName       String
-  productSku        String?
-  barcode           String?
-  originalProductData Json                   // Store original line item data
-  images            ImageReviewProductImage[]
-  selectedImageIds  String[]                  @default([]) // Array of selected image IDs
-  status            ProductImageReviewStatus  @default(PENDING)
-  reviewNotes       String?
-  reviewedAt        DateTime?
-  createdAt         DateTime                  @default(now())
-  updatedAt         DateTime                  @updatedAt
-
-  session           ImageReviewSession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  id                  String                    @id @default(cuid())
+  sessionId           String
+  productName         String
+  productSku          String?
+  barcode             String?
+  originalProductData Json
+  selectedImageIds    String[]                  @default([])
+  status              ProductImageReviewStatus  @default(PENDING)
+  reviewNotes         String?
+  reviewedAt          DateTime?
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+  session             ImageReviewSession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  images              ImageReviewProductImage[]
 
   @@index([sessionId])
   @@index([status])
@@ -608,20 +524,19 @@ model ImageReviewProduct {
 }
 
 model ImageReviewProductImage {
-  id               String              @id @default(cuid())
-  productReviewId  String
-  imageUrl         String
-  imageType        ImageType
-  source           ImageSource
-  altText          String?
-  isSelected       Boolean             @default(false)
-  isApproved       Boolean             @default(false)
-  rejectionReason  String?
-  metadata         Json                @default("{}")
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
-
-  product          ImageReviewProduct  @relation(fields: [productReviewId], references: [id], onDelete: Cascade)
+  id              String             @id @default(cuid())
+  productReviewId String
+  imageUrl        String
+  imageType       ImageType
+  source          ImageSource
+  altText         String?
+  isSelected      Boolean            @default(false)
+  isApproved      Boolean            @default(false)
+  rejectionReason String?
+  metadata        Json               @default("{}")
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  product         ImageReviewProduct @relation(fields: [productReviewId], references: [id], onDelete: Cascade)
 
   @@index([productReviewId])
   @@index([imageType])
@@ -629,140 +544,47 @@ model ImageReviewProductImage {
   @@index([isSelected])
 }
 
-enum ImageReviewStatus {
-  PENDING         // Waiting for merchant review
-  IN_PROGRESS     // Currently being reviewed
-  COMPLETED       // All products reviewed
-  AUTO_APPROVED   // Auto-approved due to timeout
-  CANCELLED       // Session cancelled
-}
-
-enum ProductImageReviewStatus {
-  PENDING         // Waiting for review
-  APPROVED        // Product images approved
-  NEEDS_CHANGES   // Needs different images
-  SKIPPED         // Merchant skipped this product
-}
-
-enum ImageType {
-  MAIN            // Primary product image
-  GALLERY         // Additional gallery images
-  VARIANT         // Variant-specific images
-  THUMBNAIL       // Thumbnail images
-}
-
-enum ImageSource {
-  VENDOR_PROVIDED // Images from vendor/supplier
-  WEB_SCRAPED     // Images found via web scraping
-  AI_GENERATED    // AI-generated images
-  STOCK_PHOTO     // Stock photography
-  MERCHANT_UPLOAD // Uploaded by merchant
-  PLACEHOLDER     // Placeholder images
-}
-
-enum ProductDraftStatus {
-  PARSED           // Just parsed from AI
-  IN_REVIEW        // Under human review
-  APPROVED         // Approved, ready to sync
-  REJECTED         // Rejected, needs fixes
-  SYNCED           // Successfully synced to Shopify
-  SYNC_ERROR       // Error during sync
-}
-
-enum ProductWorkflowStage {
-  INITIAL          // Just created
-  BASIC_REVIEW     // Basic info review
-  DETAILED_REVIEW  // Detailed review
-  PRICING_REVIEW   // Pricing strategy review
-  FINAL_REVIEW     // Final approval
-  APPROVED         // Approved for sync
-}
-
-enum ProductPriority {
-  LOW
-  MEDIUM
-  HIGH
-  URGENT
-}
-
-enum ShopifySyncStatus {
-  PENDING          // Not yet synced
-  SYNCING          // Currently syncing
-  SYNCED           // Successfully synced
-  ERROR            // Error during sync
-}
-
-// ==========================================
-// REFINEMENT ENGINE CONFIGURATION MODELS
-// ==========================================
-
 model MerchantRefinementConfig {
-  id                    String              @id @default(cuid())
-  merchantId            String              @unique
-  shopDomain            String
-  
-  // Configuration version for migration tracking
-  configVersion         String              @default("1.0")
-  
-  // Global refinement settings
-  isEnabled             Boolean             @default(true)
-  autoApplyRules        Boolean             @default(false)
-  requireReviewThreshold Float              @default(0.8)
-  
-  // Pricing configuration
-  pricingConfig         Json                // PricingRefinementConfig
-  
-  // Categorization configuration  
-  categorizationConfig  Json                // CategorizationRefinementConfig
-  
-  // Content enrichment configuration
-  contentConfig         Json                // ContentRefinementConfig
-  
-  // Deduplication configuration
-  deduplicationConfig   Json                // DeduplicationRefinementConfig
-  
-  // Advanced processing options
-  processingConfig      Json                // ProcessingRefinementConfig
-  
-  createdAt             DateTime            @default(now())
-  updatedAt             DateTime            @updatedAt
-  
-  // Relations
-  merchant              Merchant            @relation(fields: [merchantId], references: [id], onDelete: Cascade)
-  categoryMappings      CategoryMapping[]
-  pricingRules          PricingRule[]
-  contentRules          ContentRule[]
-  deduplicationRules    DeduplicationRule[]
-  
+  id                     String              @id @default(cuid())
+  merchantId             String              @unique
+  shopDomain             String
+  configVersion          String              @default("1.0")
+  isEnabled              Boolean             @default(true)
+  autoApplyRules         Boolean             @default(false)
+  requireReviewThreshold Float               @default(0.8)
+  pricingConfig          Json
+  categorizationConfig   Json
+  contentConfig          Json
+  deduplicationConfig    Json
+  processingConfig       Json
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  categoryMappings       CategoryMapping[]
+  contentRules           ContentRule[]
+  deduplicationRules     DeduplicationRule[]
+  merchant               Merchant            @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  pricingRules           PricingRule[]
+
   @@index([merchantId])
   @@index([shopDomain])
 }
 
 model CategoryMapping {
-  id                    String                      @id @default(cuid())
-  merchantId            String
-  configId              String
-  
-  // Source mapping
-  sourceCategory        String                      // Vendor category name
-  sourcePattern         String?                     // Regex pattern for matching
-  priority              Int                         @default(0)
-  
-  // Target mapping
-  targetCollection      String                      // Shopify collection name
-  targetCollectionId    String?                     // Shopify collection ID
-  
-  // Metadata
-  isEnabled             Boolean                     @default(true)
-  matchCount            Int                         @default(0)
-  lastUsed              DateTime?
-  
-  createdAt             DateTime                    @default(now())
-  updatedAt             DateTime                    @updatedAt
-  
-  // Relations
-  config                MerchantRefinementConfig    @relation(fields: [configId], references: [id], onDelete: Cascade)
-  
+  id                 String                   @id @default(cuid())
+  merchantId         String
+  configId           String
+  sourceCategory     String
+  sourcePattern      String?
+  priority           Int                      @default(0)
+  targetCollection   String
+  targetCollectionId String?
+  isEnabled          Boolean                  @default(true)
+  matchCount         Int                      @default(0)
+  lastUsed           DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  config             MerchantRefinementConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+
   @@index([merchantId])
   @@index([configId])
   @@index([sourceCategory])
@@ -770,42 +592,29 @@ model CategoryMapping {
 }
 
 model PricingRule {
-  id                    String                      @id @default(cuid())
-  merchantId            String
-  configId              String
-  
-  // Rule identification
-  name                  String
-  description           String?
-  ruleType              PricingRuleType
-  priority              Int                         @default(0)
-  
-  // Conditions
-  conditions            Json                        // Array of conditions (SKU patterns, categories, suppliers, etc.)
-  
-  // Actions
-  markupType            MarkupType                  @default(PERCENTAGE)
-  markupValue           Float
-  roundingRule          RoundingRule                @default(NONE)
-  minPrice              Float?
-  maxPrice              Float?
-  
-  // Currency handling
-  sourceCurrency        String                      @default("USD")
-  targetCurrency        String                      @default("USD")
-  exchangeRate          Float?
-  
-  // Metadata
-  isEnabled             Boolean                     @default(true)
-  applicationCount      Int                         @default(0)
-  lastUsed              DateTime?
-  
-  createdAt             DateTime                    @default(now())
-  updatedAt             DateTime                    @updatedAt
-  
-  // Relations
-  config                MerchantRefinementConfig    @relation(fields: [configId], references: [id], onDelete: Cascade)
-  
+  id               String                   @id @default(cuid())
+  merchantId       String
+  configId         String
+  name             String
+  description      String?
+  ruleType         PricingRuleType
+  priority         Int                      @default(0)
+  conditions       Json
+  markupType       MarkupType               @default(PERCENTAGE)
+  markupValue      Float
+  roundingRule     RoundingRule             @default(NONE)
+  minPrice         Float?
+  maxPrice         Float?
+  sourceCurrency   String                   @default("USD")
+  targetCurrency   String                   @default("USD")
+  exchangeRate     Float?
+  isEnabled        Boolean                  @default(true)
+  applicationCount Int                      @default(0)
+  lastUsed         DateTime?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  config           MerchantRefinementConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+
   @@index([merchantId])
   @@index([configId])
   @@index([priority])
@@ -813,39 +622,26 @@ model PricingRule {
 }
 
 model ContentRule {
-  id                    String                      @id @default(cuid())
-  merchantId            String
-  configId              String
-  
-  // Rule identification
-  name                  String
-  description           String?
-  ruleType              ContentRuleType
-  priority              Int                         @default(0)
-  
-  // Conditions
-  conditions            Json                        // When to apply this rule
-  
-  // Content generation settings
-  contentTemplate       String?                     // Template for generated content
-  brandVoicePrompt      String?                     // GPT prompt for brand voice
-  seoKeywords           String[]                    @default([])
-  
-  // Image handling
-  imageProcessing       Json?                       // Image processing rules
-  fallbackImageUrls     String[]                    @default([])
-  
-  // Metadata
-  isEnabled             Boolean                     @default(true)
-  applicationCount      Int                         @default(0)
-  lastUsed              DateTime?
-  
-  createdAt             DateTime                    @default(now())
-  updatedAt             DateTime                    @updatedAt
-  
-  // Relations
-  config                MerchantRefinementConfig    @relation(fields: [configId], references: [id], onDelete: Cascade)
-  
+  id                String                   @id @default(cuid())
+  merchantId        String
+  configId          String
+  name              String
+  description       String?
+  ruleType          ContentRuleType
+  priority          Int                      @default(0)
+  conditions        Json
+  contentTemplate   String?
+  brandVoicePrompt  String?
+  seoKeywords       String[]                 @default([])
+  imageProcessing   Json?
+  fallbackImageUrls String[]                 @default([])
+  isEnabled         Boolean                  @default(true)
+  applicationCount  Int                      @default(0)
+  lastUsed          DateTime?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  config            MerchantRefinementConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+
   @@index([merchantId])
   @@index([configId])
   @@index([priority])
@@ -853,133 +649,147 @@ model ContentRule {
 }
 
 model DeduplicationRule {
-  id                    String                      @id @default(cuid())
-  merchantId            String
-  configId              String
-  
-  // Rule identification
-  name                  String
-  description           String?
-  priority              Int                         @default(0)
-  
-  // Matching criteria
-  matchFields           String[]                    // Fields to match on (sku, barcode, title, etc.)
-  matchThreshold        Float                       @default(0.9)
-  matchAlgorithm        MatchAlgorithm              @default(EXACT)
-  
-  // Actions on match
-  onDuplicateAction     DuplicateAction             @default(SKIP)
-  updateExisting        Boolean                     @default(false)
-  mergeBehavior         Json?                       // How to merge when updating
-  
-  // Metadata
-  isEnabled             Boolean                     @default(true)
-  matchCount            Int                         @default(0)
-  lastUsed              DateTime?
-  
-  createdAt             DateTime                    @default(now())
-  updatedAt             DateTime                    @updatedAt
-  
-  // Relations
-  config                MerchantRefinementConfig    @relation(fields: [configId], references: [id], onDelete: Cascade)
-  
+  id                String                   @id @default(cuid())
+  merchantId        String
+  configId          String
+  name              String
+  description       String?
+  priority          Int                      @default(0)
+  matchFields       String[]
+  matchThreshold    Float                    @default(0.9)
+  matchAlgorithm    MatchAlgorithm           @default(EXACT)
+  onDuplicateAction DuplicateAction          @default(SKIP)
+  updateExisting    Boolean                  @default(false)
+  mergeBehavior     Json?
+  isEnabled         Boolean                  @default(true)
+  matchCount        Int                      @default(0)
+  lastUsed          DateTime?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  config            MerchantRefinementConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+
   @@index([merchantId])
   @@index([configId])
   @@index([priority])
 }
 
-// ==========================================
-// REFINEMENT ENGINE ENUMS
-// ==========================================
-
-enum PricingRuleType {
-  GLOBAL              // Apply to all products
-  CATEGORY            // Apply to specific categories
-  SUPPLIER            // Apply to specific suppliers
-  SKU_PATTERN         // Apply to SKU patterns
-  PRICE_RANGE         // Apply to price ranges
-  CONDITIONAL         // Apply based on complex conditions
-}
-
-enum MarkupType {
-  PERCENTAGE          // Multiply by percentage (e.g., cost * 1.25)
-  FIXED_AMOUNT        // Add fixed amount (e.g., cost + $5.00)
-  MARGIN_BASED        // Set margin percentage (e.g., 25% margin)
-  CUSTOM_FORMULA      // Use custom calculation
-}
-
-enum RoundingRule {
-  NONE                // No rounding
-  NEAREST_CENT        // Round to nearest cent
-  NEAREST_NICKEL      // Round to nearest $0.05
-  NEAREST_DIME        // Round to nearest $0.10
-  NEAREST_QUARTER     // Round to nearest $0.25
-  NEAREST_HALF        // Round to nearest $0.50
-  NEAREST_DOLLAR      // Round to nearest dollar
-  PSYCHOLOGICAL_99    // Round to .99 (e.g., $19.97 → $19.99)
-  PSYCHOLOGICAL_95    // Round to .95 (e.g., $19.97 → $19.95)
-}
-
-enum ContentRuleType {
-  SEO_DESCRIPTION     // Generate SEO-optimized descriptions
-  BRAND_VOICE         // Rewrite in brand voice
-  TITLE_OPTIMIZATION  // Optimize product titles
-  IMAGE_ENHANCEMENT   // Process and enhance images
-  TAG_GENERATION      // Generate relevant tags
-  METADATA_ENRICHMENT // Add metadata fields
-}
-
-enum MatchAlgorithm {
-  EXACT               // Exact string match
-  FUZZY               // Fuzzy string matching
-  SEMANTIC            // Semantic similarity
-  REGEX_PATTERN       // Regular expression matching
-  CUSTOM              // Custom matching logic
-}
-
-enum DuplicateAction {
-  SKIP                // Skip creating duplicate
-  CREATE_VARIANT      // Create as variant of existing
-  UPDATE_EXISTING     // Update existing product
-  CREATE_ANYWAY       // Create despite duplicate
-  QUEUE_FOR_REVIEW    // Queue for manual review
-}
-
 model SupplierMetrics {
-  id                    String   @id @default(cuid())
-  supplierId            String   @unique
-  
-  // Accuracy & Quality Metrics
-  averageAccuracy       Float    @default(0.0)
-  dataQualityScore      Float    @default(0.0)
-  errorRate             Float    @default(0.0)
-  
-  // Performance Metrics
-  avgProcessingTime     Int      @default(0)    // milliseconds
-  onTimeDeliveryRate    Float    @default(0.0)
-  totalPOs              Int      @default(0)
-  totalValue            Float    @default(0.0)
-  
-  // Recent Activity (last 7 days)
-  recentPOs7Days        Int      @default(0)
-  recentPOs30Days       Int      @default(0)
-  activityTrend         String   @default("stable") // 'up' | 'down' | 'stable'
-  
-  // Status Breakdown
-  completedCount        Int      @default(0)
-  processingCount       Int      @default(0)
-  failedCount           Int      @default(0)
-  needsReviewCount      Int      @default(0)
-  
-  // Health Score
-  healthScore           Float    @default(100.0)
-  lastHealthCheck       DateTime @default(now())
-  
-  // Timestamps
-  calculatedAt          DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  
+  id                 String   @id @default(cuid())
+  supplierId         String   @unique
+  averageAccuracy    Float    @default(0.0)
+  dataQualityScore   Float    @default(0.0)
+  errorRate          Float    @default(0.0)
+  avgProcessingTime  Int      @default(0)
+  onTimeDeliveryRate Float    @default(0.0)
+  totalPOs           Int      @default(0)
+  totalValue         Float    @default(0.0)
+  recentPOs7Days     Int      @default(0)
+  recentPOs30Days    Int      @default(0)
+  activityTrend      String   @default("stable")
+  completedCount     Int      @default(0)
+  processingCount    Int      @default(0)
+  failedCount        Int      @default(0)
+  needsReviewCount   Int      @default(0)
+  healthScore        Float    @default(100.0)
+  lastHealthCheck    DateTime @default(now())
+  calculatedAt       DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
   @@index([supplierId])
   @@index([healthScore])
   @@index([calculatedAt])
+}
+
+enum ImageReviewStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  AUTO_APPROVED
+  CANCELLED
+}
+
+enum ProductImageReviewStatus {
+  PENDING
+  APPROVED
+  NEEDS_CHANGES
+  SKIPPED
+}
+
+enum ImageType {
+  MAIN
+  GALLERY
+  VARIANT
+  THUMBNAIL
+}
+
+enum ImageSource {
+  VENDOR_PROVIDED
+  WEB_SCRAPED
+  AI_GENERATED
+  STOCK_PHOTO
+  MERCHANT_UPLOAD
+  PLACEHOLDER
+}
+
+enum ProductDraftStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  SYNCING
+  SYNCED
+  FAILED
+}
+
+enum PricingRuleType {
+  GLOBAL
+  CATEGORY
+  SUPPLIER
+  SKU_PATTERN
+  PRICE_RANGE
+  CONDITIONAL
+}
+
+enum MarkupType {
+  PERCENTAGE
+  FIXED_AMOUNT
+  MARGIN_BASED
+  CUSTOM_FORMULA
+}
+
+enum RoundingRule {
+  NONE
+  NEAREST_CENT
+  NEAREST_NICKEL
+  NEAREST_DIME
+  NEAREST_QUARTER
+  NEAREST_HALF
+  NEAREST_DOLLAR
+  PSYCHOLOGICAL_99
+  PSYCHOLOGICAL_95
+}
+
+enum ContentRuleType {
+  SEO_DESCRIPTION
+  BRAND_VOICE
+  TITLE_OPTIMIZATION
+  IMAGE_ENHANCEMENT
+  TAG_GENERATION
+  METADATA_ENRICHMENT
+}
+
+enum MatchAlgorithm {
+  EXACT
+  FUZZY
+  SEMANTIC
+  REGEX_PATTERN
+  CUSTOM
+}
+
+enum DuplicateAction {
+  SKIP
+  CREATE_VARIANT
+  UPDATE_EXISTING
+  CREATE_ANYWAY
+  QUEUE_FOR_REVIEW
 }
