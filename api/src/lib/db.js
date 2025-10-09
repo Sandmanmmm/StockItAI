@@ -14,15 +14,58 @@ let prisma
 let prismaVersion = null
 let isConnecting = false // Connection lock to prevent concurrent initialization
 let connectionPromise = null // Store the connection promise for concurrent requests
-const PRISMA_CLIENT_VERSION = 'v4_concurrent_safe' // Increment to force recreation
+const PRISMA_CLIENT_VERSION = 'v5_transaction_recovery' // Increment to force recreation
 
 // Increase process listener limit for Prisma reconnections
 process.setMaxListeners(20)
 
-// Initialize Prisma client - CONCURRENT-SAFE v4
+// Helper to detect fatal Prisma errors that require reconnection
+function isFatalPrismaError(error) {
+  const errorMessage = error?.message || ''
+  const errorCode = error?.code
+  
+  // PostgreSQL transaction abortion
+  if (errorMessage.includes('25P02') || errorMessage.includes('current transaction is aborted')) {
+    console.error(`🚨 Fatal: Transaction aborted (25P02)`)
+    return true
+  }
+  
+  // Engine crashed or stopped responding
+  if (errorMessage.includes('Response from the Engine was empty')) {
+    console.error(`🚨 Fatal: Prisma engine crashed`)
+    return true
+  }
+  
+  // Connection closed
+  if (errorMessage.includes('Connection is closed') || errorCode === 'P1017') {
+    console.error(`🚨 Fatal: Connection closed`)
+    return true
+  }
+  
+  return false
+}
+
+// Force disconnect and clear client (for error recovery)
+async function forceDisconnect() {
+  if (prisma) {
+    console.log(`🔌 Force disconnecting Prisma client...`)
+    try {
+      await prisma.$disconnect()
+    } catch (e) {
+      console.warn(`⚠️ Error during force disconnect:`, e.message)
+    }
+    prisma = null
+    prismaVersion = null
+    isConnecting = false
+    connectionPromise = null
+    console.log(`✅ Client cleared, next request will create fresh connection`)
+  }
+}
+
+// Initialize Prisma client - CONCURRENT-SAFE v5 with TRANSACTION RECOVERY
 async function initializePrisma() {
   try {
-    console.log(`🔍 [v4] initializePrisma called, current prisma:`, prisma ? 'exists' : 'null', `isConnecting: ${isConnecting}`)
+    console.log(`🔍 [v5] initializePrisma called, current prisma:`, prisma ? 'exists' : 'null', `isConnecting: ${isConnecting}`)
     
     // If another request is already connecting, wait for it to complete
     if (isConnecting && connectionPromise) {
@@ -35,13 +78,7 @@ async function initializePrisma() {
     // Only recreate if version changed (not on every call)
     if (prisma && prismaVersion !== PRISMA_CLIENT_VERSION) {
       console.log(`🔄 Version change detected (${prismaVersion} → ${PRISMA_CLIENT_VERSION}), disconnecting old client`)
-      try {
-        await prisma.$disconnect()
-      } catch (e) {
-        console.warn(`⚠️ Error disconnecting old client:`, e.message)
-      }
-      prisma = null
-      prismaVersion = null
+      await forceDisconnect()
     }
     
     // Reuse existing client if version matches AND it's fully connected
@@ -52,8 +89,13 @@ async function initializePrisma() {
         await prisma.$queryRaw`SELECT 1 as healthcheck`
         return prisma // Client is healthy!
       } catch (error) {
-        console.warn(`⚠️ Existing client health check failed, reconnecting:`, error.message)
-        prisma = null // Force recreation
+        console.warn(`⚠️ Existing client health check failed:`, error.message)
+        // Check if this is a fatal error requiring reconnect
+        if (isFatalPrismaError(error)) {
+          await forceDisconnect()
+        } else {
+          prisma = null // Force recreation for non-fatal errors too
+        }
       }
     }
     
@@ -141,6 +183,24 @@ export const db = {
   get client() {
     // Return existing client if available, otherwise create new one
     if (prisma) {
+      // Add error handler to detect fatal errors and force reconnect
+      if (!prisma._errorHandlerAttached) {
+        prisma._errorHandlerAttached = true
+        
+        // Wrap $queryRaw to catch fatal errors
+        const originalQueryRaw = prisma.$queryRaw.bind(prisma)
+        prisma.$queryRaw = async (...args) => {
+          try {
+            return await originalQueryRaw(...args)
+          } catch (error) {
+            if (isFatalPrismaError(error)) {
+              console.error(`🚨 Fatal Prisma error detected, forcing reconnect`)
+              await forceDisconnect()
+            }
+            throw error
+          }
+        }
+      }
       return prisma
     }
     // If no client exists, create one synchronously (but it won't be connected yet)
