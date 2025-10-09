@@ -1,13 +1,12 @@
 import express from 'express'
 import { SimpleProductDraftService } from '../services/simpleProductDraftService.js'
 import { db } from '../lib/db.js'
-import { devBypassAuth } from '../lib/auth.js'
 
 const router = express.Router()
 const productDraftService = new SimpleProductDraftService(db)
 
 // Get product draft by line item ID
-router.get('/by-line-item/:lineItemId', devBypassAuth, async (req, res) => {
+router.get('/by-line-item/:lineItemId', async (req, res) => {
   try {
     const prisma = await db.getClient()
     const { lineItemId } = req.params
@@ -88,7 +87,7 @@ router.get('/by-line-item/:lineItemId', devBypassAuth, async (req, res) => {
 })
 
 // Get all product drafts for a merchant
-router.get('/', devBypassAuth, async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const prisma = await db.getClient()
     // Get merchantId from authenticated request or query parameter
@@ -226,10 +225,10 @@ router.get('/', devBypassAuth, async (req, res) => {
 })
 
 // Create a new product draft
-router.post('/', devBypassAuth, async (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const prisma = await db.getClient()
-    // Get merchant from authenticated request (set by devBypassAuth middleware)
+    // Get merchant from authenticated request (set by parent auth middleware)
     if (!req.merchant) {
       return res.status(401).json({
         success: false,
@@ -310,7 +309,7 @@ router.post('/', devBypassAuth, async (req, res) => {
 })
 
 // Update a product draft
-router.patch('/:id', devBypassAuth, async (req, res) => {
+router.patch('/:id', async (req, res) => {
   try {
     const { id } = req.params
     const updateData = req.body
@@ -339,7 +338,7 @@ router.patch('/:id', devBypassAuth, async (req, res) => {
 })
 
 // Delete a product draft
-router.delete('/:id', devBypassAuth, async (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params
     
@@ -367,7 +366,7 @@ router.delete('/:id', devBypassAuth, async (req, res) => {
 })
 
 // Get analytics for product drafts
-router.get('/analytics/:merchantId', devBypassAuth, async (req, res) => {
+router.get('/analytics/:merchantId', async (req, res) => {
   try {
     const { merchantId } = req.params
     
@@ -387,7 +386,7 @@ router.get('/analytics/:merchantId', devBypassAuth, async (req, res) => {
 })
 
 // Bulk update product drafts (for batch operations)
-router.patch('/bulk/update', devBypassAuth, async (req, res) => {
+router.patch('/bulk/update', async (req, res) => {
   try {
     const { productDraftIds, updateData } = req.body
     
@@ -424,7 +423,7 @@ router.patch('/bulk/update', devBypassAuth, async (req, res) => {
 })
 
 // Sync product drafts to Shopify
-router.post('/sync', devBypassAuth, async (req, res) => {
+router.post('/sync', async (req, res) => {
   try {
     const prisma = await db.getClient()
     const { productIds } = req.body

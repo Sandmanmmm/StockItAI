@@ -1,17 +1,13 @@
 /**
  * Merchant Data API routes
  * Provides authenticated endpoints for merchant-specific data to replace placeholder useKV patterns
+ * Authentication is handled by middleware in server.js
  */
 
 import express from 'express'
 import { db } from '../lib/db.js'
-import { verifyShopifyRequest, devBypassAuth } from '../lib/auth.js'
 
 const router = express.Router()
-
-// Use development bypass in dev mode, full auth in production
-const authMiddleware = process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest
-router.use(authMiddleware)
 
 // GET /api/merchant/data/dashboard-summary - Dashboard overview data
 router.get('/dashboard-summary', async (req, res) => {

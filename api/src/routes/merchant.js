@@ -1,18 +1,12 @@
 /**
  * Merchant API routes
- * All routes are protected by Shopify authentication middleware
+ * All routes are protected by Shopify authentication middleware applied in server.js
  */
 
 import express from 'express'
 import { db } from '../lib/db.js'
-import { verifyShopifyRequest, devBypassAuth } from '../lib/auth.js'
 
 const router = express.Router()
-
-// Apply authentication middleware to all routes
-// Use devBypassAuth in development for easier testing
-const authMiddleware = process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest
-router.use(authMiddleware)
 
 // GET /api/merchant - Get current merchant info
 router.get('/', async (req, res) => {
