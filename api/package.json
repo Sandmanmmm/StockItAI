@@ -21,6 +21,7 @@
     "@vercel/functions": "^3.1.1",
     "axios": "^1.12.2",
     "bull": "^4.16.5",
+    "connect-redis": "^7.1.1",
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
     "dotenv": "^16.6.1",

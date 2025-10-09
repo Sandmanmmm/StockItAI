@@ -8,8 +8,8 @@ import helmet from 'helmet'
 import morgan from 'morgan'
 import dotenv from 'dotenv'
 import path from 'path'
-import session from 'express-session'
 import { fileURLToPath } from 'url'
+import { createSessionStore, getSessionConfig } from './config/session.js'
 
 // Load environment variables
 dotenv.config() // Load from .env in current directory
@@ -41,17 +41,28 @@ if (process.env.STOCKIT_PRODUCTION_URL) {
 allowedOrigins.add('https://stock-it-ai.vercel.app')
 allowedOrigins.add('https://admin.shopify.com')
 
-// Session configuration
-app.use(session({
+// Initialize session store and middleware (moved to async startup below)
+// This will be configured after server starts to allow Redis connection
+
+// Temporary: Apply basic session middleware during initialization
+// This will be replaced with production store once Redis connects
+import session from 'express-session'
+let sessionMiddleware = session({
   secret: process.env.SESSION_SECRET || 'development_session_secret',
   resave: false,
   saveUninitialized: false,
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
   }
-}))
+})
+
+// Apply session middleware
+app.use((req, res, next) => {
+  sessionMiddleware(req, res, next)
+})
 
 // Middleware - Configure helmet for Shopify app embedding
 app.use(helmet({
@@ -691,6 +702,33 @@ app.listen(PORT, async () => {
   console.log('API Server running on port', PORT)
   console.log('Health check: http://localhost:' + PORT + '/api/health')
   console.log('Environment:', process.env.NODE_ENV || 'development')
+  
+  // Initialize production session store
+  try {
+    console.log('🔐 Initializing production session store...')
+    const sessionStore = await createSessionStore()
+    const sessionConfig = getSessionConfig(sessionStore)
+    
+    // Update session middleware with production store
+    sessionMiddleware = session(sessionConfig)
+    
+    if (sessionStore) {
+      const storeType = sessionStore.constructor.name
+      console.log(`✅ Session store initialized: ${storeType}`)
+      
+      // Log session store details
+      if (storeType === 'RedisStore') {
+        console.log('   📦 Using Upstash Redis (serverless, production-ready)')
+      } else if (storeType === 'PrismaSessionStore') {
+        console.log('   📦 Using Prisma PostgreSQL (fallback)')
+      }
+    } else {
+      console.log('⚠️  Using in-memory sessions (development only)')
+    }
+  } catch (error) {
+    console.error('❌ Failed to initialize session store:', error)
+    console.warn('⚠️ Server will continue with in-memory sessions (NOT PRODUCTION SAFE)')
+  }
   
   // Initialize workflow orchestration system
   try {

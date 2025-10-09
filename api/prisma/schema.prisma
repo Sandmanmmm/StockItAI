@@ -4,8 +4,8 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DIRECT_URL")      // Pooler for runtime queries (port 6543)
-  directUrl = env("DATABASE_URL")    // Direct for migrations (port 5432)
+  url       = env("DATABASE_URL")    // Direct connection for migrations (port 5432)
+  directUrl = env("DIRECT_URL")      // Pooler for runtime queries (port 6543)
 }
 
 model Session {
@@ -32,6 +32,18 @@ model Session {
 
   @@index([shop])
   @@index([merchantId])
+}
+
+// Express Session Store - HTTP session storage (separate from Shopify OAuth)
+model ExpressSession {
+  sid       String   @id // Session ID from express-session
+  sess      Json // Session data (JSON blob)
+  expire    DateTime // Expiration timestamp
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([expire]) // For efficient cleanup of expired sessions
+  @@map("express_sessions") // Custom table name
 }
 
 model Merchant {
