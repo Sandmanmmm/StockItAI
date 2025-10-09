@@ -30,6 +30,7 @@ function isRetryableError(error) {
     'Response from the Engine was empty',
     'Can\'t reach database server',
     'Connection pool timeout',
+    'Timed out fetching a new connection from the connection pool',
     'Error in Prisma Client request',
     'connect ECONNREFUSED'
   ]

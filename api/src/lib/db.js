@@ -223,6 +223,33 @@ export const db = {
     }
   },
 
+  // Lightweight raw query helper used by legacy services that expect
+  // a pg-style response ({ rows, rowCount }).
+  async query(sql, params = []) {
+    const client = await this.getClient()
+
+    const executeQuery = async () => {
+      const result = Array.isArray(params) && params.length > 0
+        ? await client.$queryRawUnsafe(sql, ...params)
+        : await client.$queryRawUnsafe(sql)
+
+      const rows = Array.isArray(result) ? result : []
+      return {
+        rows,
+        rowCount: rows.length
+      }
+    }
+
+    try {
+      return await withPrismaRetry(executeQuery, { operationName: 'db.query' })
+    } catch (error) {
+      if (isFatalPrismaError(error)) {
+        await forceDisconnect()
+      }
+      throw error
+    }
+  },
+
   // Helper functions for authenticated operations
   // Note: These methods expect merchant context to be passed from authenticated routes
   
