@@ -4,8 +4,8 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL")    // Direct connection for migrations (port 5432)
-  directUrl = env("DIRECT_URL")      // Pooler for runtime queries (port 6543)
+  url       = env("DATABASE_URL")    // Runtime queries via Pooler (port 6543)
+  directUrl = env("DIRECT_URL")      // Migrations via Direct (port 5432)
 }
 
 model Session {
