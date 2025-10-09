@@ -203,7 +203,11 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Content-Length': Buffer.byteLength(queueData)
+              'Content-Length': Buffer.byteLength(queueData),
+              // Add Vercel deployment protection bypass token
+              ...(process.env.VERCEL_AUTOMATION_BYPASS_SECRET && {
+                'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET
+              })
             }
           }
 
