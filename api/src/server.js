@@ -107,15 +107,16 @@ app.use('/api/files', filesRouter) // File serving doesn't need auth verificatio
 app.post('/api/queues/process-upload', processUploadQueueHandler)
 app.post('/api/process-upload-queue', processUploadQueueHandler) // Also support direct serverless endpoint path
 
-// Production monitoring and analytics (admin access)
+// Analytics - Merchant-specific, use Shopify auth
+app.use('/api/analytics', verifyShopifyRequest, analyticsRouter)
+
+// Production monitoring and admin tools (admin access only)
 if (process.env.NODE_ENV === 'production') {
   app.use('/api/monitoring', adminAuth, monitoringRouter)
-  app.use('/api/analytics', adminAuth, analyticsRouter)
   app.use('/api/dlq', adminAuth, deadLetterQueueRouter)
 } else {
   // Development access without admin auth
   app.use('/api/monitoring', devBypassAuth, monitoringRouter)
-  app.use('/api/analytics', devBypassAuth, analyticsRouter)
   app.use('/api/dlq', devBypassAuth, deadLetterQueueRouter)
 }
 
