@@ -86,6 +86,15 @@ async function initializePrisma() {
     // Reuse existing client if version matches AND it's fully connected
     if (prisma && prismaVersion === PRISMA_CLIENT_VERSION) {
       console.log(`✅ Reusing existing Prisma client (version ${PRISMA_CLIENT_VERSION})`)
+      
+      // If another request is still warming up, wait for the connection promise
+      if (isConnecting && connectionPromise) {
+        console.log(`⏳ Client is warming up, waiting for connection promise...`)
+        await connectionPromise
+        console.log(`✅ Warmup completed, returning connected client`)
+        return prisma
+      }
+      
       // Quick health check - if it fails, we'll reconnect
       try {
         await prisma.$queryRaw`SELECT 1 as healthcheck`

@@ -96,8 +96,9 @@ export class WorkflowOrchestrator {
     this.dbService = new DatabasePersistenceService()
     this.storageService = new SupabaseStorageService()
     this.fileParsingService = new FileParsingService()
-  this.productDraftService = new SimpleProductDraftService(db)
-  this.refinementConfigService = new RefinementConfigService(db.client)
+    this.productDraftService = new SimpleProductDraftService(db)
+    // Don't initialize refinementConfigService in constructor - it needs async DB client
+    this.refinementConfigService = null
   }
 
   /**
@@ -105,6 +106,12 @@ export class WorkflowOrchestrator {
    */
   async initialize() {
     console.log('🎭 Initializing WorkflowOrchestrator...')
+    
+    // Initialize refinementConfigService with async DB client
+    if (!this.refinementConfigService) {
+      const prisma = await db.getClient()
+      this.refinementConfigService = new RefinementConfigService(prisma)
+    }
     
     // Initialize Redis connection
     await this.redis.initializeConnections()
