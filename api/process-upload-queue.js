@@ -124,6 +124,10 @@ export default async function handler(req, res) {
       })
     }
 
+    // Extract purchaseOrderId from upload metadata
+    const purchaseOrderId = upload.metadata?.purchaseOrderId
+    console.log(`📝 Purchase Order ID from upload metadata: ${purchaseOrderId}`)
+
     // Process the file through workflow integration
     console.log(`🔄 Starting file processing...`)
     const result = await workflowIntegration.processUploadedFile({
@@ -134,6 +138,7 @@ export default async function handler(req, res) {
       mimeType: upload.mimeType,
       merchantId: upload.merchantId,
       supplierId: upload.supplierId,
+      purchaseOrderId: purchaseOrderId,  // Pass the existing PO ID to be updated
       buffer: fileBuffer,  // Changed from fileBuffer to buffer
       aiSettings: aiSettings
     })
