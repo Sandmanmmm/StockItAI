@@ -93,19 +93,20 @@ async function initializePrisma() {
       await forceDisconnect()
     }
     
+    // If another request is already reconnecting, wait for it
+    if (isConnecting && connectionPromise) {
+      console.log(`⏳ Another request is reconnecting, waiting...`)
+      await connectionPromise
+      console.log(`✅ Reconnection completed by other request`)
+      // Recursively call to do health check on new client
+      return await initializePrisma()
+    }
+    
     // Reuse existing client if version matches AND it's fully connected
     if (prisma && prismaVersion === PRISMA_CLIENT_VERSION) {
       console.log(`✅ Reusing existing Prisma client (version ${PRISMA_CLIENT_VERSION})`)
       
-      // If another request is still warming up, wait for the connection promise
-      if (isConnecting && connectionPromise) {
-        console.log(`⏳ Client is warming up, waiting for connection promise...`)
-        await connectionPromise
-        console.log(`✅ Warmup completed, returning connected client`)
-        return prisma
-      }
-      
-      // CRITICAL: Always health check reused clients
+      // CRITICAL: Always health check reused clients BEFORE returning
       // Serverless functions may reuse memory but engine connections die
       try {
         // Use raw client for health check to avoid retry wrapper interference
@@ -114,11 +115,15 @@ async function initializePrisma() {
         return prisma // Client is healthy!
       } catch (error) {
         console.warn(`⚠️ Existing client health check failed:`, error.message)
+        
+        // Set connection lock BEFORE disconnecting
+        // This prevents other concurrent requests from using dead client
+        isConnecting = true
+        
         // ANY failure on reused client = force reconnect
-        // Don't trust a zombie connection
         console.log(`🔄 Forcing full reconnect due to failed health check`)
         await forceDisconnect()
-        // Fall through to create new client
+        // Fall through to create new client (isConnecting flag is set)
       }
     }
     
