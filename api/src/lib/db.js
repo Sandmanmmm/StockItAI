@@ -132,9 +132,29 @@ async function initializePrisma() {
           console.log(`   DATABASE_URL port: ${process.env.DATABASE_URL?.includes('5432') ? '5432 (direct)' : process.env.DATABASE_URL?.includes('6543') ? '6543 (pooler)' : 'unknown'}`)
           console.log(`   DIRECT_URL port: ${process.env.DIRECT_URL?.includes('5432') ? '5432 (direct)' : process.env.DIRECT_URL?.includes('6543') ? '6543 (pooler)' : 'unknown'}`)
           
+          // Limit connection pool size for serverless (prevent pool exhaustion)
+          // Supabase free tier: 60 max connections
+          // With many serverless instances, keep pool small per instance
+          const connectionLimit = parseInt(process.env.PRISMA_CONNECTION_LIMIT || '3', 10)
+          const connectionTimeout = parseInt(process.env.PRISMA_CONNECTION_TIMEOUT || '10', 10)
+          console.log(`   Connection pool limit: ${connectionLimit}`)
+          console.log(`   Connection timeout: ${connectionTimeout}s`)
+          
           rawPrisma = new PrismaClient({
             log: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
             errorFormat: 'pretty',
+            datasources: {
+              db: {
+                url: process.env.DATABASE_URL
+              }
+            },
+            // Limit connections per serverless instance to prevent pool exhaustion
+            __internal: {
+              engine: {
+                connection_limit: connectionLimit,
+                pool_timeout: connectionTimeout
+              }
+            }
           })
           prismaVersion = PRISMA_CLIENT_VERSION
           console.log(`✅ PrismaClient created - using schema datasource config (pooler: port 6543)`)
