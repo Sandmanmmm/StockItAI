@@ -51,6 +51,7 @@ import { safeFormatTime } from '@/lib/utils'
 import { ShopifyLayoutWrapper } from './components/ShopifyLayoutWrapper'
 import { ShopifyHeader } from './components/ShopifyHeader'
 import { notificationService } from '@/lib/notificationService'
+import { AppBridgeStatus } from './components/AppBridgeStatus'
 
 interface NotificationItem {
   id: string
@@ -227,6 +228,9 @@ function App() {
                     exit={{ opacity: 0, x: -20 }}
                     transition={{ duration: 0.3 }}
                   >
+                    {/* Temporary Diagnostic */}
+                    <AppBridgeStatus />
+                    
                     <DashboardOverview 
                       onShowActiveSuppliers={() => setShowActiveSuppliers(true)} 
                       onShowAllPurchaseOrders={() => setShowAllPurchaseOrders(true)}
