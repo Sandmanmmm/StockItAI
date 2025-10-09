@@ -3,7 +3,14 @@ import { db, prismaOperation } from '../lib/db.js';
 
 export class RefinementConfigService {
   constructor(prisma) {
-    this.prisma = prisma || db.client;
+    this.prisma = prisma || null;
+  }
+
+  async getPrisma() {
+    if (!this.prisma) {
+      this.prisma = await db.getClient();
+    }
+    return this.prisma;
   }
 
   /**
@@ -11,8 +18,9 @@ export class RefinementConfigService {
    */
   async getMerchantConfig(merchantId) {
     // Use retry wrapper for transient connection errors
+    const prisma = await this.getPrisma();
     const config = await prismaOperation(
-      () => this.prisma.merchantRefinementConfig.findUnique({
+      (client) => client.merchantRefinementConfig.findUnique({
         where: { merchantId }
       }),
       `Get merchant refinement config for ${merchantId}`
@@ -27,8 +35,9 @@ export class RefinementConfigService {
    * Create or update merchant's refinement configuration
    */
   async updateMerchantConfig(merchantId, updates) {
+    const prisma = await this.getPrisma();
     const merchant = await prismaOperation(
-      () => this.prisma.merchant.findUnique({
+      (client) => client.merchant.findUnique({
         where: { id: merchantId },
         select: { shopDomain: true }
       }),
@@ -41,7 +50,7 @@ export class RefinementConfigService {
 
     // Check if config exists
     const existingConfig = await prismaOperation(
-      () => this.prisma.merchantRefinementConfig.findUnique({
+      (client) => client.merchantRefinementConfig.findUnique({
         where: { merchantId }
       }),
       `Find existing refinement config for ${merchantId}`
@@ -50,7 +59,7 @@ export class RefinementConfigService {
     let config;
     if (existingConfig) {
       // Update existing configuration
-      config = await this.prisma.merchantRefinementConfig.update({
+      config = await prisma.merchantRefinementConfig.update({
         where: { merchantId },
         data: {
           isEnabled: updates.isEnabled ?? existingConfig.isEnabled,
@@ -82,7 +91,7 @@ export class RefinementConfigService {
       });
     } else {
       // Create new configuration with defaults
-      config = await this.prisma.merchantRefinementConfig.create({
+      config = await prisma.merchantRefinementConfig.create({
         data: {
           merchantId,
           shopDomain: merchant.shopDomain,

@@ -7,7 +7,7 @@
 // This ensures proper module resolution and dependency management
 
 import { PrismaClient } from '@prisma/client'
-import { withPrismaRetry, createRetryablePrismaClient, prismaOperation } from './prismaRetryWrapper.js'
+import { withPrismaRetry, createRetryablePrismaClient } from './prismaRetryWrapper.js'
 
 // Prisma client singleton
 let prisma
@@ -44,6 +44,16 @@ function isFatalPrismaError(error) {
   }
   
   return false
+}
+
+async function prismaOperationInternal(operation, operationName = 'Database operation') {
+  if (typeof operation !== 'function') {
+    throw new Error('prismaOperation requires a function argument')
+  }
+
+  const client = await initializePrisma()
+  const execute = () => operation(client)
+  return withPrismaRetry(execute, { operationName })
 }
 
 // Force disconnect and clear client (for error recovery)
@@ -187,6 +197,8 @@ async function initializePrisma() {
 }
 
 // Database utility functions
+export const prismaOperation = prismaOperationInternal
+
 export const db = {
   // Get Prisma client instance (async to ensure connection)
   async getClient() {

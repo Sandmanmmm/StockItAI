@@ -548,7 +548,7 @@ export class RefinementPipelineService {
   async getMerchantShopifyConfig(merchantId) {
     // Get merchant's Shopify configuration with retry logic
     const merchant = await prismaOperation(
-      () => db.client.merchant.findUnique({
+  (prisma) => prisma.merchant.findUnique({
         where: { id: merchantId }
       }),
       `Get merchant Shopify config for ${merchantId}`

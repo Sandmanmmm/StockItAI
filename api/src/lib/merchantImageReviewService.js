@@ -26,7 +26,7 @@ export class MerchantImageReviewService {
     try {
       // Verify PO exists before creating session
       const poExists = await prismaOperation(
-        () => db.client.purchaseOrder.findUnique({
+        (prisma) => prisma.purchaseOrder.findUnique({
           where: { id: sessionData.purchaseOrderId },
           select: { id: true }
         }),
@@ -43,7 +43,7 @@ export class MerchantImageReviewService {
       
       // Create the image review session
       const reviewSession = await prismaOperation(
-        () => db.client.imageReviewSession.create({
+        (prisma) => prisma.imageReviewSession.create({
           data: {
             sessionId: sessionId,
             purchaseOrderId: sessionData.purchaseOrderId,
@@ -60,7 +60,7 @@ export class MerchantImageReviewService {
       // Create products and their images for the session
       for (const lineItem of sessionData.lineItems) {
         const reviewProduct = await prismaOperation(
-          () => db.client.imageReviewProduct.create({
+          (prisma) => prisma.imageReviewProduct.create({
             data: {
               sessionId: reviewSession.id,
               productName: lineItem.productName,
@@ -76,7 +76,7 @@ export class MerchantImageReviewService {
         // Create images for this product
         for (const imageData of lineItem.images) {
           await prismaOperation(
-            () => db.client.imageReviewProductImage.create({
+            (prisma) => prisma.imageReviewProductImage.create({
               data: {
                 productReviewId: reviewProduct.id,
                 imageUrl: imageData.url,
@@ -116,7 +116,7 @@ export class MerchantImageReviewService {
   async getImageReviewSessionByPurchaseOrder(purchaseOrderId) {
     try {
       const session = await prismaOperation(
-        () => db.client.imageReviewSession.findFirst({
+        (prisma) => prisma.imageReviewSession.findFirst({
           where: {
             purchaseOrderId: purchaseOrderId
           },
@@ -505,7 +505,7 @@ export class MerchantImageReviewService {
   async getSessionByPurchaseOrder(poId, merchantId) {
     try {
       const session = await prismaOperation(
-        () => db.client.imageReviewSession.findFirst({
+        (prisma) => prisma.imageReviewSession.findFirst({
           where: {
             purchaseOrderId: poId,
             merchantId: merchantId

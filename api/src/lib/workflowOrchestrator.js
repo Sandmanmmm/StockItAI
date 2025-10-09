@@ -477,17 +477,20 @@ export class WorkflowOrchestrator {
         try {
           console.log(`📊 Updating PO ${metadata.purchaseOrderId} status to failed due to workflow failure`)
           
-          await db.client.purchaseOrder.update({
-            where: { id: metadata.purchaseOrderId },
-            data: {
-              status: 'failed',
-              jobStatus: 'failed',
-              jobCompletedAt: new Date(),
-              jobError: `${stage} failed: ${error.message}`,
-              processingNotes: `Processing failed at ${stage} stage: ${error.message}`,
-              updatedAt: new Date()
-            }
-          })
+          await prismaOperation(
+            (prisma) => prisma.purchaseOrder.update({
+              where: { id: metadata.purchaseOrderId },
+              data: {
+                status: 'failed',
+                jobStatus: 'failed',
+                jobCompletedAt: new Date(),
+                jobError: `${stage} failed: ${error.message}`,
+                processingNotes: `Processing failed at ${stage} stage: ${error.message}`,
+                updatedAt: new Date()
+              }
+            }),
+            `Mark PO ${metadata.purchaseOrderId} as failed`
+          )
           
           console.log(`✅ PO ${metadata.purchaseOrderId} status updated to failed`)
           
@@ -530,7 +533,7 @@ export class WorkflowOrchestrator {
       
       // Use retry wrapper for transient connection errors
       await prismaOperation(
-        () => db.client.purchaseOrder.update({
+        (prisma) => prisma.purchaseOrder.update({
           where: { id: purchaseOrderId },
           data: {
             processingNotes: JSON.stringify({
@@ -625,10 +628,13 @@ export class WorkflowOrchestrator {
       console.log('📥 Downloading file content from storage...')
       try {
         // Get upload record to find file URL
-        const upload = await db.client.upload.findUnique({
-          where: { id: uploadId },
-          select: { fileUrl: true }
-        })
+        const upload = await prismaOperation(
+          (prisma) => prisma.upload.findUnique({
+            where: { id: uploadId },
+            select: { fileUrl: true }
+          }),
+          `Lookup upload ${uploadId} for file download`
+        )
         
         if (!upload || !upload.fileUrl) {
           throw new Error(`No file URL found for upload ${uploadId}`)
@@ -1709,18 +1715,24 @@ export class WorkflowOrchestrator {
           
           console.log('   Attempting database update with accumulated data:', Object.keys(updateData))
           
-          const updateResult = await db.client.purchaseOrder.update({
-            where: { id: purchaseOrderId },
-            data: updateData
-          })
+          const updateResult = await prismaOperation(
+            (prisma) => prisma.purchaseOrder.update({
+              where: { id: purchaseOrderId },
+              data: updateData
+            }),
+            `Status update (initial) for PO ${purchaseOrderId}`
+          )
           
           
           console.log('   Attempting database update with accumulated data:', Object.keys(updateData))
           
-          const finalUpdateResult = await db.client.purchaseOrder.update({
-            where: { id: purchaseOrderId },
-            data: updateData
-          })
+          const finalUpdateResult = await prismaOperation(
+            (prisma) => prisma.purchaseOrder.update({
+              where: { id: purchaseOrderId },
+              data: updateData
+            }),
+            `Status update (final) for PO ${purchaseOrderId}`
+          )
           
           console.log(`✅ Purchase order ${purchaseOrderId} status updated to: ${finalStatus}`)
           console.log('   Updated record status:', finalUpdateResult.status)
@@ -1832,20 +1844,23 @@ export class WorkflowOrchestrator {
         
         if (purchaseOrderId) {
           console.log(`🔍 Fetching line items from database for PO: ${purchaseOrderId}`)
-          const dbLineItems = await db.client.pOLineItem.findMany({
-            where: { purchaseOrderId },
-            select: {
-              id: true,
-              sku: true,
-              productName: true,
-              description: true,
-              quantity: true,
-              unitCost: true,
-              totalCost: true,
-              confidence: true,
-              status: true
-            }
-          })
+          const dbLineItems = await prismaOperation(
+            (prisma) => prisma.pOLineItem.findMany({
+              where: { purchaseOrderId },
+              select: {
+                id: true,
+                sku: true,
+                productName: true,
+                description: true,
+                quantity: true,
+                unitCost: true,
+                totalCost: true,
+                confidence: true,
+                status: true
+              }
+            }),
+            `Load line items for normalization (PO ${purchaseOrderId})`
+          )
           
           if (dbLineItems.length > 0) {
             console.log(`✅ Fetched ${dbLineItems.length} line items from database`)
@@ -1874,9 +1889,12 @@ export class WorkflowOrchestrator {
       }
       
       try {
-        const merchant = await db.client.merchant.findUnique({
-          where: { id: merchantId }
-        })
+        const merchant = await prismaOperation(
+          (prisma) => prisma.merchant.findUnique({
+            where: { id: merchantId }
+          }),
+          `Fetch merchant ${merchantId} for normalization`
+        )
         if (merchant) {
           merchantConfig = {
             baseCurrency: merchant.currency || 'USD',
