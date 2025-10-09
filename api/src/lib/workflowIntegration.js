@@ -192,11 +192,15 @@ export class WorkflowIntegrationService {
   calculateWorkflowProgress(workflowStatus) {
     // Filter out the special "processing" status stage - only count actual workflow stages
     const workflowStageNames = ['ai_parsing', 'database_save', 'shopify_sync', 'status_update']
-    const stages = Object.entries(workflowStatus.stages)
+    const stageEntries = Object.entries(workflowStatus.stages || {})
+    const stages = stageEntries
       .filter(([stageName, _]) => workflowStageNames.includes(stageName))
       .map(([_, stageData]) => stageData)
     
-    const totalStages = stages.length
+    const totalStages = stages.length || workflowStageNames.length
+    if (totalStages === 0) {
+      return 0
+    }
     let completedStages = 0
     let currentProgress = 0
 

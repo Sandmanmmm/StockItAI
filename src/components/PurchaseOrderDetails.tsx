@@ -192,179 +192,212 @@ export function PurchaseOrderDetails({ orderId, onBack }: PurchaseOrderDetailsPr
   useEffect(() => {
     const fetchPurchaseOrder = async () => {
       try {
-        const result = await authenticatedRequest<any>('/api/purchase-orders')
-        
-        if (result.success && result.data?.orders) {
-          // Find the specific PO by ID or number
-          const foundPO = result.data.orders.find((po: any) => 
-            po.id === orderId || po.number === orderId
-          )
-          
-          if (foundPO && foundPO.rawData) {
-            // Handle both data structures: nested extractedData or direct rawData
-            const extractedData = foundPO.rawData.extractedData || foundPO.rawData
-            const lineItems = extractedData.lineItems || []
-            
-            // Debug: Log the actual data structure
-            console.log('🔍 Purchase Order Debug Data:')
-            console.log('foundPO:', foundPO)
-            console.log('rawData:', foundPO.rawData)
-            console.log('extractedData:', extractedData)
-            console.log('extractedData.totals:', extractedData.totals)
-            console.log('extractedData.lineItems sample:', lineItems.slice(0, 2))
-            console.log('foundPO.totalAmount:', foundPO.totalAmount)
-            console.log('foundPO.currency:', foundPO.currency)
-            
-            // Transform API data to component format
-            const transformedPO: PurchaseOrder = {
-              id: foundPO.id,
-              number: foundPO.number,
-              supplier: {
-                name: extractedData.supplier?.name || foundPO.supplierName || 'Unknown Supplier',
-                contact: extractedData.supplier?.contact?.name || 'N/A',
-                email: extractedData.supplier?.contact?.email || extractedData.supplier?.email || 'N/A',
-                phone: extractedData.supplier?.contact?.phone || extractedData.supplier?.phone || 'N/A',
-                address: extractedData.supplier?.address || 'N/A'
-              },
-              date: extractedData.dates?.orderDate || foundPO.orderDate || new Date().toISOString().split('T')[0],
-              status: foundPO.status as 'pending' | 'approved' | 'processing' | 'completed' | 'rejected',
-              confidence: Math.round((foundPO.confidence || 0) * 100),
-              totalAmount: extractedData.totals?.amount || 
-                          extractedData.totals?.grandTotal || 
-                          extractedData.totals?.total || 
-                          extractedData.totals?.totalAmount || 
-                          extractedData.total?.amount ||
-                          foundPO.totalAmount || 0,
-              currency: foundPO.currency || 'USD',
-              items: (() => {
-                // Priority 1: Use real POLineItem data if available
-                if (foundPO.lineItems && foundPO.lineItems.length > 0) {
-                  console.log('Using real POLineItem data:', foundPO.lineItems.length, 'items');
-                  return foundPO.lineItems.map((lineItem: any) => ({
-                    id: lineItem.id, // REAL database ID
-                    sku: lineItem.sku || lineItem.productCode || lineItem.itemCode || `ITEM-${lineItem.id}`,
-                    name: lineItem.productName || lineItem.description || 'Unknown Item',
-                    quantity: lineItem.quantity || 1,
-                    unitPrice: lineItem.unitCost || 0,
-                    totalPrice: lineItem.totalCost || (lineItem.unitCost * lineItem.quantity) || 0,
-                    confidence: Math.round((lineItem.confidence || 0.9) * 100)
-                  }));
-                }
-                
-                // Priority 2: Fall back to extracted data with warning
-                console.warn('No real POLineItem data found, falling back to extracted data');
-                return lineItems.map((item: any, index: number) => ({
-                  id: `temp-${index + 1}`, // Temporary ID with clear prefix
-                  sku: item.productCode || item.sku || item.itemCode || `ITEM-${index + 1}`,
-                  name: item.description || item.name || item.product || item.title || 'Unknown Item',
-                  quantity: parseInt(item.quantity) || parseInt(item.qty) || parseInt(item.amount) || 1,
-                  unitPrice: parseFloat(item.unitPrice) || parseFloat(item.price) || parseFloat(item.unit_price) || 0,
-                  totalPrice: parseFloat(item.total) || parseFloat(item.totalPrice) || parseFloat(item.total_price) || 
-                             (parseFloat(item.unitPrice || item.price || 0) * parseInt(item.quantity || item.qty || 1)) || 0,
-                  confidence: Math.round((foundPO.rawData?.fieldConfidences?.lineItems || 0.9) * 100)
-                }));
-              })(),
-              notes: extractedData.notes || foundPO.processingNotes || 'No additional notes',
-              aiProcessingNotes: foundPO.rawData?.qualityAssessment?.overall === 'high' 
-                ? `High confidence extraction (${Math.round((foundPO.confidence || 0) * 100)}%). Document processed successfully with ${foundPO.rawData?.qualityIndicators?.documentCompleteness || 'good'} completeness.`
-                : `AI processing completed with ${Math.round((foundPO.confidence || 0) * 100)}% confidence. ${foundPO.rawData?.issues?.join('. ') || ''}`,
-              originalFile: {
-                name: foundPO.fileName || 'document.pdf',
-                type: foundPO.fileName?.toLowerCase().includes('.pdf') ? 'pdf' : 'image' as 'pdf' | 'image' | 'excel',
-                size: foundPO.fileSize || 0,
-                url: `/api/files/po/${foundPO.id}`
-              },
-              timestamps: {
-                uploaded: foundPO.createdAt || new Date().toISOString(),
-                processed: foundPO.rawData?.metadata?.processedAt || foundPO.updatedAt || new Date().toISOString(),
-                lastModified: foundPO.updatedAt || new Date().toISOString()
-              },
-              processingFlags: {
-                requiresReview: foundPO.status === 'review_needed' || (foundPO.confidence || 0) < 0.85,
-                hasDiscrepancies: (foundPO.rawData?.issues?.length || 0) > 0,
-                missingInformation: foundPO.status === 'pending' || !extractedData.supplier?.name
-              },
-              // Enhanced data fields
-              enhancedData: {
-                financialBreakdown: extractedData.totals ? {
-                  subtotal: parseFloat(extractedData.totals.subtotal) || parseFloat(extractedData.totals.sub_total) || 0,
-                  tax: parseFloat(extractedData.totals.tax) || parseFloat(extractedData.totals.taxAmount) || 0,
-                  shipping: parseFloat(extractedData.totals.shipping) || parseFloat(extractedData.totals.shippingCost) || 0,
-                  grandTotal: parseFloat(extractedData.totals.grandTotal) || parseFloat(extractedData.totals.total) || parseFloat(extractedData.totals.totalAmount) || 0
-                } : undefined,
-                qualityMetrics: foundPO.rawData?.qualityAssessment ? {
-                  overall: foundPO.rawData.qualityAssessment.overall || 'unknown',
-                  imageClarity: foundPO.rawData.qualityIndicators?.imageClarity || 'unknown',
-                  textLegibility: foundPO.rawData.qualityIndicators?.textLegibility || 'unknown',
-                  documentCompleteness: foundPO.rawData.qualityIndicators?.documentCompleteness || 'unknown',
-                  overallScore: Math.round((foundPO.rawData.qualityAssessment.overallScore || 0) * 100),
-                  completenessScore: Math.round((foundPO.rawData.completenessScore || 0) * 100),
-                  issueCount: foundPO.rawData.qualityAssessment.issueCount || 0,
-                  hasIssues: foundPO.rawData.qualityAssessment.hasIssues || false
-                } : undefined,
-                fieldConfidences: foundPO.rawData?.fieldConfidences ? {
-                  supplier: Math.round((foundPO.rawData.fieldConfidences.supplier || 0) * 100),
-                  poNumber: Math.round((foundPO.rawData.fieldConfidences.poNumber || 0) * 100),
-                  dates: Math.round((foundPO.rawData.fieldConfidences.dates || 0) * 100),
-                  totals: Math.round((foundPO.rawData.fieldConfidences.totals || 0) * 100),
-                  lineItems: Math.round((foundPO.rawData.fieldConfidences.lineItems || 0) * 100),
-                  notes: Math.round((foundPO.rawData.fieldConfidences.notes || 0) * 100)
-                } : undefined,
-                processingInfo: {
-                  aiModel: foundPO.rawData?.metadata?.aiModel || 'unknown',
-                  workflowId: foundPO.rawData?.metadata?.workflowId || 'unknown',
-                  processedAt: foundPO.rawData?.metadata?.processedAt || foundPO.updatedAt,
-                  textExtractionLength: foundPO.rawData?.extractedTextLength || 0,
-                  pageCount: foundPO.rawData?.pageCount || 1
-                },
-                expectedDeliveryDate: extractedData.dates?.expectedDeliveryDate || null,
-                paymentStatus: extractedData.notes?.includes('Paid') ? 'paid' : 'pending'
-              }
+        let foundPO: any | null = null
+
+        const detailResponse = await authenticatedRequest<any>(`/api/purchase-orders/${orderId}`)
+        if (detailResponse.success && detailResponse.data) {
+          foundPO = detailResponse.data
+          console.log('📦 Loaded purchase order via detail endpoint', {
+            id: foundPO.id,
+            number: foundPO.number,
+            lineItems: foundPO.lineItems?.length
+          })
+        } else {
+          console.warn('⚠️ Detail endpoint unavailable, falling back to list fetch', detailResponse.error)
+          const listResponse = await authenticatedRequest<any>('/api/purchase-orders')
+          if (listResponse.success && listResponse.data?.orders) {
+            foundPO = listResponse.data.orders.find((po: any) => po.id === orderId || po.number === orderId) || null
+            if (foundPO) {
+              console.log('📦 Loaded purchase order via list fallback', {
+                id: foundPO.id,
+                number: foundPO.number,
+                lineItems: foundPO.lineItems?.length
+              })
             }
-            
-            setPurchaseOrder(transformedPO)
-          } else {
-            // Fallback to basic PO data without detailed extraction
-            const basicPO: PurchaseOrder = {
-              id: foundPO.id,
-              number: foundPO.number,
-              supplier: {
-                name: foundPO.supplierName || 'Unknown Supplier',
-                contact: 'N/A',
-                email: 'N/A',
-                phone: 'N/A',
-                address: 'N/A'
-              },
-              date: foundPO.orderDate || new Date().toISOString().split('T')[0],
-              status: foundPO.status as 'pending' | 'approved' | 'processing' | 'completed' | 'rejected',
-              confidence: Math.round((foundPO.confidence || 0) * 100),
-              totalAmount: foundPO.totalAmount || 0,
-              currency: foundPO.currency || 'USD',
-              items: [],
-              notes: foundPO.processingNotes || 'Processing in progress...',
-              aiProcessingNotes: foundPO.rawData?.error || 'AI processing data not available',
-              originalFile: {
-                name: foundPO.fileName || 'document.pdf',
-                type: foundPO.fileName?.toLowerCase().includes('.pdf') ? 'pdf' : 'image' as 'pdf' | 'image' | 'excel',
-                size: foundPO.fileSize || 0,
-                url: `/api/files/po/${foundPO.id}`
-              },
-              timestamps: {
-                uploaded: foundPO.createdAt || new Date().toISOString(),
-                processed: foundPO.updatedAt || new Date().toISOString(),
-                lastModified: foundPO.updatedAt || new Date().toISOString()
-              },
-              processingFlags: {
-                requiresReview: true,
-                hasDiscrepancies: true,
-                missingInformation: true
-              },
-              // Empty enhanced data for basic POs
-              enhancedData: undefined
-            }
-            
-            setPurchaseOrder(basicPO)
           }
+        }
+
+        if (!foundPO) {
+          notificationService.showError(
+            'Purchase Order Not Found',
+            'We could not find the requested purchase order. Please return to the list and try again.',
+            { category: 'system', priority: 'high' }
+          )
+          return
+        }
+
+        if (foundPO.rawData) {
+          // Handle both data structures: nested extractedData or direct rawData
+          const extractedData = foundPO.rawData.extractedData || foundPO.rawData
+          const lineItems = extractedData.lineItems || []
+
+          // Debug: Log the actual data structure
+          console.log('🔍 Purchase Order Debug Data:')
+          console.log('foundPO:', foundPO)
+          console.log('rawData:', foundPO.rawData)
+          console.log('extractedData:', extractedData)
+          console.log('extractedData.totals:', extractedData.totals)
+          console.log('extractedData.lineItems sample:', lineItems.slice(0, 2))
+          console.log('foundPO.totalAmount:', foundPO.totalAmount)
+          console.log('foundPO.currency:', foundPO.currency)
+
+          // Transform API data to component format
+          const transformedPO: PurchaseOrder = {
+            id: foundPO.id,
+            number: foundPO.number,
+            supplier: {
+              name: extractedData.supplier?.name || foundPO.supplierName || 'Unknown Supplier',
+              contact: extractedData.supplier?.contact?.name || 'N/A',
+              email: extractedData.supplier?.contact?.email || extractedData.supplier?.email || 'N/A',
+              phone: extractedData.supplier?.contact?.phone || extractedData.supplier?.phone || 'N/A',
+              address: extractedData.supplier?.address || 'N/A'
+            },
+            date: extractedData.dates?.orderDate || foundPO.orderDate || new Date().toISOString().split('T')[0],
+            status: foundPO.status as 'pending' | 'approved' | 'processing' | 'completed' | 'rejected',
+            confidence: Math.round((foundPO.confidence || 0) * 100),
+            totalAmount: extractedData.totals?.amount || 
+                        extractedData.totals?.grandTotal || 
+                        extractedData.totals?.total || 
+                        extractedData.totals?.totalAmount || 
+                        extractedData.total?.amount ||
+                        foundPO.totalAmount || 0,
+            currency: foundPO.currency || 'USD',
+            items: (() => {
+              // Priority 1: Use real POLineItem data if available
+              if (foundPO.lineItems && foundPO.lineItems.length > 0) {
+                console.log('Using real POLineItem data:', foundPO.lineItems.length, 'items')
+                return foundPO.lineItems.map((lineItem: any) => ({
+                  id: lineItem.id, // REAL database ID
+                  sku: lineItem.sku || lineItem.productCode || lineItem.itemCode || `ITEM-${lineItem.id}`,
+                  name: lineItem.productName || lineItem.description || 'Unknown Item',
+                  quantity: lineItem.quantity || 1,
+                  unitPrice: lineItem.unitCost || 0,
+                  totalPrice: lineItem.totalCost || (lineItem.unitCost * lineItem.quantity) || 0,
+                  confidence: Math.round((lineItem.confidence || 0.9) * 100)
+                }))
+              }
+
+              // Priority 2: Fall back to extracted data with warning
+              console.warn('No real POLineItem data found, falling back to extracted data')
+              return lineItems.map((item: any, index: number) => ({
+                id: `temp-${index + 1}`, // Temporary ID with clear prefix
+                sku: item.productCode || item.sku || item.itemCode || `ITEM-${index + 1}`,
+                name: item.description || item.name || item.product || item.title || 'Unknown Item',
+                quantity: parseInt(item.quantity) || parseInt(item.qty) || parseInt(item.amount) || 1,
+                unitPrice: parseFloat(item.unitPrice) || parseFloat(item.price) || parseFloat(item.unit_price) || 0,
+                totalPrice: parseFloat(item.total) || parseFloat(item.totalPrice) || parseFloat(item.total_price) || 
+                           (parseFloat(item.unitPrice || item.price || 0) * parseInt(item.quantity || item.qty || 1)) || 0,
+                confidence: Math.round((foundPO.rawData?.fieldConfidences?.lineItems || 0.9) * 100)
+              }))
+            })(),
+            notes: extractedData.notes || foundPO.processingNotes || 'No additional notes',
+            aiProcessingNotes: foundPO.rawData?.qualityAssessment?.overall === 'high' 
+              ? `High confidence extraction (${Math.round((foundPO.confidence || 0) * 100)}%). Document processed successfully with ${foundPO.rawData?.qualityIndicators?.documentCompleteness || 'good'} completeness.`
+              : `AI processing completed with ${Math.round((foundPO.confidence || 0) * 100)}% confidence. ${foundPO.rawData?.issues?.join('. ') || ''}`,
+            originalFile: {
+              name: foundPO.fileName || 'document.pdf',
+              type: foundPO.fileName?.toLowerCase().includes('.pdf') ? 'pdf' : 'image' as 'pdf' | 'image' | 'excel',
+              size: foundPO.fileSize || 0,
+              url: `/api/files/po/${foundPO.id}`
+            },
+            timestamps: {
+              uploaded: foundPO.createdAt || new Date().toISOString(),
+              processed: foundPO.rawData?.metadata?.processedAt || foundPO.updatedAt || new Date().toISOString(),
+              lastModified: foundPO.updatedAt || new Date().toISOString()
+            },
+            processingFlags: {
+              requiresReview: foundPO.status === 'review_needed' || (foundPO.confidence || 0) < 0.85,
+              hasDiscrepancies: (foundPO.rawData?.issues?.length || 0) > 0,
+              missingInformation: foundPO.status === 'pending' || !extractedData.supplier?.name
+            },
+            // Enhanced data fields
+            enhancedData: {
+              financialBreakdown: extractedData.totals ? {
+                subtotal: parseFloat(extractedData.totals.subtotal) || parseFloat(extractedData.totals.sub_total) || 0,
+                tax: parseFloat(extractedData.totals.tax) || parseFloat(extractedData.totals.taxAmount) || 0,
+                shipping: parseFloat(extractedData.totals.shipping) || parseFloat(extractedData.totals.shippingCost) || 0,
+                grandTotal: parseFloat(extractedData.totals.grandTotal) || parseFloat(extractedData.totals.total) || parseFloat(extractedData.totals.totalAmount) || 0
+              } : undefined,
+              qualityMetrics: foundPO.rawData?.qualityAssessment ? {
+                overall: foundPO.rawData.qualityAssessment.overall || 'unknown',
+                imageClarity: foundPO.rawData.qualityIndicators?.imageClarity || 'unknown',
+                textLegibility: foundPO.rawData.qualityIndicators?.textLegibility || 'unknown',
+                documentCompleteness: foundPO.rawData.qualityIndicators?.documentCompleteness || 'unknown',
+                overallScore: Math.round((foundPO.rawData.qualityAssessment.overallScore || 0) * 100),
+                completenessScore: Math.round((foundPO.rawData.completenessScore || 0) * 100),
+                issueCount: foundPO.rawData.qualityAssessment.issueCount || 0,
+                hasIssues: foundPO.rawData.qualityAssessment.hasIssues || false
+              } : undefined,
+              fieldConfidences: foundPO.rawData?.fieldConfidences ? {
+                supplier: Math.round((foundPO.rawData.fieldConfidences.supplier || 0) * 100),
+                poNumber: Math.round((foundPO.rawData.fieldConfidences.poNumber || 0) * 100),
+                dates: Math.round((foundPO.rawData.fieldConfidences.dates || 0) * 100),
+                totals: Math.round((foundPO.rawData.fieldConfidences.totals || 0) * 100),
+                lineItems: Math.round((foundPO.rawData.fieldConfidences.lineItems || 0) * 100),
+                notes: Math.round((foundPO.rawData.fieldConfidences.notes || 0) * 100)
+              } : undefined,
+              processingInfo: {
+                aiModel: foundPO.rawData?.metadata?.aiModel || 'unknown',
+                workflowId: foundPO.rawData?.metadata?.workflowId || 'unknown',
+                processedAt: foundPO.rawData?.metadata?.processedAt || foundPO.updatedAt,
+                textExtractionLength: foundPO.rawData?.extractedTextLength || 0,
+                pageCount: foundPO.rawData?.pageCount || 1
+              },
+              expectedDeliveryDate: extractedData.dates?.expectedDeliveryDate || null,
+              paymentStatus: extractedData.notes?.includes('Paid') ? 'paid' : 'pending'
+            }
+          }
+
+          setPurchaseOrder(transformedPO)
+        } else {
+          // Fallback to basic PO data without detailed extraction
+          const basicPO: PurchaseOrder = {
+            id: foundPO.id,
+            number: foundPO.number,
+            supplier: {
+              name: foundPO.supplierName || 'Unknown Supplier',
+              contact: 'N/A',
+              email: 'N/A',
+              phone: 'N/A',
+              address: 'N/A'
+            },
+            date: foundPO.orderDate || new Date().toISOString().split('T')[0],
+            status: foundPO.status as 'pending' | 'approved' | 'processing' | 'completed' | 'rejected',
+            confidence: Math.round((foundPO.confidence || 0) * 100),
+            totalAmount: foundPO.totalAmount || 0,
+            currency: foundPO.currency || 'USD',
+            items: foundPO.lineItems?.length ? foundPO.lineItems.map((lineItem: any) => ({
+              id: lineItem.id,
+              sku: lineItem.sku || lineItem.productCode || lineItem.itemCode || `ITEM-${lineItem.id}`,
+              name: lineItem.productName || lineItem.description || 'Unknown Item',
+              quantity: lineItem.quantity || 1,
+              unitPrice: lineItem.unitCost || 0,
+              totalPrice: lineItem.totalCost || (lineItem.unitCost * lineItem.quantity) || 0,
+              confidence: Math.round((lineItem.confidence || 0.9) * 100)
+            })) : [],
+            notes: foundPO.processingNotes || 'Processing in progress...',
+            aiProcessingNotes: foundPO.rawData?.error || 'AI processing data not available',
+            originalFile: {
+              name: foundPO.fileName || 'document.pdf',
+              type: foundPO.fileName?.toLowerCase().includes('.pdf') ? 'pdf' : 'image' as 'pdf' | 'image' | 'excel',
+              size: foundPO.fileSize || 0,
+              url: `/api/files/po/${foundPO.id}`
+            },
+            timestamps: {
+              uploaded: foundPO.createdAt || new Date().toISOString(),
+              processed: foundPO.updatedAt || new Date().toISOString(),
+              lastModified: foundPO.updatedAt || new Date().toISOString()
+            },
+            processingFlags: {
+              requiresReview: true,
+              hasDiscrepancies: true,
+              missingInformation: true
+            },
+            // Empty enhanced data for basic POs
+            enhancedData: undefined
+          }
+
+          setPurchaseOrder(basicPO)
         }
       } catch (error) {
         console.error('Error fetching purchase order:', error)
