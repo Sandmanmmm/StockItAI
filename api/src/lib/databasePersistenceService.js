@@ -538,6 +538,31 @@ export class DatabasePersistenceService {
   }
 
   /**
+   * Parse currency string to float (handles $, commas, etc.)
+   */
+  parseCurrency(value) {
+    if (value === null || value === undefined || value === '') {
+      return 0
+    }
+    
+    // If already a number, return it
+    if (typeof value === 'number') {
+      return value
+    }
+    
+    // Convert to string and remove currency symbols, commas, spaces
+    const cleaned = String(value)
+      .replace(/[$€£¥₹,\s]/g, '') // Remove common currency symbols and commas
+      .trim()
+    
+    // Parse to float
+    const parsed = parseFloat(cleaned)
+    
+    // Return 0 if parsing failed (NaN)
+    return isNaN(parsed) ? 0 : parsed
+  }
+
+  /**
    * Create line items for purchase order
    */
   async createLineItems(tx, lineItemsData, purchaseOrderId, lineItemsConfidence) {
@@ -553,15 +578,22 @@ export class DatabasePersistenceService {
       const itemConfidence = lineItemsConfidence[i] || lineItemsConfidence.overall || 50
       
       try {
+        // Parse currency values properly
+        const quantity = parseInt(item.quantity) || 1
+        const unitCost = this.parseCurrency(item.unitPrice || item.price || item.cost || item.unitCost)
+        const totalCost = this.parseCurrency(item.totalPrice || item.total || item.lineTotal) 
+          || (quantity * unitCost) // Calculate if not provided
+        
+        console.log(`  💰 Line item ${i + 1} pricing: quantity=${quantity}, unitCost=${unitCost}, totalCost=${totalCost}`)
+        
         const lineItem = await tx.pOLineItem.create({
           data: {
             sku: item.sku || item.productCode || item.itemNumber || `AUTO-${i + 1}`,
             productName: item.productName || item.description || item.name || 'Unknown Product',
             description: item.description || item.productName || null,
-            quantity: parseInt(item.quantity) || 1,
-            unitCost: parseFloat(item.unitPrice || item.price || item.cost || 0),
-            totalCost: parseFloat(item.totalPrice || item.total || 
-              (item.quantity * (item.unitPrice || item.price || item.cost)) || 0),
+            quantity: quantity,
+            unitCost: unitCost,
+            totalCost: totalCost,
             confidence: itemConfidence / 100, // Store as 0-1 range
             status: itemConfidence >= 80 ? 'pending' : 'review_needed',
             aiNotes: `AI extracted: ${JSON.stringify(item)}`,
@@ -572,7 +604,7 @@ export class DatabasePersistenceService {
         })
         
         lineItems.push(lineItem)
-        console.log(`  📦 Line item ${i + 1}: ${lineItem.productName} x${lineItem.quantity}`)
+        console.log(`  📦 Line item ${i + 1}: ${lineItem.productName} x${lineItem.quantity} @ $${lineItem.unitCost} = $${lineItem.totalCost}`)
         
       } catch (error) {
         console.warn(`⚠️ Failed to create line item ${i + 1}:`, error.message)
