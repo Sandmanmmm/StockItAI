@@ -133,7 +133,7 @@ export default async function handler(req, res) {
       mimeType: upload.mimeType,
       merchantId: upload.merchantId,
       supplierId: upload.supplierId,
-      fileBuffer: fileBuffer,
+      buffer: fileBuffer,  // Changed from fileBuffer to buffer
       aiSettings: aiSettings
     })
 
