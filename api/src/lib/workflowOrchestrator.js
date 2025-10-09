@@ -1226,7 +1226,9 @@ export class WorkflowOrchestrator {
       }
 
       // Check if we have product drafts from accumulated data
-      if (!productDrafts || productDrafts.length === 0) {
+      let draftsToProcess = productDrafts
+      
+      if (!draftsToProcess || draftsToProcess.length === 0) {
         console.log('⚠️ No product drafts in accumulated data, checking database...')
         
         // Try to get product drafts from database
@@ -1262,20 +1264,11 @@ export class WorkflowOrchestrator {
         }
         
         // Use database drafts
-        productDrafts = draftsFromDb
+        draftsToProcess = draftsFromDb
         console.log(`✅ Loaded ${draftsFromDb.length} product drafts from database`)
       }
 
-      // Get product drafts from database to ensure we have latest data
-      const draftsFromDb = await prisma.productDraft.findMany({
-        where: { purchaseOrderId },
-        include: {
-          POLineItem: true,
-          images: true
-        }
-      })
-
-      console.log(`🖼️ Found ${draftsFromDb.length} product drafts to process`)
+      console.log(`🖼️ Found ${draftsToProcess.length} product drafts to process`)
       
       job.progress(20)
       

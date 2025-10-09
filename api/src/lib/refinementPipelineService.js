@@ -741,6 +741,7 @@ export class RefinementPipelineService {
 
   /**
    * Get approved images for a line item from review system
+   * Updated to use Prisma models instead of raw SQL (fixes P2010 error)
    */
   async getApprovedImagesForItem(item, purchaseOrderId) {
     try {
@@ -749,24 +750,38 @@ export class RefinementPipelineService {
         return item.images?.processed || []
       }
 
-      // Get approved images from review session
-      const approvedImages = await db.query(`
-        SELECT iro.* 
-        FROM image_review_options iro
-        JOIN image_review_items iri ON iro.review_item_id = iri.id
-        JOIN image_review_sessions irs ON iri.session_id = irs.id
-        WHERE irs.purchase_order_id = $1 
-          AND iri.line_item_id = $2
-          AND iro.is_selected = true
-        ORDER BY iro.selection_order ASC
-      `, [purchaseOrderId, item.id])
+      // Get approved images using Prisma models
+      const prisma = await db.getClient()
+      
+      const approvedImages = await prisma.imageReviewProductImage.findMany({
+        where: {
+          product: {
+            session: {
+              purchaseOrderId: purchaseOrderId
+            },
+            productSku: item.sku || undefined
+          },
+          isSelected: true
+        },
+        orderBy: {
+          createdAt: 'asc'
+        },
+        include: {
+          product: {
+            select: {
+              productName: true,
+              productSku: true
+            }
+          }
+        }
+      })
 
-      return approvedImages.rows.map(row => ({
-        id: row.id,
-        url: row.image_url,
-        category: row.image_category,
-        sourceInfo: JSON.parse(row.source_info || '{}'),
-        position: row.selection_order || 1,
+      return approvedImages.map((img, index) => ({
+        id: img.id,
+        url: img.imageUrl,
+        category: img.imageType,
+        sourceInfo: img.metadata || {},
+        position: index + 1,
         approved: true
       }))
       
