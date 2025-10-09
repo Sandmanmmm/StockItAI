@@ -62,12 +62,13 @@ export default async function handler(req, res) {
 
     // Download file from Supabase Storage
     console.log(`⬇️ Downloading file from: ${upload.fileUrl}`)
-    const fileBuffer = await storageService.downloadFile(upload.fileUrl)
+    const downloadResult = await storageService.downloadFile(upload.fileUrl)
     
-    if (!fileBuffer) {
-      throw new Error('Failed to download file from storage')
+    if (!downloadResult.success || !downloadResult.buffer) {
+      throw new Error(`Failed to download file from storage: ${downloadResult.error || 'Unknown error'}`)
     }
 
+    const fileBuffer = downloadResult.buffer
     console.log(`✅ File downloaded successfully: ${fileBuffer.length} bytes`)
 
     // Update progress
