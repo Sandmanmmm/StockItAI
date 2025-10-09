@@ -82,12 +82,32 @@ export default async function handler(req, res) {
     }
 
     // Get merchant AI settings
-    const aiSettings = await db.client.aISettings.findUnique({
+    // Get or create AI settings with defaults
+    let aiSettings = await db.client.aISettings.findUnique({
       where: { merchantId }
     })
 
     if (!aiSettings) {
-      throw new Error(`AI settings not found for merchant: ${merchantId}`)
+      console.log(`📝 Creating default AI settings for merchant: ${merchantId}`)
+      aiSettings = await db.client.aISettings.create({
+        data: {
+          merchantId,
+          confidenceThreshold: 0.8,
+          autoApproveHigh: false,
+          strictMatching: true,
+          learningMode: true,
+          enableOCR: true,
+          enableNLP: true,
+          enableAutoMapping: true,
+          primaryModel: 'gpt-5-nano',
+          fallbackModel: 'gpt-4o-mini',
+          maxRetries: 3,
+          autoMatchSuppliers: true,
+          notifyOnErrors: true,
+          notifyOnLowConfidence: true,
+          notifyOnNewSuppliers: true
+        }
+      })
     }
 
     console.log(`🤖 AI settings loaded for merchant: ${merchantId}`)
@@ -164,8 +184,8 @@ export default async function handler(req, res) {
           where: { workflowId },
           data: {
             status: 'failed',
-            error: error.message,
-            endTime: new Date()
+            errorMessage: error.message,
+            completedAt: new Date()
           }
         })
       } catch (updateError) {
@@ -179,7 +199,7 @@ export default async function handler(req, res) {
         where: { id: uploadId },
         data: {
           status: 'failed',
-          processedAt: new Date()
+          errorMessage: error.message
         }
       })
     } catch (updateError) {

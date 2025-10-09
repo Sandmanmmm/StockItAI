@@ -251,6 +251,35 @@ export const db = {
         }
       })
 
+      // Create default AI settings if they don't exist
+      const existingAISettings = await this.client.aISettings.findUnique({
+        where: { merchantId: merchant.id }
+      })
+
+      if (!existingAISettings) {
+        console.log(`📝 Creating default AI settings for new merchant: ${merchant.shopDomain}`)
+        await this.client.aISettings.create({
+          data: {
+            merchantId: merchant.id,
+            confidenceThreshold: 0.8,
+            autoApproveHigh: false,
+            strictMatching: true,
+            learningMode: true,
+            enableOCR: true,
+            enableNLP: true,
+            enableAutoMapping: true,
+            primaryModel: 'gpt-5-nano',
+            fallbackModel: 'gpt-4o-mini',
+            maxRetries: 3,
+            autoMatchSuppliers: true,
+            notifyOnErrors: true,
+            notifyOnLowConfidence: true,
+            notifyOnNewSuppliers: true
+          }
+        })
+        console.log(`✅ Default AI settings created for merchant: ${merchant.shopDomain}`)
+      }
+
       return merchant
     } catch (error) {
       console.error('Failed to upsert merchant:', error)
