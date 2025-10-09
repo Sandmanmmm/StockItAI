@@ -5,9 +5,9 @@
  * background processing of uploaded purchase order files.
  */
 
-import { db } from '../src/lib/db.js'
-import { storageService } from '../src/lib/storageService.js'
-import { workflowIntegration } from '../src/lib/workflowIntegration.js'
+import { db } from './src/lib/db.js'
+import { storageService } from './src/lib/storageService.js'
+import { workflowIntegration } from './src/lib/workflowIntegration.js'
 
 export default async function handler(req, res) {
   const startTime = Date.now()
