@@ -125,14 +125,17 @@ export default async function handler(req, res) {
 
     // Process the file through workflow integration
     console.log(`🔄 Starting file processing...`)
-    const result = await workflowIntegration.processUploadedFile(
-      upload.id,
-      upload.fileName,
-      upload.fileType,
-      fileBuffer,
-      upload.merchant,
-      aiSettings
-    )
+    const result = await workflowIntegration.processUploadedFile({
+      uploadId: upload.id,
+      fileName: upload.fileName,
+      originalFileName: upload.originalFileName,
+      fileSize: upload.fileSize,
+      mimeType: upload.mimeType,
+      merchantId: upload.merchantId,
+      supplierId: upload.supplierId,
+      fileBuffer: fileBuffer,
+      aiSettings: aiSettings
+    })
 
     console.log(`✅ File processing completed successfully`)
 
