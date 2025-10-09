@@ -12,15 +12,25 @@ import { withPrismaRetry, createRetryablePrismaClient, prismaOperation } from '.
 // Prisma client singleton
 let prisma
 let prismaVersion = null
-const PRISMA_CLIENT_VERSION = 'v3_pooler_directurl' // Increment to force recreation
+let isConnecting = false // Connection lock to prevent concurrent initialization
+let connectionPromise = null // Store the connection promise for concurrent requests
+const PRISMA_CLIENT_VERSION = 'v4_concurrent_safe' // Increment to force recreation
 
 // Increase process listener limit for Prisma reconnections
 process.setMaxListeners(20)
 
-// Initialize Prisma client - SMART REUSE v3
+// Initialize Prisma client - CONCURRENT-SAFE v4
 async function initializePrisma() {
   try {
-    console.log(`🔍 [v3] initializePrisma called, current prisma:`, prisma ? 'exists' : 'null')
+    console.log(`🔍 [v4] initializePrisma called, current prisma:`, prisma ? 'exists' : 'null', `isConnecting: ${isConnecting}`)
+    
+    // If another request is already connecting, wait for it to complete
+    if (isConnecting && connectionPromise) {
+      console.log(`⏳ Another request is connecting, waiting...`)
+      await connectionPromise
+      console.log(`✅ Connection completed by other request, returning existing client`)
+      return prisma
+    }
     
     // Only recreate if version changed (not on every call)
     if (prisma && prismaVersion !== PRISMA_CLIENT_VERSION) {
@@ -34,87 +44,58 @@ async function initializePrisma() {
       prismaVersion = null
     }
     
-    // Reuse existing client if version matches
+    // Reuse existing client if version matches AND it's fully connected
     if (prisma && prismaVersion === PRISMA_CLIENT_VERSION) {
       console.log(`✅ Reusing existing Prisma client (version ${PRISMA_CLIENT_VERSION})`)
-    }
-    // Reuse existing client if version matches
-    if (prisma && prismaVersion === PRISMA_CLIENT_VERSION) {
-      console.log(`✅ Reusing existing Prisma client (version ${PRISMA_CLIENT_VERSION})`)
+      // Quick health check - if it fails, we'll reconnect
+      try {
+        await prisma.$queryRaw`SELECT 1 as healthcheck`
+        return prisma // Client is healthy!
+      } catch (error) {
+        console.warn(`⚠️ Existing client health check failed, reconnecting:`, error.message)
+        prisma = null // Force recreation
+      }
     }
     
     if (!prisma) {
-      console.log(`🔧 Creating new PrismaClient (version ${PRISMA_CLIENT_VERSION})...`)
-      console.log(`📊 Environment check:`)
-      console.log(`   DATABASE_URL present: ${!!process.env.DATABASE_URL}`)
-      console.log(`   DIRECT_URL present: ${!!process.env.DIRECT_URL}`)
-      console.log(`   DATABASE_URL port: ${process.env.DATABASE_URL?.includes('5432') ? '5432 (direct)' : process.env.DATABASE_URL?.includes('6543') ? '6543 (pooler)' : 'unknown'}`)
-      console.log(`   DIRECT_URL port: ${process.env.DIRECT_URL?.includes('5432') ? '5432 (direct)' : process.env.DIRECT_URL?.includes('6543') ? '6543 (pooler)' : 'unknown'}`)
-      
-      prisma = new PrismaClient({
-        log: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
-        errorFormat: 'pretty',
-        // REMOVED: datasources override - let Prisma use schema.prisma configuration
-        // This allows directUrl (DIRECT_URL env var) to be used for connection pooling
-        // DATABASE_URL: Direct connection for migrations (port 5432)
-        // DIRECT_URL: Transaction pooler for runtime queries (port 6543)
-      })
-      prismaVersion = PRISMA_CLIENT_VERSION
-      console.log(`✅ PrismaClient created - using schema datasource config (pooler: port 6543)`)
-    }
-    
-    // CRITICAL: ALWAYS verify connection, even if client exists
-    // In serverless, cached clients may have disconnected engines
-    console.log(`🔌 Verifying Prisma engine connection...`)
-    let connectAttempts = 0
-    const maxAttempts = 3
-    
-    while (connectAttempts < maxAttempts) {
-      try {
-        // Force reconnect attempt
-        await prisma.$connect()
-        console.log(`✅ Prisma $connect() succeeded (attempt ${connectAttempts + 1})`)
-        
-        // CRITICAL: Wait for engine to fully initialize after connection
-        // Under concurrent load, engines need MORE time to stabilize
-        // Increased from 300ms → 1000ms → 2000ms due to concurrent workflow crashes
-        // Multiple workflows creating product drafts simultaneously cause engine overload
-        const engineWarmupDelay = 2000 // 2 seconds warmup (was 1000ms - still too short under load!)
-        console.log(`⏳ Waiting ${engineWarmupDelay}ms for engine warmup...`)
-        await new Promise(resolve => setTimeout(resolve, engineWarmupDelay))
-        
-        // CRITICAL: Verify engine is ready with test query
-        // Under load, skip multiple test queries to reduce connection strain
-        console.log(`🔍 Verifying engine readiness with test query...`)
-        
-        // Single test query with even more generous retry (was 5 attempts)
-        // Under concurrent load, health check itself can fail due to pool exhaustion
-        await withPrismaRetry(
-          () => prisma.$queryRaw`SELECT 1 as healthcheck`,
-          { operationName: 'Engine health check', maxRetries: 8, initialDelayMs: 500 }
-        )
-        
-        console.log(`✅ Engine verified - ready for queries`)
-        break // Success!
-      } catch (error) {
-        connectAttempts++
-        console.error(`⚠️ Connection attempt ${connectAttempts} failed:`, error.message)
-        if (connectAttempts >= maxAttempts) {
-          // Last resort: destroy and recreate client
-          console.error(`💀 All connection attempts failed, recreating client...`)
-          try {
-            await prisma.$disconnect()
-          } catch (e) {
-            console.error(`⚠️ Disconnect failed:`, e.message)
-          }
-          prisma = null // Force recreation on next call
-          throw new Error(`Failed to connect Prisma engine after ${maxAttempts} attempts`)
+      // Set connection lock and create promise that other requests can wait on
+      isConnecting = true
+      connectionPromise = (async () => {
+        try {
+          console.log(`🔧 Creating new PrismaClient (version ${PRISMA_CLIENT_VERSION})...`)
+          console.log(`📊 Environment check:`)
+          console.log(`   DATABASE_URL present: ${!!process.env.DATABASE_URL}`)
+          console.log(`   DIRECT_URL present: ${!!process.env.DIRECT_URL}`)
+          console.log(`   DATABASE_URL port: ${process.env.DATABASE_URL?.includes('5432') ? '5432 (direct)' : process.env.DATABASE_URL?.includes('6543') ? '6543 (pooler)' : 'unknown'}`)
+          console.log(`   DIRECT_URL port: ${process.env.DIRECT_URL?.includes('5432') ? '5432 (direct)' : process.env.DIRECT_URL?.includes('6543') ? '6543 (pooler)' : 'unknown'}`)
+          
+          prisma = new PrismaClient({
+            log: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
+            errorFormat: 'pretty',
+          })
+          prismaVersion = PRISMA_CLIENT_VERSION
+          console.log(`✅ PrismaClient created - using schema datasource config (pooler: port 6543)`)
+          
+          // Connect immediately after creation
+          await prisma.$connect()
+          console.log(`✅ Prisma $connect() succeeded`)
+          
+          // Reduced warmup time since we already verified connection
+          console.log(`⏳ Waiting 500ms for engine warmup...`)
+          await new Promise(resolve => setTimeout(resolve, 500))
+          
+          // Quick verification
+          await prisma.$queryRaw`SELECT 1 as healthcheck`
+          console.log(`✅ Engine verified - ready for queries`)
+          
+          return prisma
+        } finally {
+          isConnecting = false
+          connectionPromise = null
         }
-        // Wait before retry with longer delays for cold starts (500ms, 1000ms, 1500ms)
-        const retryDelay = 500 * connectAttempts
-        console.log(`⏳ Waiting ${retryDelay}ms before retry ${connectAttempts + 1}...`)
-        await new Promise(resolve => setTimeout(resolve, retryDelay))
-      }
+      })()
+      
+      await connectionPromise
     }
 
     if (!prisma) {
