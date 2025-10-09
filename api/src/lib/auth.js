@@ -14,6 +14,7 @@ export async function verifyShopifyRequest(req, res, next) {
   try {
     // Allow CORS preflight requests to pass through without authentication
     if (req.method === 'OPTIONS') {
+      console.log(`🔐 OPTIONS preflight for ${req.originalUrl} - bypassing auth`)
       return res.sendStatus(204)
     }
 
@@ -21,6 +22,10 @@ export async function verifyShopifyRequest(req, res, next) {
     const origin = headers.origin
     const hasAuthHeader = !!headers.authorization
     console.log(`🔐 verifyShopifyRequest -> ${method} ${originalUrl} | origin: ${origin || 'n/a'} | auth header: ${hasAuthHeader ? 'present' : 'missing'}`)
+    
+    if (!hasAuthHeader) {
+      console.log(`🔐 Request headers:`, Object.keys(headers).join(', '))
+    }
 
     const prisma = await db.getClient()
     // Get the authorization header

@@ -110,18 +110,44 @@ export async function authenticatedRequest<T>(
     // Check if body is FormData (for file uploads)
     const isFormData = options.body instanceof FormData
     
+    // Build headers object, ensuring Authorization is always included
+    const requestHeaders: Record<string, string> = {}
+    
+    // Add Content-Type for JSON (not for FormData)
+    if (!isFormData) {
+      requestHeaders['Content-Type'] = 'application/json'
+    }
+    
+    // Merge existing headers from options
+    if (options.headers) {
+      if (options.headers instanceof Headers) {
+        // Convert Headers object to plain object
+        options.headers.forEach((value, key) => {
+          requestHeaders[key] = value
+        })
+      } else if (Array.isArray(options.headers)) {
+        // Convert array of tuples to object
+        options.headers.forEach(([key, value]) => {
+          requestHeaders[key] = value
+        })
+      } else {
+        // Plain object - spread it
+        Object.assign(requestHeaders, options.headers)
+      }
+    }
+    
+    // Always set Authorization last so it can't be overwritten
+    if (sessionToken) {
+      requestHeaders['Authorization'] = `Bearer ${sessionToken}`
+    }
+    
     const config: RequestInit = {
-      headers: {
-        // Only set Content-Type for JSON, let browser set it for FormData
-        ...(!isFormData && { 'Content-Type': 'application/json' }),
-        // Include Shopify session token if available
-        ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` }),
-        ...options.headers,
-      },
       ...options,
+      headers: requestHeaders,
     }
 
-    console.log(`� Authentication: ${sessionToken ? 'Token present' : 'No token - using dev mode'}`)
+    console.log(`🔐 Authentication: ${sessionToken ? 'Token present' : 'No token - using dev mode'}`)
+    console.log(`🔐 Authorization header set: ${requestHeaders['Authorization'] ? 'YES' : 'NO'}`)
     
     const response = await fetch(url, config)
     
