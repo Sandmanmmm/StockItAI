@@ -468,7 +468,7 @@ export const db = {
 }
 
 // Export retry utilities for direct use
-export { withPrismaRetry, createRetryablePrismaClient, prismaOperation }
+export { withPrismaRetry, createRetryablePrismaClient }
 
 const prismaWarmupPromise = initializePrisma().catch(error => {
   console.error('❌ Initial Prisma warmup failed:', error)
