@@ -16,6 +16,7 @@ router.use(authMiddleware)
 // GET /api/merchant/data/dashboard-summary - Dashboard overview data
 router.get('/dashboard-summary', async (req, res) => {
   try {
+    const prisma = await db.getClient()
     const merchant = req.shop
     
     console.log('🔍 Dashboard summary request - merchant info:')
@@ -33,7 +34,7 @@ router.get('/dashboard-summary', async (req, res) => {
       console.log(`🔍 Querying POs for merchant ID: ${merchant.id} (${merchant.name || merchant.email})`)
       
       // Get recent purchase orders (last 5)
-      const recentPOs = await db.client.purchaseOrder.findMany({
+      const recentPOs = await prisma.purchaseOrder.findMany({
         where: { merchantId: merchant.id },
         include: {
           supplier: {
@@ -56,22 +57,22 @@ router.get('/dashboard-summary', async (req, res) => {
         totalSuppliers,
         activeSuppliers
       ] = await Promise.all([
-        db.client.purchaseOrder.count({
+        prisma.purchaseOrder.count({
           where: { merchantId: merchant.id }
         }),
-        db.client.purchaseOrder.count({
+        prisma.purchaseOrder.count({
           where: { merchantId: merchant.id, status: 'pending' }
         }),
-        db.client.purchaseOrder.count({
+        prisma.purchaseOrder.count({
           where: { merchantId: merchant.id, status: 'processing' }
         }),
-        db.client.purchaseOrder.count({
+        prisma.purchaseOrder.count({
           where: { merchantId: merchant.id, status: 'completed' }
         }),
-        db.client.supplier.count({
+        prisma.supplier.count({
           where: { merchantId: merchant.id }
         }),
-        db.client.supplier.count({
+        prisma.supplier.count({
           where: { merchantId: merchant.id, status: 'active' }
         })
       ])
@@ -156,6 +157,7 @@ router.get('/dashboard-summary', async (req, res) => {
 // GET /api/merchant/data/suppliers - Supplier list with metrics
 router.get('/suppliers', async (req, res) => {
   try {
+    const prisma = await db.getClient()
     const merchant = req.shop
     
     if (!merchant) {
@@ -166,7 +168,7 @@ router.get('/suppliers', async (req, res) => {
     }
 
     // Get suppliers with purchase order stats
-    const suppliers = await db.client.supplier.findMany({
+    const suppliers = await prisma.supplier.findMany({
       where: { merchantId: merchant.id },
       include: {
         _count: {
@@ -229,6 +231,7 @@ router.get('/suppliers', async (req, res) => {
 // GET /api/merchant/data/supplier-metrics - Supplier performance metrics
 router.get('/supplier-metrics', async (req, res) => {
   try {
+    const prisma = await db.getClient()
     const merchant = req.shop
     
     if (!merchant) {
@@ -242,7 +245,7 @@ router.get('/supplier-metrics', async (req, res) => {
     const thirtyDaysAgo = new Date()
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
-    const supplierMetrics = await db.client.supplier.findMany({
+    const supplierMetrics = await prisma.supplier.findMany({
       where: { 
         merchantId: merchant.id,
         purchaseOrders: {
@@ -313,6 +316,7 @@ router.get('/supplier-metrics', async (req, res) => {
 // GET /api/merchant/data/notifications - Real merchant notifications
 router.get('/notifications', async (req, res) => {
   try {
+    const prisma = await db.getClient()
     const merchant = req.shop
     
     if (!merchant) {
@@ -329,7 +333,7 @@ router.get('/notifications', async (req, res) => {
       pendingReviews
     ] = await Promise.all([
       // Failed jobs in last 24 hours
-      db.client.purchaseOrder.findMany({
+      prisma.purchaseOrder.findMany({
         where: {
           merchantId: merchant.id,
           jobStatus: 'failed',
@@ -348,7 +352,7 @@ router.get('/notifications', async (req, res) => {
       }),
       
       // Recently completed POs
-      db.client.purchaseOrder.findMany({
+      prisma.purchaseOrder.findMany({
         where: {
           merchantId: merchant.id,
           status: 'completed',
@@ -368,7 +372,7 @@ router.get('/notifications', async (req, res) => {
       }),
 
       // POs needing review
-      db.client.purchaseOrder.findMany({
+      prisma.purchaseOrder.findMany({
         where: {
           merchantId: merchant.id,
           status: 'review_needed'

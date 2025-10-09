@@ -11,6 +11,7 @@ import { withPrismaRetry, createRetryablePrismaClient, prismaOperation } from '.
 
 // Prisma client singleton
 let prisma
+let rawPrisma // underlying Prisma client before proxy wrapping
 let prismaVersion = null
 let isConnecting = false // Connection lock to prevent concurrent initialization
 let connectionPromise = null // Store the connection promise for concurrent requests
@@ -47,14 +48,15 @@ function isFatalPrismaError(error) {
 
 // Force disconnect and clear client (for error recovery)
 async function forceDisconnect() {
-  if (prisma) {
+  if (prisma || rawPrisma) {
     console.log(`🔌 Force disconnecting Prisma client...`)
     try {
-      await prisma.$disconnect()
+      await (rawPrisma ?? prisma)?.$disconnect()
     } catch (e) {
       console.warn(`⚠️ Error during force disconnect:`, e.message)
     }
     prisma = null
+    rawPrisma = null
     prismaVersion = null
     isConnecting = false
     connectionPromise = null
@@ -111,7 +113,7 @@ async function initializePrisma() {
           console.log(`   DATABASE_URL port: ${process.env.DATABASE_URL?.includes('5432') ? '5432 (direct)' : process.env.DATABASE_URL?.includes('6543') ? '6543 (pooler)' : 'unknown'}`)
           console.log(`   DIRECT_URL port: ${process.env.DIRECT_URL?.includes('5432') ? '5432 (direct)' : process.env.DIRECT_URL?.includes('6543') ? '6543 (pooler)' : 'unknown'}`)
           
-          prisma = new PrismaClient({
+          rawPrisma = new PrismaClient({
             log: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
             errorFormat: 'pretty',
           })
@@ -119,16 +121,19 @@ async function initializePrisma() {
           console.log(`✅ PrismaClient created - using schema datasource config (pooler: port 6543)`)
           
           // Connect immediately after creation
-          await prisma.$connect()
+          await rawPrisma.$connect()
           console.log(`✅ Prisma $connect() succeeded`)
           
           // Reduced warmup time since we already verified connection
-          console.log(`⏳ Waiting 500ms for engine warmup...`)
-          await new Promise(resolve => setTimeout(resolve, 500))
+          const warmupDelayMs = parseInt(process.env.PRISMA_WARMUP_MS || '1500', 10)
+          console.log(`⏳ Waiting ${warmupDelayMs}ms for engine warmup...`)
+          await new Promise(resolve => setTimeout(resolve, warmupDelayMs))
           
           // Quick verification
-          await prisma.$queryRaw`SELECT 1 as healthcheck`
+          await rawPrisma.$queryRaw`SELECT 1 as healthcheck`
           console.log(`✅ Engine verified - ready for queries`)
+
+          prisma = createRetryablePrismaClient(rawPrisma)
           
           return prisma
         } finally {
@@ -147,16 +152,16 @@ async function initializePrisma() {
     // Handle graceful shutdown (only register once)
     if (!prisma._handlersRegistered) {
       process.on('beforeExit', async () => {
-        await prisma.$disconnect()
+        await rawPrisma?.$disconnect()
       })
 
       process.on('SIGINT', async () => {
-        await prisma.$disconnect()
+        await rawPrisma?.$disconnect()
         process.exit(0)
       })
 
       process.on('SIGTERM', async () => {
-        await prisma.$disconnect()
+        await rawPrisma?.$disconnect()
         process.exit(0)
       })
       
@@ -205,17 +210,20 @@ export const db = {
     }
     // If no client exists, create one synchronously (but it won't be connected yet)
     console.warn(`⚠️ Accessing client synchronously - connection may not be established`)
-    prisma = new PrismaClient({
+    rawPrisma = new PrismaClient({
       log: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
       errorFormat: 'pretty'
     })
+    prismaVersion = PRISMA_CLIENT_VERSION
+    prisma = createRetryablePrismaClient(rawPrisma)
     return prisma
   },
 
   // Test database connection
   async testConnection() {
     try {
-      await this.client.$queryRaw`SELECT 1`
+      const client = await this.getClient()
+      await client.$queryRaw`SELECT 1`
       return { success: true, message: 'Database connection successful' }
     } catch (error) {
       console.error('Database connection failed:', error)
@@ -441,4 +449,10 @@ export const db = {
 // Export retry utilities for direct use
 export { withPrismaRetry, createRetryablePrismaClient, prismaOperation }
 
+const prismaWarmupPromise = initializePrisma().catch(error => {
+  console.error('❌ Initial Prisma warmup failed:', error)
+  throw error
+})
+
+await prismaWarmupPromise
 export default db

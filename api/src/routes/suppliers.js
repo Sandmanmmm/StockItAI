@@ -12,6 +12,7 @@ const router = express.Router()
 // GET /api/suppliers - Get all suppliers
 router.get('/', async (req, res) => {
   try {
+    const prisma = await db.getClient()
     const merchant = req.merchant
     if (!merchant || !merchant.id) {
       return res.status(401).json({
@@ -20,7 +21,7 @@ router.get('/', async (req, res) => {
       })
     }
 
-    const suppliers = await db.client.supplier.findMany({
+    const suppliers = await prisma.supplier.findMany({
       where: { merchantId: merchant.id },
       orderBy: { createdAt: 'desc' }
     })
@@ -41,6 +42,7 @@ router.get('/', async (req, res) => {
 // GET /api/suppliers/:id - Get single supplier
 router.get('/:id', async (req, res) => {
   try {
+    const prisma = await db.getClient()
     const merchant = req.merchant
     if (!merchant || !merchant.id) {
       return res.status(401).json({
@@ -49,7 +51,7 @@ router.get('/:id', async (req, res) => {
       })
     }
 
-    const supplier = await db.client.supplier.findFirst({
+    const supplier = await prisma.supplier.findFirst({
       where: { 
         id: req.params.id,
         merchantId: merchant.id 
@@ -85,6 +87,7 @@ router.get('/:id', async (req, res) => {
 // POST /api/suppliers - Create new supplier
 router.post('/', async (req, res) => {
   try {
+    const prisma = await db.getClient()
     const merchant = req.merchant
     if (!merchant || !merchant.id) {
       return res.status(401).json({
@@ -120,7 +123,7 @@ router.post('/', async (req, res) => {
       supplierData.categories = req.body.categories
     }
 
-    const supplier = await db.client.supplier.create({
+    const supplier = await prisma.supplier.create({
       data: supplierData
     })
 
@@ -149,6 +152,7 @@ router.post('/', async (req, res) => {
 // PUT /api/suppliers/:id - Update supplier
 router.put('/:id', async (req, res) => {
   try {
+    const prisma = await db.getClient()
     const merchant = req.merchant
     if (!merchant || !merchant.id) {
       return res.status(401).json({
@@ -157,7 +161,7 @@ router.put('/:id', async (req, res) => {
       })
     }
 
-    const supplier = await db.client.supplier.updateMany({
+    const supplier = await prisma.supplier.updateMany({
       where: { 
         id: req.params.id,
         merchantId: merchant.id 
@@ -173,7 +177,7 @@ router.put('/:id', async (req, res) => {
     }
 
     // Fetch updated supplier
-    const updatedSupplier = await db.client.supplier.findFirst({
+    const updatedSupplier = await prisma.supplier.findFirst({
       where: { 
         id: req.params.id,
         merchantId: merchant.id 
@@ -196,6 +200,7 @@ router.put('/:id', async (req, res) => {
 // DELETE /api/suppliers/:id - Delete supplier
 router.delete('/:id', async (req, res) => {
   try {
+    const prisma = await db.getClient()
     const merchant = req.merchant
     if (!merchant || !merchant.id) {
       return res.status(401).json({
@@ -205,7 +210,7 @@ router.delete('/:id', async (req, res) => {
     }
 
     // Check if supplier has purchase orders
-    const poCount = await db.client.purchaseOrder.count({
+    const poCount = await prisma.purchaseOrder.count({
       where: { 
         supplierId: req.params.id,
         merchantId: merchant.id 
@@ -219,7 +224,7 @@ router.delete('/:id', async (req, res) => {
       })
     }
 
-    const supplier = await db.client.supplier.deleteMany({
+    const supplier = await prisma.supplier.deleteMany({
       where: { 
         id: req.params.id,
         merchantId: merchant.id 
@@ -249,6 +254,7 @@ router.delete('/:id', async (req, res) => {
 // GET /api/suppliers/:id/metrics - Get supplier performance metrics
 router.get('/:id/metrics', async (req, res) => {
   try {
+    const prisma = await db.getClient()
     const merchant = req.merchant
     if (!merchant || !merchant.id) {
       return res.status(401).json({
@@ -258,7 +264,7 @@ router.get('/:id/metrics', async (req, res) => {
     }
 
     // Verify supplier belongs to merchant
-    const supplier = await db.client.supplier.findFirst({
+    const supplier = await prisma.supplier.findFirst({
       where: { 
         id: req.params.id,
         merchantId: merchant.id 
@@ -299,6 +305,7 @@ router.get('/:id/metrics', async (req, res) => {
 // POST /api/suppliers/:id/metrics/refresh - Force recalculate metrics
 router.post('/:id/metrics/refresh', async (req, res) => {
   try {
+    const prisma = await db.getClient()
     const merchant = req.merchant
     if (!merchant || !merchant.id) {
       return res.status(401).json({
@@ -308,7 +315,7 @@ router.post('/:id/metrics/refresh', async (req, res) => {
     }
 
     // Verify supplier belongs to merchant
-    const supplier = await db.client.supplier.findFirst({
+    const supplier = await prisma.supplier.findFirst({
       where: { 
         id: req.params.id,
         merchantId: merchant.id 
@@ -389,6 +396,7 @@ router.post('/match', async (req, res) => {
 // POST /api/suppliers/suggest/:purchaseOrderId - Get supplier suggestions for PO
 router.post('/suggest/:purchaseOrderId', async (req, res) => {
   try {
+    const prisma = await db.getClient()
     const merchant = req.merchant
     if (!merchant || !merchant.id) {
       return res.status(401).json({
@@ -398,7 +406,7 @@ router.post('/suggest/:purchaseOrderId', async (req, res) => {
     }
 
     // Get purchase order
-    const purchaseOrder = await db.client.purchaseOrder.findFirst({
+    const purchaseOrder = await prisma.purchaseOrder.findFirst({
       where: {
         id: req.params.purchaseOrderId,
         merchantId: merchant.id
@@ -459,6 +467,7 @@ router.post('/suggest/:purchaseOrderId', async (req, res) => {
 // POST /api/suppliers/auto-match/:purchaseOrderId - Auto-match and link supplier
 router.post('/auto-match/:purchaseOrderId', async (req, res) => {
   try {
+    const prisma = await db.getClient()
     const merchant = req.merchant
     if (!merchant || !merchant.id) {
       return res.status(401).json({
@@ -468,7 +477,7 @@ router.post('/auto-match/:purchaseOrderId', async (req, res) => {
     }
 
     // Get purchase order
-    const purchaseOrder = await db.client.purchaseOrder.findFirst({
+    const purchaseOrder = await prisma.purchaseOrder.findFirst({
       where: {
         id: req.params.purchaseOrderId,
         merchantId: merchant.id
@@ -530,6 +539,7 @@ router.post('/auto-match/:purchaseOrderId', async (req, res) => {
 // PUT /api/suppliers/link/:purchaseOrderId/:supplierId - Manually link supplier to PO
 router.put('/link/:purchaseOrderId/:supplierId', async (req, res) => {
   try {
+    const prisma = await db.getClient()
     const merchant = req.merchant
     if (!merchant || !merchant.id) {
       return res.status(401).json({
@@ -539,7 +549,7 @@ router.put('/link/:purchaseOrderId/:supplierId', async (req, res) => {
     }
 
     // Verify purchase order
-    const purchaseOrder = await db.client.purchaseOrder.findFirst({
+    const purchaseOrder = await prisma.purchaseOrder.findFirst({
       where: {
         id: req.params.purchaseOrderId,
         merchantId: merchant.id
@@ -554,7 +564,7 @@ router.put('/link/:purchaseOrderId/:supplierId', async (req, res) => {
     }
 
     // Verify supplier
-    const supplier = await db.client.supplier.findFirst({
+    const supplier = await prisma.supplier.findFirst({
       where: {
         id: req.params.supplierId,
         merchantId: merchant.id
@@ -569,7 +579,7 @@ router.put('/link/:purchaseOrderId/:supplierId', async (req, res) => {
     }
 
     // Link supplier to purchase order
-    const updatedPO = await db.client.purchaseOrder.update({
+    const updatedPO = await prisma.purchaseOrder.update({
       where: { id: purchaseOrder.id },
       data: {
         supplierId: supplier.id,

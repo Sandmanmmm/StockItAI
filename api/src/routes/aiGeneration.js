@@ -166,12 +166,13 @@ Generate only the description, no explanations:`
     // If lineItemId provided, update the product draft
     if (lineItemId) {
       try {
-        const draft = await db.client.productDraft.findFirst({
+        const prisma = await db.getClient()
+        const draft = await prisma.productDraft.findFirst({
           where: { lineItemId }
         })
 
         if (draft) {
-          await db.client.productDraft.update({
+          await prisma.productDraft.update({
             where: { id: draft.id },
             data: {
               refinedTitle,
@@ -294,12 +295,13 @@ Format your response as JSON:
     // If lineItemId provided, update the product draft
     if (lineItemId) {
       try {
-        const draft = await db.client.productDraft.findFirst({
+        const prisma = await db.getClient()
+        const draft = await prisma.productDraft.findFirst({
           where: { lineItemId }
         })
 
         if (draft) {
-          await db.client.productDraft.update({
+          await prisma.productDraft.update({
             where: { id: draft.id },
             data: {
               productType: generated.productType,
@@ -351,8 +353,9 @@ router.post('/bulk-product-content', async (req, res) => {
 
     console.log(`🤖 Generating AI content for ${products.length} products`)
 
-    const results = []
-    const errors = []
+  const results = []
+  const errors = []
+  let prisma
 
     for (const product of products) {
       try {
@@ -421,12 +424,15 @@ Format your response as JSON:
         // Update product draft if lineItemId provided
         if (product.lineItemId) {
           try {
-            const draft = await db.client.productDraft.findFirst({
+            if (!prisma) {
+              prisma = await db.getClient()
+            }
+            const draft = await prisma.productDraft.findFirst({
               where: { lineItemId: product.lineItemId }
             })
 
             if (draft) {
-              await db.client.productDraft.update({
+              await prisma.productDraft.update({
                 where: { id: draft.id },
                 data: {
                   refinedTitle: generated.title,

@@ -226,6 +226,7 @@ export class POAnalysisJobProcessor {
    * Save analysis results to database
    */
   async saveAnalysisResults(purchaseOrderId, data) {
+    const prisma = await db.getClient()
     const updateData = {
       number: data.poNumber || 'Unknown',
       supplierName: data.supplierName || 'Unknown',
@@ -241,14 +242,14 @@ export class POAnalysisJobProcessor {
     }
 
     // Update PO
-    const updatedPO = await db.client.purchaseOrder.update({
+    const updatedPO = await prisma.purchaseOrder.update({
       where: { id: purchaseOrderId },
       data: updateData
     })
 
     // Create/update line items
     if (data.lineItems && data.lineItems.length > 0) {
-      await this.saveLineItems(purchaseOrderId, data.lineItems)
+      await this.saveLineItems(prisma, purchaseOrderId, data.lineItems)
     }
 
     return updatedPO
@@ -257,9 +258,9 @@ export class POAnalysisJobProcessor {
   /**
    * Save line items to database
    */
-  async saveLineItems(purchaseOrderId, lineItems) {
+  async saveLineItems(prisma, purchaseOrderId, lineItems) {
     // Delete existing line items
-    await db.client.pOLineItem.deleteMany({
+    await prisma.pOLineItem.deleteMany({
       where: { purchaseOrderId }
     })
 
@@ -275,7 +276,7 @@ export class POAnalysisJobProcessor {
       confidence: item.confidence || 0.8
     }))
 
-    await db.client.pOLineItem.createMany({
+    await prisma.pOLineItem.createMany({
       data: lineItemData
     })
   }
@@ -285,8 +286,9 @@ export class POAnalysisJobProcessor {
    */
   async attemptSupplierMatching(purchaseOrderId, supplierName, merchantId) {
     try {
+      const prisma = await db.getClient()
       // Get the full PO with parsed data
-      const purchaseOrder = await db.client.purchaseOrder.findUnique({
+      const purchaseOrder = await prisma.purchaseOrder.findUnique({
         where: { id: purchaseOrderId },
         select: { rawData: true }
       })
@@ -339,7 +341,7 @@ export class POAnalysisJobProcessor {
         
         // Auto-link if match score is high enough (>= 85%)
         if (bestMatch.matchScore >= 85) {
-          await db.client.purchaseOrder.update({
+          await prisma.purchaseOrder.update({
             where: { id: purchaseOrderId },
             data: { supplierId: bestMatch.supplier.id }
           })
@@ -366,7 +368,8 @@ export class POAnalysisJobProcessor {
    * Update PO job status in database
    */
   async updatePOJobStatus(purchaseOrderId, statusData) {
-    await db.client.purchaseOrder.update({
+    const prisma = await db.getClient()
+    await prisma.purchaseOrder.update({
       where: { id: purchaseOrderId },
       data: statusData
     })

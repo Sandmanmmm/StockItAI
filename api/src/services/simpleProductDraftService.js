@@ -1,42 +1,75 @@
-// Simple Product Draft Service - Aligned with actual Prisma schema
-import { PrismaClient } from '@prisma/client';
-
 export class SimpleProductDraftService {
-  constructor(prisma) {
-    this.prisma = prisma;
+  constructor(dbProvider) {
+    this.db = dbProvider;
+  }
+
+  async _getClient() {
+    if (this.db?.getClient) {
+      return await this.db.getClient();
+    }
+
+    if (this.db) {
+      return this.db;
+    }
+
+    throw new Error('SimpleProductDraftService requires a Prisma client or db provider');
   }
 
   /**
    * Create a new product draft using our actual Prisma schema
    */
   async createProductDraft(data) {
-    // Build include object based on what's available
-    const include = {
-      Session: true,
-      merchant: true,
-      purchaseOrder: true,
-      POLineItem: true,
-      images: true,
-      variants: true,
-      reviewHistory: true
-    };
+    const prisma = await this._getClient();
 
-    // Only include supplier if supplierId is provided
-    if (data.supplierId) {
-      include.supplier = true;
+    // First create the draft without any heavy relation loading
+    const created = await prisma.productDraft.create({
+      data
+    });
+
+    // Follow up with a lightweight read for just the fields we need downstream
+    const productDraft = await prisma.productDraft.findUnique({
+      where: { id: created.id },
+      select: {
+        id: true,
+        lineItemId: true,
+        sessionId: true,
+        merchantId: true,
+        supplierId: true,
+        purchaseOrderId: true,
+        originalTitle: true,
+        refinedTitle: true,
+        originalDescription: true,
+        refinedDescription: true,
+        originalPrice: true,
+        priceRefined: true,
+        estimatedMargin: true,
+        status: true,
+        tags: true,
+        createdAt: true,
+        updatedAt: true,
+        POLineItem: {
+          select: {
+            id: true,
+            sku: true,
+            productName: true
+          }
+        }
+      }
+    });
+
+    if (productDraft && productDraft.POLineItem && !productDraft.lineItem) {
+      productDraft.lineItem = productDraft.POLineItem;
     }
 
-    return await this.prisma.productDraft.create({
-      data: data,
-      include: include
-    });
+    return productDraft;
   }
 
   /**
    * Get all product drafts for a merchant
    */
   async getProductDrafts(merchantId) {
-    return await this.prisma.productDraft.findMany({
+    const prisma = await this._getClient();
+    return await prisma.productDraft.findMany({
       where: { merchantId },
       include: {
         Session: true,
@@ -54,12 +87,13 @@ export class SimpleProductDraftService {
    * Update a product draft
    */
   async updateProductDraft(id, data) {
+    const prisma = await this._getClient();
     const updateData = { 
       ...data,
       reviewedAt: data.reviewedBy ? new Date() : undefined
     };
     
-    return await this.prisma.productDraft.update({
+    return await prisma.productDraft.update({
       where: { id },
       data: updateData,
       include: {
@@ -78,7 +112,8 @@ export class SimpleProductDraftService {
    * Delete a product draft
    */
   async deleteProductDraft(id) {
-    return await this.prisma.productDraft.delete({
+    const prisma = await this._getClient();
+    return await prisma.productDraft.delete({
       where: { id }
     });
   }
@@ -87,6 +122,7 @@ export class SimpleProductDraftService {
    * Get analytics for product drafts
    */
   async getAnalytics(merchantId) {
+    const prisma = await this._getClient();
     const [
       total,
       byStatus,
@@ -94,19 +130,19 @@ export class SimpleProductDraftService {
       recentCount
     ] = await Promise.all([
       // Total count
-      this.prisma.productDraft.count({
+      prisma.productDraft.count({
         where: { merchantId }
       }),
       
       // Count by status
-      this.prisma.productDraft.groupBy({
+      prisma.productDraft.groupBy({
         by: ['status'],
         where: { merchantId },
         _count: true
       }),
       
       // Average margin
-      this.prisma.productDraft.aggregate({
+      prisma.productDraft.aggregate({
         where: { 
           merchantId,
           estimatedMargin: { not: null }
@@ -115,7 +151,7 @@ export class SimpleProductDraftService {
       }),
       
       // Recent count (last 7 days)
-      this.prisma.productDraft.count({
+      prisma.productDraft.count({
         where: {
           merchantId,
           createdAt: {

@@ -96,8 +96,8 @@ export class WorkflowOrchestrator {
     this.dbService = new DatabasePersistenceService()
     this.storageService = new SupabaseStorageService()
     this.fileParsingService = new FileParsingService()
-    this.productDraftService = new SimpleProductDraftService(db.client)
-    this.refinementConfigService = new RefinementConfigService(db.client)
+  this.productDraftService = new SimpleProductDraftService(db)
+  this.refinementConfigService = new RefinementConfigService(db.client)
   }
 
   /**
@@ -955,6 +955,8 @@ export class WorkflowOrchestrator {
     
     const { workflowId, data } = job.data
     const { aiResult, dbResult, purchaseOrderId, merchantId } = data
+
+    const prisma = await db.getClient()
     
     console.log('🎨 Product Draft Creation data:', { 
       workflowId, 
@@ -979,7 +981,7 @@ export class WorkflowOrchestrator {
       console.log(`   PO ID from job data: ${data.purchaseOrderId}`)
       
       // Get the saved line items from the database
-      const lineItemsFromDb = await db.client.pOLineItem.findMany({
+      const lineItemsFromDb = await prisma.pOLineItem.findMany({
         where: { purchaseOrderId: purchaseOrder.id }
       })
       
@@ -987,7 +989,7 @@ export class WorkflowOrchestrator {
       
       if (!lineItemsFromDb || lineItemsFromDb.length === 0) {
         // Debug: Check if line items exist for any PO
-        const allLineItems = await db.client.pOLineItem.findMany({
+        const allLineItems = await prisma.pOLineItem.findMany({
           take: 10,
           orderBy: { createdAt: 'desc' }
         })
@@ -1027,7 +1029,7 @@ export class WorkflowOrchestrator {
 
           // Check if a product draft already exists for this line item
           // NOTE: lineItemId is NOT unique, so we use findFirst instead of findUnique
-          const existingDraft = await db.client.productDraft.findFirst({
+          const existingDraft = await prisma.productDraft.findFirst({
             where: { lineItemId: lineItem.id }  // FIXED: Use lineItemId (actual DB field) and findFirst
           });
 
@@ -1038,14 +1040,14 @@ export class WorkflowOrchestrator {
           }
 
           // Find a session for this merchant (required by our schema)
-          let session = await db.client.session.findFirst({
+          let session = await prisma.session.findFirst({
             where: { merchantId: merchantId }
           });
 
           if (!session) {
             console.warn(`⚠️ No session found for merchant ${merchantId}, creating temporary session`)
             try {
-              session = await db.client.session.create({
+              session = await prisma.session.create({
                 data: {
                   shop: `temp-${merchantId}-${Date.now()}`,
                   state: 'temporary',
@@ -1191,6 +1193,8 @@ export class WorkflowOrchestrator {
     
     const { workflowId, data } = job.data
     const { purchaseOrderId, productDrafts } = data
+
+    const prisma = await db.getClient()
     
     console.log(`🖼️ Image attachment data:`, { 
       workflowId, 
@@ -1213,7 +1217,7 @@ export class WorkflowOrchestrator {
         console.log('⚠️ No product drafts in accumulated data, checking database...')
         
         // Try to get product drafts from database
-        const draftsFromDb = await db.client.productDraft.findMany({
+        const draftsFromDb = await prisma.productDraft.findMany({
           where: { purchaseOrderId },
           include: {
             POLineItem: true,
@@ -1250,7 +1254,7 @@ export class WorkflowOrchestrator {
       }
 
       // Get product drafts from database to ensure we have latest data
-      const draftsFromDb = await db.client.productDraft.findMany({
+      const draftsFromDb = await prisma.productDraft.findMany({
         where: { purchaseOrderId },
         include: {
           POLineItem: true,
@@ -1301,7 +1305,7 @@ export class WorkflowOrchestrator {
 
             // Save images to database
             for (const [imgIndex, image] of images.slice(0, 3).entries()) {  // Top 3 images
-              await db.client.productImage.create({
+              await prisma.productImage.create({
                 data: {
                   productDraftId: draft.id,
                   originalUrl: image.url,
@@ -1368,7 +1372,7 @@ export class WorkflowOrchestrator {
 
         if (merchantId && imagesFoundCount > 0) {
           // Get all images for this PO
-          const allImages = await db.client.productImage.findMany({
+          const allImages = await prisma.productImage.findMany({
             where: {
               productDraft: {
                 purchaseOrderId

@@ -242,8 +242,9 @@ export async function findMatchingSuppliers(parsedSupplier, merchantId, options 
   })
   
   try {
+    const client = await db.getClient()
     // Get all suppliers for merchant
-    const suppliers = await db.client.supplier.findMany({
+    const suppliers = await client.supplier.findMany({
       where: {
         merchantId,
         ...(includeInactive ? {} : { status: 'active' })
@@ -330,6 +331,7 @@ export async function autoMatchSupplier(purchaseOrderId, parsedSupplier, merchan
   console.log('🤖 Auto-matching supplier for PO:', purchaseOrderId)
   
   try {
+    const client = await db.getClient()
     // Find matches
     const matches = await findMatchingSuppliers(parsedSupplier, merchantId, {
       minScore: 0.6, // Lower threshold for suggestions
@@ -347,7 +349,7 @@ export async function autoMatchSupplier(purchaseOrderId, parsedSupplier, merchan
         console.log(`✅ High confidence match (${bestMatch.matchScore}), auto-linking supplier: ${bestMatch.supplier.name}`)
         
         // Link supplier to purchase order
-        await db.client.purchaseOrder.update({
+        await client.purchaseOrder.update({
           where: { id: purchaseOrderId },
           data: {
             supplierId: bestMatch.supplier.id,
@@ -365,7 +367,7 @@ export async function autoMatchSupplier(purchaseOrderId, parsedSupplier, merchan
       console.log('🆕 No match found, creating new supplier')
       
       // Create new supplier
-      const newSupplier = await db.client.supplier.create({
+      const newSupplier = await client.supplier.create({
         data: {
           name: parsedSupplier.name,
           contactEmail: parsedSupplier.email || null,
@@ -379,7 +381,7 @@ export async function autoMatchSupplier(purchaseOrderId, parsedSupplier, merchan
       })
       
       // Link to purchase order
-      await db.client.purchaseOrder.update({
+      await client.purchaseOrder.update({
         where: { id: purchaseOrderId },
         data: {
           supplierId: newSupplier.id,

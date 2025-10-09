@@ -4,14 +4,15 @@ import { db } from '../lib/db.js'
 import { devBypassAuth } from '../lib/auth.js'
 
 const router = express.Router()
-const productDraftService = new SimpleProductDraftService(db.client)
+const productDraftService = new SimpleProductDraftService(db)
 
 // Get product draft by line item ID
 router.get('/by-line-item/:lineItemId', devBypassAuth, async (req, res) => {
   try {
+    const prisma = await db.getClient()
     const { lineItemId } = req.params
     
-    const productDraft = await db.client.productDraft.findFirst({
+    const productDraft = await prisma.productDraft.findFirst({
       where: { lineItemId },
       include: {
         session: true,
@@ -88,6 +89,7 @@ router.get('/by-line-item/:lineItemId', devBypassAuth, async (req, res) => {
 // Get all product drafts for a merchant
 router.get('/', devBypassAuth, async (req, res) => {
   try {
+    const prisma = await db.getClient()
     // Get merchantId from authenticated request or query parameter
     const merchantId = req.merchant?.id || req.query.merchantId
     
@@ -129,7 +131,7 @@ router.get('/', devBypassAuth, async (req, res) => {
     }
     
     // Fetch product drafts with filters
-    const productDrafts = await db.client.productDraft.findMany({
+    const productDrafts = await prisma.productDraft.findMany({
       where,
       include: {
         images: true,
@@ -225,6 +227,7 @@ router.get('/', devBypassAuth, async (req, res) => {
 // Create a new product draft
 router.post('/', devBypassAuth, async (req, res) => {
   try {
+    const prisma = await db.getClient()
     // Get merchant from authenticated request (set by devBypassAuth middleware)
     if (!req.merchant) {
       return res.status(401).json({
@@ -253,7 +256,7 @@ router.post('/', devBypassAuth, async (req, res) => {
     console.log(`[CREATE DRAFT] Merchant: ${merchantId}, LineItem: ${lineItemId}`)
     
     // Find the session for this merchant
-    const session = await db.client.session.findFirst({
+    const session = await prisma.session.findFirst({
       where: { merchantId }
     })
     
@@ -422,6 +425,7 @@ router.patch('/bulk/update', devBypassAuth, async (req, res) => {
 // Sync product drafts to Shopify
 router.post('/sync', devBypassAuth, async (req, res) => {
   try {
+    const prisma = await db.getClient()
     const { productIds } = req.body
     
     if (!Array.isArray(productIds) || productIds.length === 0) {
@@ -442,7 +446,7 @@ router.post('/sync', devBypassAuth, async (req, res) => {
     const merchantId = req.merchant.id
     
     // Fetch the product drafts
-    const productDrafts = await db.client.productDraft.findMany({
+    const productDrafts = await prisma.productDraft.findMany({
       where: {
         id: { in: productIds },
         merchantId
@@ -462,7 +466,7 @@ router.post('/sync', devBypassAuth, async (req, res) => {
     }
     
     // Update all to syncing status
-    await db.client.productDraft.updateMany({
+    await prisma.productDraft.updateMany({
       where: { id: { in: productIds } },
       data: { status: 'SYNCING' }
     })
@@ -477,7 +481,7 @@ router.post('/sync', devBypassAuth, async (req, res) => {
           await new Promise(resolve => setTimeout(resolve, 1000))
           
           // Update to synced status
-          await db.client.productDraft.update({
+          await prisma.productDraft.update({
             where: { id: draft.id },
             data: {
               status: 'SYNCED',
@@ -491,7 +495,7 @@ router.post('/sync', devBypassAuth, async (req, res) => {
           console.error(`❌ Failed to sync product draft ${draft.id}:`, error)
           
           // Update to failed status
-          await db.client.productDraft.update({
+          await prisma.productDraft.update({
             where: { id: draft.id },
             data: {
               status: 'FAILED',

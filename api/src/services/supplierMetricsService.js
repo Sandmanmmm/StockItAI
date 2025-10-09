@@ -17,8 +17,9 @@ import { db } from '../lib/db.js'
  */
 export async function calculateSupplierMetrics(supplierId) {
   try {
+    const client = await db.getClient()
     // Fetch all POs for this supplier
-    const purchaseOrders = await db.client.purchaseOrder.findMany({
+    const purchaseOrders = await client.purchaseOrder.findMany({
       where: { supplierId },
       include: {
         lineItems: true
@@ -66,7 +67,7 @@ export async function calculateSupplierMetrics(supplierId) {
     metrics.healthScore = calculateHealthScore(metrics)
 
     // Store metrics in database
-    await db.client.supplierMetrics.upsert({
+    await client.supplierMetrics.upsert({
       where: { supplierId },
       update: metrics,
       create: metrics
@@ -86,7 +87,8 @@ export async function calculateSupplierMetrics(supplierId) {
  */
 export async function calculateAllSupplierMetrics(merchantId) {
   try {
-    const suppliers = await db.client.supplier.findMany({
+    const client = await db.getClient()
+    const suppliers = await client.supplier.findMany({
       where: { merchantId },
       select: { id: true }
     })
@@ -114,8 +116,9 @@ export async function calculateAllSupplierMetrics(merchantId) {
  */
 export async function getSupplierMetrics(supplierId, maxAgeMinutes = 60) {
   try {
+    const client = await db.getClient()
     // Try to get cached metrics
-    const cached = await db.client.supplierMetrics.findUnique({
+    const cached = await client.supplierMetrics.findUnique({
       where: { supplierId }
     })
 

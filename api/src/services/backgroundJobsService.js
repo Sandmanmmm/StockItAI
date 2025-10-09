@@ -82,10 +82,11 @@ export function stopBackgroundJobs() {
  */
 async function calculateAllSupplierMetricsJob() {
   const startTime = Date.now()
+  const client = await db.getClient()
   
   try {
     // Get all active merchants
-    const merchants = await db.client.merchant.findMany({
+    const merchants = await client.merchant.findMany({
       where: { status: 'active' },
       select: { id: true, name: true }
     })
@@ -140,6 +141,7 @@ async function calculateAllSupplierMetricsJob() {
  */
 async function performHealthCheck() {
   const startTime = Date.now()
+  const client = await db.getClient()
   
   try {
     const checks = {
@@ -151,7 +153,7 @@ async function performHealthCheck() {
 
     // Check database connection
     try {
-      await db.client.$queryRaw`SELECT 1`
+      await client.$queryRaw`SELECT 1`
       checks.database = true
     } catch (error) {
       console.error('❌ Database health check failed:', error)
@@ -159,11 +161,11 @@ async function performHealthCheck() {
 
     // Count active resources
     if (checks.database) {
-      checks.merchants = await db.client.merchant.count({
+      checks.merchants = await client.merchant.count({
         where: { status: 'active' }
       })
 
-      checks.suppliers = await db.client.supplier.count({
+      checks.suppliers = await client.supplier.count({
         where: { status: 'active' }
       })
 
@@ -171,7 +173,7 @@ async function performHealthCheck() {
       const yesterday = new Date()
       yesterday.setDate(yesterday.getDate() - 1)
       
-      checks.recentPOs = await db.client.purchaseOrder.count({
+      checks.recentPOs = await client.purchaseOrder.count({
         where: {
           createdAt: {
             gte: yesterday
@@ -203,13 +205,14 @@ async function performHealthCheck() {
  */
 async function autoLinkUnlinkedPOs() {
   const startTime = Date.now()
+  const client = await db.getClient()
   
   try {
     // Import the supplier matching service
     const { findMatchingSuppliers } = await import('./supplierMatchingService.js')
     
     // Find all unlinked POs with supplier names
-    const allUnlinkedPOs = await db.client.purchaseOrder.findMany({
+    const allUnlinkedPOs = await client.purchaseOrder.findMany({
       where: {
         supplierId: null,
         // Only process POs from the last 7 days to avoid reprocessing old ones
@@ -276,7 +279,7 @@ async function autoLinkUnlinkedPOs() {
           
           // Auto-link if confidence is high enough (>= 85%)
           if (bestMatch.matchScore >= 85) {
-            await db.client.purchaseOrder.update({
+            await client.purchaseOrder.update({
               where: { id: po.id },
               data: { supplierId: bestMatch.supplier.id }
             })
