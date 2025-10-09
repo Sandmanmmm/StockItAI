@@ -99,6 +99,16 @@ export function DashboardOverview({ onShowActiveSuppliers, onShowAllPurchaseOrde
   const { recentPOs, metrics, loading: dashboardLoading, error: dashboardError, refetch: refetchDashboard } = useDashboardSummary()
   const { supplierMetrics, loading: metricsLoading, error: metricsError, refetch: refetchMetrics } = useSupplierMetrics()
 
+  console.log('🎨 [DASHBOARD COMPONENT] Render state:', {
+    dashboardLoading,
+    metricsLoading,
+    dashboardError,
+    metricsError,
+    recentPOsLength: recentPOs?.length || 0,
+    metricsData: metrics,
+    supplierMetricsLength: supplierMetrics?.length || 0
+  })
+
   const loading = dashboardLoading || metricsLoading
   const error = dashboardError || metricsError
   // Show loading state

@@ -112,23 +112,40 @@ export function useDashboardSummary() {
       setLoading(true)
       setError(null)
       
+      console.log('🎯 [DASHBOARD HOOK] Starting fetch...')
       const response = await authenticatedRequest('/api/merchant/data/dashboard-summary')
       
+      console.log('🎯 [DASHBOARD HOOK] Response received:', {
+        success: response.success,
+        hasData: !!response.data,
+        error: response.error
+      })
+      
       if (!response.success) {
+        console.error('🎯 [DASHBOARD HOOK] API returned error:', response.error)
         throw new Error(response.error || 'Failed to fetch dashboard summary')
       }
       
+      console.log('🎯 [DASHBOARD HOOK] Data details:', {
+        recentPOs: response.data?.recentPOs?.length || 0,
+        totalPOs: response.data?.metrics?.totalPOs || 0,
+        firstPO: response.data?.recentPOs?.[0]
+      })
+      
       setData(response.data as DashboardSummaryData)
+      console.log('🎯 [DASHBOARD HOOK] State updated, should trigger re-render')
     } catch (err) {
-      console.error('Dashboard summary fetch error:', err)
+      console.error('🎯 [DASHBOARD HOOK] Fetch error:', err)
       setError(err instanceof Error ? err.message : 'Unknown error')
       setData(null)
     } finally {
       setLoading(false)
+      console.log('🎯 [DASHBOARD HOOK] Fetch complete, loading=false')
     }
   }
 
   useEffect(() => {
+    console.log('🎯 [DASHBOARD HOOK] useEffect triggered, calling fetch')
     fetchDashboardSummary()
   }, [])
 
@@ -140,6 +157,10 @@ export function useDashboardSummary() {
     refetch: fetchDashboardSummary
   }
 }
+
+// Add this logging wrapper
+const originalHook = useDashboardSummary
+export { originalHook as useDashboardSummaryOriginal }
 
 // Suppliers hook - replaces useKV for suppliers list
 export function useSuppliers() {
