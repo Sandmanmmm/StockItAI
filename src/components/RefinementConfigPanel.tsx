@@ -159,7 +159,8 @@ export function RefinementConfigPanel() {
     try {
       const result = await authenticatedRequest<RefinementConfig>(`/refinement-config?merchantId=${merchantId}`)
       if (result.success && result.data) {
-        setConfig(result.data)
+        const merged = deepMerge(defaultConfig, result.data)
+        setConfig(merged)
       }
     } catch (error) {
       console.error('Failed to load configuration:', error)
@@ -177,7 +178,8 @@ export function RefinementConfigPanel() {
       })
       
       if (result.success && result.data) {
-        setConfig(result.data)
+        const merged = deepMerge(defaultConfig, result.data)
+        setConfig(merged)
         // Show success notification
       }
     } catch (error) {
@@ -211,7 +213,7 @@ export function RefinementConfigPanel() {
   }
 
   const resetToDefaults = () => {
-    setConfig(defaultConfig)
+    setConfig(deepMerge(defaultConfig, defaultConfig))
   }
 
   const updateConfig = (path: string, value: any) => {
@@ -222,7 +224,11 @@ export function RefinementConfigPanel() {
       
       // Ensure all intermediate objects exist
       for (let i = 0; i < keys.length - 1; i++) {
-        if (!current[keys[i]]) {
+        if (
+          typeof current[keys[i]] !== 'object' ||
+          current[keys[i]] === null ||
+          Array.isArray(current[keys[i]])
+        ) {
           current[keys[i]] = {}
         }
         current = current[keys[i]]
@@ -613,4 +619,38 @@ export function RefinementConfigPanel() {
       </CardContent>
     </Card>
   )
+}
+
+function deepMerge<T>(defaults: T, overrides: Partial<T> | null | undefined): T {
+  if (!overrides || typeof overrides !== 'object') {
+    return JSON.parse(JSON.stringify(defaults))
+  }
+
+  const merged: any = Array.isArray(defaults)
+    ? [...(defaults as any)]
+    : { ...(defaults as any) }
+
+  for (const key of Object.keys(overrides)) {
+    const overrideValue: any = (overrides as any)[key]
+    const defaultValue: any = (defaults as any)[key]
+
+    if (overrideValue === undefined) {
+      continue
+    }
+
+    if (
+      overrideValue &&
+      typeof overrideValue === 'object' &&
+      !Array.isArray(overrideValue) &&
+      defaultValue &&
+      typeof defaultValue === 'object' &&
+      !Array.isArray(defaultValue)
+    ) {
+      merged[key] = deepMerge(defaultValue, overrideValue)
+    } else {
+      merged[key] = overrideValue
+    }
+  }
+
+  return merged
 }

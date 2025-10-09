@@ -493,42 +493,32 @@ export function ProductDetailView({
       console.log('API Body:', testBody);
 
       try {
-        const refinementResponse = await fetch(testUrl, {
+        const refinementResponse = await authenticatedRequest<any>(testUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(testBody)
         });
 
-        console.log('Refinement API Response Status:', refinementResponse.status);
-        
-        if (refinementResponse.ok) {
-          const responseData = await refinementResponse.json();
-          console.log('Refinement API Response Data:', responseData);
-          
-          if (responseData.success && responseData.data) {
-            const data = responseData.data as any;
-            refinedPrice = data.adjustedPrice || refinedPrice;
-            const markup = data.markup || 0;
-            estimatedMargin = item.unitPrice > 0 ? ((refinedPrice - item.unitPrice) / refinedPrice) * 100 : estimatedMargin;
-            appliedRules = data.appliedRules?.map((rule: any) => rule.description).join(', ') || '';
-            console.log('SUCCESS - Refined pricing result:', {
-              original: item.unitPrice,
-              refined: refinedPrice,
-              margin: estimatedMargin,
-              rules: appliedRules
-            });
-          } else {
-            console.error('Refinement API returned unsuccessful response:', responseData);
-            alert(`Refinement API Error: ${JSON.stringify(responseData)}`);
-          }
+        if (refinementResponse.success && refinementResponse.data) {
+          const data = refinementResponse.data;
+          refinedPrice = data.adjustedPrice || refinedPrice;
+          const markup = data.markup || 0;
+          estimatedMargin = item.unitPrice > 0 ? ((refinedPrice - item.unitPrice) / refinedPrice) * 100 : estimatedMargin;
+          appliedRules = data.appliedRules?.map((rule: any) => rule.description).join(', ') || '';
+          console.log('SUCCESS - Refined pricing result:', {
+            original: item.unitPrice,
+            refined: refinedPrice,
+            margin: estimatedMargin,
+            rules: appliedRules,
+            markup
+          });
         } else {
-          const errorText = await refinementResponse.text();
-          console.error('Refinement API request failed:', refinementResponse.status, errorText);
-          alert(`Refinement API Failed: ${refinementResponse.status} - ${errorText}`);
+          console.error('Refinement API returned unsuccessful response:', refinementResponse);
+          alert(`Refinement API Error: ${refinementResponse.error || 'Unknown error'}`);
         }
       } catch (refinementError) {
         console.error('Failed to get refined pricing, using fallback:', refinementError);
-        alert(`Refinement Error: ${refinementError.message}`);
+        alert(`Refinement Error: ${refinementError instanceof Error ? refinementError.message : String(refinementError)}`);
       }
 
       console.log('Final refined price before creating draft:', refinedPrice);

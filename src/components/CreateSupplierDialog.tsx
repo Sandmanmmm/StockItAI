@@ -9,6 +9,7 @@
  */
 
 import { useState, useEffect } from 'react'
+import { authenticatedRequest } from '@/lib/shopifyApiService'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Dialog,
@@ -181,7 +182,7 @@ export default function CreateSupplierDialog({ onSuccess, children, initialData 
 
     setIsSubmitting(true)
     try {
-      const response = await fetch('/api/suppliers', {
+      const result = await authenticatedRequest('/api/suppliers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -196,9 +197,7 @@ export default function CreateSupplierDialog({ onSuccess, children, initialData 
         })
       })
 
-      const result = await response.json()
-
-      if (result.success) {
+      if (result.success && result.data) {
         // Success!
         setIsOpen(false)
         setFormData(INITIAL_FORM_DATA)
