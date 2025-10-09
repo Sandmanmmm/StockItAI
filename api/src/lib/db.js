@@ -143,14 +143,29 @@ async function initializePrisma() {
           await rawPrisma.$connect()
           console.log(`✅ Prisma $connect() succeeded`)
           
-          // Reduced warmup time since we already verified connection
-          const warmupDelayMs = parseInt(process.env.PRISMA_WARMUP_MS || '1500', 10)
+          // Increased warmup time for serverless cold starts with concurrent requests
+          const warmupDelayMs = parseInt(process.env.PRISMA_WARMUP_MS || '2500', 10)
           console.log(`⏳ Waiting ${warmupDelayMs}ms for engine warmup...`)
           await new Promise(resolve => setTimeout(resolve, warmupDelayMs))
           
-          // Quick verification
-          await rawPrisma.$queryRaw`SELECT 1 as healthcheck`
-          console.log(`✅ Engine verified - ready for queries`)
+          // Quick verification with retry logic
+          let verified = false
+          for (let i = 0; i < 3; i++) {
+            try {
+              await rawPrisma.$queryRaw`SELECT 1 as healthcheck`
+              console.log(`✅ Engine verified - ready for queries`)
+              verified = true
+              break
+            } catch (error) {
+              if (i < 2) {
+                console.warn(`⚠️ Verification attempt ${i + 1}/3 failed, retrying in 500ms...`)
+                await new Promise(resolve => setTimeout(resolve, 500))
+              } else {
+                console.error(`❌ Engine verification failed after 3 attempts:`, error.message)
+                throw error
+              }
+            }
+          }
 
           prisma = createRetryablePrismaClient(rawPrisma)
           

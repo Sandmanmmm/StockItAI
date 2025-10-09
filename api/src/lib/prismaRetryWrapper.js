@@ -45,18 +45,18 @@ function isRetryableError(error) {
  * 
  * @param {Function} operation - Async function that performs Prisma operation
  * @param {Object} options - Retry configuration
- * @param {number} options.maxRetries - Maximum number of retry attempts (default: 3)
- * @param {number} options.initialDelayMs - Initial delay in milliseconds (default: 100)
- * @param {number} options.maxDelayMs - Maximum delay in milliseconds (default: 2000)
+ * @param {number} options.maxRetries - Maximum number of retry attempts (default: 5)
+ * @param {number} options.initialDelayMs - Initial delay in milliseconds (default: 200)
+ * @param {number} options.maxDelayMs - Maximum delay in milliseconds (default: 3000)
  * @param {string} options.operationName - Name for logging (optional)
  * @returns {Promise<any>} - Result of the operation
  * @throws {Error} - Final error if all retries exhausted
  */
 export async function withPrismaRetry(operation, options = {}) {
   const {
-    maxRetries = 3,
-    initialDelayMs = 100,
-    maxDelayMs = 2000,
+    maxRetries = 5,
+    initialDelayMs = 200,
+    maxDelayMs = 3000,
     operationName = 'Prisma operation'
   } = options
   
