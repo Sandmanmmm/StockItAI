@@ -11,26 +11,40 @@ import { withPrismaRetry, createRetryablePrismaClient, prismaOperation } from '.
 
 // Prisma client singleton
 let prisma
+let prismaVersion = null
 const PRISMA_CLIENT_VERSION = 'v3_pooler_directurl' // Increment to force recreation
 
-// Initialize Prisma client - FORCED REBUILD v2
+// Increase process listener limit for Prisma reconnections
+process.setMaxListeners(20)
+
+// Initialize Prisma client - SMART REUSE v3
 async function initializePrisma() {
   try {
-    console.log(`🔍 [v2] initializePrisma called, current prisma:`, prisma ? 'exists' : 'null')
+    console.log(`🔍 [v3] initializePrisma called, current prisma:`, prisma ? 'exists' : 'null')
     
-    // FORCE RECREATION: Always recreate to ensure new code is used
-    if (prisma) {
-      console.log(`🔄 Force disconnecting old Prisma client (version upgrade to ${PRISMA_CLIENT_VERSION})`)
+    // Only recreate if version changed (not on every call)
+    if (prisma && prismaVersion !== PRISMA_CLIENT_VERSION) {
+      console.log(`🔄 Version change detected (${prismaVersion} → ${PRISMA_CLIENT_VERSION}), disconnecting old client`)
       try {
         await prisma.$disconnect()
       } catch (e) {
         console.warn(`⚠️ Error disconnecting old client:`, e.message)
       }
       prisma = null
+      prismaVersion = null
+    }
+    
+    // Reuse existing client if version matches
+    if (prisma && prismaVersion === PRISMA_CLIENT_VERSION) {
+      console.log(`✅ Reusing existing Prisma client (version ${PRISMA_CLIENT_VERSION})`)
+    }
+    // Reuse existing client if version matches
+    if (prisma && prismaVersion === PRISMA_CLIENT_VERSION) {
+      console.log(`✅ Reusing existing Prisma client (version ${PRISMA_CLIENT_VERSION})`)
     }
     
     if (!prisma) {
-      console.log(`🔧 Creating new PrismaClient...`)
+      console.log(`🔧 Creating new PrismaClient (version ${PRISMA_CLIENT_VERSION})...`)
       console.log(`📊 Environment check:`)
       console.log(`   DATABASE_URL present: ${!!process.env.DATABASE_URL}`)
       console.log(`   DIRECT_URL present: ${!!process.env.DIRECT_URL}`)
@@ -45,6 +59,7 @@ async function initializePrisma() {
         // DATABASE_URL: Direct connection for migrations (port 5432)
         // DIRECT_URL: Transaction pooler for runtime queries (port 6543)
       })
+      prismaVersion = PRISMA_CLIENT_VERSION
       console.log(`✅ PrismaClient created - using schema datasource config (pooler: port 6543)`)
     }
     
