@@ -104,13 +104,12 @@ async function initializePrisma() {
     
     // Reuse existing client if version matches AND it's fully connected
     if (prisma && prismaVersion === PRISMA_CLIENT_VERSION) {
-      console.log(`✅ Reusing existing Prisma client (version ${PRISMA_CLIENT_VERSION})`)
-      
-      // CRITICAL: Always health check reused clients BEFORE returning
+      // CRITICAL: Health check FIRST before logging or returning
       // Serverless functions may reuse memory but engine connections die
       try {
         // Use raw client for health check to avoid retry wrapper interference
         await rawPrisma.$queryRaw`SELECT 1 as healthcheck`
+        console.log(`✅ Reusing existing Prisma client (version ${PRISMA_CLIENT_VERSION})`)
         console.log(`✅ Reused client health check passed`)
         return prisma // Client is healthy!
       } catch (error) {
