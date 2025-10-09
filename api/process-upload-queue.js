@@ -148,7 +148,7 @@ export default async function handler(req, res) {
           status: 'completed',
           currentStage: 'completed',
           progressPercent: 100,
-          endTime: new Date()
+          completedAt: new Date()
         }
       })
     }
@@ -158,7 +158,7 @@ export default async function handler(req, res) {
       where: { id: uploadId },
       data: {
         status: 'processed',
-        processedAt: new Date()
+        updatedAt: new Date()
       }
     })
 
