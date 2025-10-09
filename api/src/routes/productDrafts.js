@@ -15,13 +15,14 @@ router.get('/by-line-item/:lineItemId', devBypassAuth, async (req, res) => {
     const productDraft = await prisma.productDraft.findFirst({
       where: { lineItemId },
       include: {
-        session: true,
+        Session: true,
         merchant: true,
         purchaseOrder: true,
         POLineItem: true,
         images: true,
         variants: true,
-        reviewHistory: true
+        reviewHistory: true,
+        supplier: true
       }
     })
     
@@ -58,9 +59,9 @@ router.get('/by-line-item/:lineItemId', devBypassAuth, async (req, res) => {
       createdAt: productDraft.createdAt,
       updatedAt: productDraft.updatedAt,
       // Include basic info from relations
-      session: productDraft.session ? {
-        id: productDraft.session.id,
-        shop: productDraft.session.shop
+      session: productDraft.Session ? {
+        id: productDraft.Session.id,
+        shop: productDraft.Session.shop
       } : null,
       merchant: productDraft.merchant ? {
         id: productDraft.merchant.id,

@@ -12,6 +12,7 @@ import { db } from './db.js'
  */
 export async function verifyShopifyRequest(req, res, next) {
   try {
+    const prisma = await db.getClient()
     // Get the authorization header
     const authHeader = req.headers.authorization
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -48,7 +49,7 @@ export async function verifyShopifyRequest(req, res, next) {
     // Find or create merchant in database
     let merchant
     try {
-      merchant = await db.client.merchant.findFirst({
+      merchant = await prisma.merchant.findFirst({
         where: { 
           OR: [
             { shopDomain: shopDomain },
@@ -59,7 +60,7 @@ export async function verifyShopifyRequest(req, res, next) {
 
       if (!merchant) {
         // Create new merchant if not exists
-        merchant = await db.client.merchant.create({
+        merchant = await prisma.merchant.create({
           data: {
             name: shopDomain,
             shopDomain: `${shopDomain}.myshopify.com`,
@@ -73,7 +74,7 @@ export async function verifyShopifyRequest(req, res, next) {
         console.log(`Created new merchant: ${merchant.name} (${merchant.shopDomain})`)
       } else {
         // Update last access time
-        await db.client.merchant.update({
+        await prisma.merchant.update({
           where: { id: merchant.id },
           data: { updatedAt: new Date() }
         })
@@ -116,17 +117,25 @@ export async function devBypassAuth(req, res, next) {
   }
 
   try {
+    let prisma = null
+    try {
+      prisma = await db.getClient()
+    } catch (connectionError) {
+      console.warn('Database connection unavailable for devBypassAuth, will use mock merchant if needed:', connectionError.message)
+    }
     // Try to use database if available
     let merchant
     try {
       // Use the Test Shop merchant that has our real data
-      merchant = await db.client.merchant.findFirst({
-        where: { email: 'test@example.com' }
-      })
+      if (prisma) {
+        merchant = await prisma.merchant.findFirst({
+          where: { email: 'test@example.com' }
+        })
+      }
 
-      if (!merchant) {
+      if (!merchant && prisma) {
         // Fallback to creating development merchant
-        merchant = await db.client.merchant.create({
+        merchant = await prisma.merchant.create({
           data: {
             name: 'Development Test Store',
             shopDomain: 'dev-test.myshopify.com',
@@ -142,6 +151,20 @@ export async function devBypassAuth(req, res, next) {
     } catch (dbError) {
       console.warn('Database unavailable, using mock merchant for development:', dbError.message)
       // Use mock merchant when database is unavailable
+      merchant = {
+        id: 'dev-merchant-123',
+        name: 'Development Test Store',
+        shopDomain: 'dev-test.myshopify.com', 
+        email: 'dev-test@shopify.com',
+        status: 'active',
+        currency: 'USD',
+        plan: 'basic',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }
+    }
+
+    if (!merchant) {
       merchant = {
         id: 'dev-merchant-123',
         name: 'Development Test Store',

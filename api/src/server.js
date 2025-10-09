@@ -20,6 +20,26 @@ const __dirname = path.dirname(__filename)
 const app = express()
 const PORT = process.env.API_PORT || 3003
 
+const allowedOrigins = new Set([
+  process.env.FRONTEND_URL || 'http://localhost:5173',
+  'http://localhost:3003',
+  'https://forgot-yeah-termination-intelligence.trycloudflare.com'
+])
+
+if (process.env.APP_URL) {
+  allowedOrigins.add(process.env.APP_URL)
+}
+
+if (process.env.VERCEL_URL) {
+  allowedOrigins.add(`https://${process.env.VERCEL_URL}`)
+}
+
+if (process.env.STOCKIT_PRODUCTION_URL) {
+  allowedOrigins.add(process.env.STOCKIT_PRODUCTION_URL)
+}
+
+allowedOrigins.add('https://stock-it-ai.vercel.app')
+
 // Session configuration
 app.use(session({
   secret: process.env.SESSION_SECRET || 'development_session_secret',
@@ -44,12 +64,17 @@ app.use(helmet({
   }
 }))
 app.use(cors({
-  origin: [
-    process.env.FRONTEND_URL || 'http://localhost:5173',
-    'http://localhost:3003', // Allow API server to serve React app
-    'https://forgot-yeah-termination-intelligence.trycloudflare.com' // Allow Cloudflare tunnel
-  ],
-  credentials: true
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.has(origin)) {
+      return callback(null, true)
+    }
+    console.warn(`⚠️ CORS blocked request from origin: ${origin}`)
+    return callback(new Error('Not allowed by CORS'))
+  },
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  optionsSuccessStatus: 204
 }))
 app.use(morgan('combined'))
 app.use(express.json({ limit: '10mb' }))
