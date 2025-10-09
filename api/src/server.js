@@ -39,6 +39,7 @@ if (process.env.STOCKIT_PRODUCTION_URL) {
 }
 
 allowedOrigins.add('https://stock-it-ai.vercel.app')
+allowedOrigins.add('https://admin.shopify.com')
 
 // Session configuration
 app.use(session({

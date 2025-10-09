@@ -12,10 +12,21 @@ import { db } from './db.js'
  */
 export async function verifyShopifyRequest(req, res, next) {
   try {
+    // Allow CORS preflight requests to pass through without authentication
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(204)
+    }
+
+    const { method, originalUrl, headers } = req
+    const origin = headers.origin
+    const hasAuthHeader = !!headers.authorization
+    console.log(`🔐 verifyShopifyRequest -> ${method} ${originalUrl} | origin: ${origin || 'n/a'} | auth header: ${hasAuthHeader ? 'present' : 'missing'}`)
+
     const prisma = await db.getClient()
     // Get the authorization header
     const authHeader = req.headers.authorization
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.warn(`🔐 Auth rejected: invalid header for ${method} ${originalUrl}`)
       return res.status(401).json({
         success: false,
         error: 'Missing or invalid authorization header',
@@ -29,6 +40,7 @@ export async function verifyShopifyRequest(req, res, next) {
     // Validate the session token
     const payload = await validateSessionToken(sessionToken)
     if (!payload) {
+      console.warn(`🔐 Auth rejected: token validation failed for ${method} ${originalUrl}`)
       return res.status(401).json({
         success: false,
         error: 'Invalid or expired session token',
@@ -39,12 +51,15 @@ export async function verifyShopifyRequest(req, res, next) {
     // Extract shop domain from token
     const shopDomain = await getShopFromToken(sessionToken)
     if (!shopDomain) {
+      console.warn(`🔐 Auth rejected: shop extraction failed for ${method} ${originalUrl}`)
       return res.status(401).json({
         success: false,
         error: 'Cannot extract shop domain from token',
         code: 'INVALID_SHOP'
       })
     }
+
+    console.log(`🔐 Auth token payload shop: ${shopDomain}`)
 
     // Find or create merchant in database
     let merchant
@@ -87,6 +102,17 @@ export async function verifyShopifyRequest(req, res, next) {
         code: 'DB_ERROR'
       })
     }
+
+    if (!merchant) {
+      console.warn(`🔐 Auth rejected: merchant not found for shop ${shopDomain}`)
+      return res.status(401).json({
+        success: false,
+        error: 'Merchant authentication required',
+        code: 'MERCHANT_NOT_FOUND'
+      })
+    }
+
+    console.log(`🔐 Auth success for merchant ${merchant.id} (${merchant.shopDomain}) on ${method} ${originalUrl}`)
 
     // Add merchant and token info to request
     req.merchant = merchant
