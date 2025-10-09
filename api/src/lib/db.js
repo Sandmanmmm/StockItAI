@@ -105,18 +105,20 @@ async function initializePrisma() {
         return prisma
       }
       
-      // Quick health check - if it fails, we'll reconnect
+      // CRITICAL: Always health check reused clients
+      // Serverless functions may reuse memory but engine connections die
       try {
-        await prisma.$queryRaw`SELECT 1 as healthcheck`
+        // Use raw client for health check to avoid retry wrapper interference
+        await rawPrisma.$queryRaw`SELECT 1 as healthcheck`
+        console.log(`✅ Reused client health check passed`)
         return prisma // Client is healthy!
       } catch (error) {
         console.warn(`⚠️ Existing client health check failed:`, error.message)
-        // Check if this is a fatal error requiring reconnect
-        if (isFatalPrismaError(error)) {
-          await forceDisconnect()
-        } else {
-          prisma = null // Force recreation for non-fatal errors too
-        }
+        // ANY failure on reused client = force reconnect
+        // Don't trust a zombie connection
+        console.log(`🔄 Forcing full reconnect due to failed health check`)
+        await forceDisconnect()
+        // Fall through to create new client
       }
     }
     
