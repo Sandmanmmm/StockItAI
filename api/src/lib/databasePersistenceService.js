@@ -58,16 +58,22 @@ export class DatabasePersistenceService {
           console.warn(`⚠️ WARNING: No line items found in extracted data!`)
         }
         
-        // Start database transaction with extended timeout for large POs
-        const result = await prisma.$transaction(async (tx) => {
-        
-        // 1. Find or create supplier
+        // ⚡ CRITICAL OPTIMIZATION: Find/create supplier BEFORE transaction starts
+        // This avoids expensive fuzzy matching (50+ seconds) inside the 8-second transaction timeout
+        console.log(`🔍 [PRE-TRANSACTION] Finding or creating supplier...`)
+        const preTransactionStart = Date.now()
         const supplier = await this.findOrCreateSupplier(
-          tx, 
+          prisma, // Use regular client, not transaction
           aiResult.extractedData?.vendor?.name || aiResult.extractedData?.supplierName,
           aiResult.extractedData?.vendor,
           merchantId
         )
+        console.log(`✅ [PRE-TRANSACTION] Supplier resolved in ${Date.now() - preTransactionStart}ms`)
+        
+        // Start database transaction - now only fast writes, no expensive queries
+        const result = await prisma.$transaction(async (tx) => {
+        
+        // Supplier already resolved above - just use the result
         
         // 2. Update existing purchase order or create new one
         console.log(`🔍 Database save mode check:`)
@@ -200,14 +206,22 @@ export class DatabasePersistenceService {
   /**
    * Find existing supplier or create new one with fuzzy matching
    */
-  async findOrCreateSupplier(tx, supplierName, vendorData, merchantId) {
+  /**
+   * Find existing supplier or create new one
+   * @param {Object} client - Prisma client OR transaction client
+   * @param {string} supplierName - Supplier name
+   * @param {Object} vendorData - Vendor data from AI extraction
+   * @param {string} merchantId - Merchant ID
+   * @returns {Promise<Object|null>} Supplier record or null
+   */
+  async findOrCreateSupplier(client, supplierName, vendorData, merchantId) {
     if (!supplierName) return null
     
     try {
       console.log(`🔍 Finding or creating supplier: ${supplierName}`)
       
       // Try exact match first (case-insensitive)
-      let supplier = await tx.supplier.findFirst({
+      let supplier = await client.supplier.findFirst({
         where: {
           merchantId,
           name: {
@@ -221,7 +235,7 @@ export class DatabasePersistenceService {
         console.log(`✅ Found exact match supplier: ${supplier.name} (${supplier.id})`)
         
         // Update existing supplier PO count and info
-        supplier = await tx.supplier.update({
+        supplier = await client.supplier.update({
           where: { id: supplier.id },
           data: {
             totalPOs: { increment: 1 },
@@ -264,7 +278,7 @@ export class DatabasePersistenceService {
         console.log(`🎯 Found fuzzy match: ${bestMatch.supplier.name} (score: ${bestMatch.matchScore})`)
         
         // Update the matched supplier
-        supplier = await tx.supplier.update({
+        supplier = await client.supplier.update({
           where: { id: bestMatch.supplier.id },
           data: {
             totalPOs: { increment: 1 },
@@ -283,7 +297,7 @@ export class DatabasePersistenceService {
       
       // No match found - create new supplier
       console.log(`📝 No match found, creating new supplier: ${supplierName}`)
-      supplier = await tx.supplier.create({
+      supplier = await client.supplier.create({
         data: {
           name: supplierName,
           merchantId,
