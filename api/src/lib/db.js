@@ -180,13 +180,17 @@ async function initializePrisma() {
             throw new Error('Client was disconnected before health check could run')
           }
           
-          // CRITICAL: Use real model query, not raw SQL
-          // $queryRaw uses different engine path than model queries
-          // Health check must match actual usage patterns
-          await rawPrisma.session.findFirst({ 
-            where: { id: 'health_check_non_existent' },
-            select: { id: true }
-          })
+          // CRITICAL FIX: Wait for warmup before health check
+          // Health check must use same warmup state as actual queries
+          if (!warmupComplete && warmupPromise) {
+            console.log(`⏳ [HEALTH CHECK] Waiting for warmup to complete...`)
+            await warmupPromise
+          }
+          
+          // Use simple query that tests engine directly
+          // $queryRaw bypasses extension but tests the same engine path
+          await rawPrisma.$queryRaw`SELECT 1 as health`
+          
           console.log(`✅ Reusing existing Prisma client (version ${PRISMA_CLIENT_VERSION})`)
           console.log(`✅ Reused client health check passed`)
           healthCheckPromise = null // Clear lock
@@ -341,7 +345,9 @@ async function initializePrisma() {
                   }
                   
                   // Add retry logic at extension level for non-transaction operations
-                  const maxRetries = 3
+                  // Reduced to 2 retries to fit within serverless 10s timeout
+                  // Total retry time: 500ms + 1000ms = 1.5s max
+                  const maxRetries = 2
                   let lastError
                   
                   for (let attempt = 1; attempt <= maxRetries; attempt++) {
