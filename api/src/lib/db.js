@@ -299,59 +299,68 @@ async function initializePrisma() {
           // Wait for warmup to complete before continuing
           await warmupPromise
 
-          // CRITICAL: Add Prisma middleware to intercept ALL queries and ensure warmup
-          // This catches operations that bypass the proxy wrapper
-          rawPrisma.$use(async (params, next) => {
-            // Ensure engine is warmed up before EVERY operation
-            if (!warmupComplete) {
-              if (warmupPromise) {
-                console.log(`⏳ [MIDDLEWARE] Waiting for warmup before ${params.model}.${params.action}...`)
-                await warmupPromise
-              } else {
-                console.warn(`⚠️ [MIDDLEWARE] Warmup not complete but no promise - proceeding with caution`)
-              }
-            }
-            
-            // Add retry logic at middleware level for extra safety
-            const maxRetries = 3
-            let lastError
-            
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
-              try {
-                return await next(params)
-              } catch (error) {
-                lastError = error
-                const errorMessage = error?.message || ''
-                
-                // Check for engine warmup errors
-                if (errorMessage.includes('Engine is not yet connected') || 
-                    errorMessage.includes('Response from the Engine was empty')) {
-                  
-                  if (attempt < maxRetries) {
-                    const delay = 500 * attempt
-                    console.warn(
-                      `⚠️ [MIDDLEWARE] ${params.model}.${params.action} attempt ${attempt}/${maxRetries} ` +
-                      `failed with engine error. Retrying in ${delay}ms...`
-                    )
-                    await new Promise(resolve => setTimeout(resolve, delay))
-                    continue
+          // CRITICAL: Use Prisma Client Extensions (v5+) to intercept ALL queries
+          // This ensures warmup is complete before any operation
+          // Note: $use() middleware was deprecated in Prisma 5.x, replaced with $extends()
+          const extendedPrisma = rawPrisma.$extends({
+            name: 'warmupGuard',
+            query: {
+              $allModels: {
+                async $allOperations({ model, operation, args, query }) {
+                  // Ensure engine is warmed up before EVERY operation
+                  if (!warmupComplete) {
+                    if (warmupPromise) {
+                      console.log(`⏳ [EXTENSION] Waiting for warmup before ${model}.${operation}...`)
+                      await warmupPromise
+                    } else {
+                      console.warn(`⚠️ [EXTENSION] Warmup not complete but no promise - proceeding with caution`)
+                    }
                   }
                   
-                  console.error(
-                    `❌ [MIDDLEWARE] ${params.model}.${params.action} failed after ${maxRetries} attempts`
-                  )
+                  // Add retry logic at extension level for extra safety
+                  const maxRetries = 3
+                  let lastError
+                  
+                  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                    try {
+                      return await query(args)
+                    } catch (error) {
+                      lastError = error
+                      const errorMessage = error?.message || ''
+                      
+                      // Check for engine warmup errors
+                      if (errorMessage.includes('Engine is not yet connected') || 
+                          errorMessage.includes('Response from the Engine was empty')) {
+                        
+                        if (attempt < maxRetries) {
+                          const delay = 500 * attempt
+                          console.warn(
+                            `⚠️ [EXTENSION] ${model}.${operation} attempt ${attempt}/${maxRetries} ` +
+                            `failed with engine error. Retrying in ${delay}ms...`
+                          )
+                          await new Promise(resolve => setTimeout(resolve, delay))
+                          continue
+                        }
+                        
+                        console.error(
+                          `❌ [EXTENSION] ${model}.${operation} failed after ${maxRetries} attempts`
+                        )
+                      }
+                      
+                      throw error
+                    }
+                  }
+                  
+                  throw lastError
                 }
-                
-                throw error
               }
             }
-            
-            throw lastError
           })
           
-          console.log(`✅ Prisma middleware installed - all queries will wait for warmup`)
+          console.log(`✅ Prisma Client Extension installed - all queries will wait for warmup`)
 
-          prisma = createRetryablePrismaClient(rawPrisma)
+          // Use the extended client instead of raw client for the proxy wrapper
+          prisma = createRetryablePrismaClient(extendedPrisma)
           
           return prisma
         } finally {
