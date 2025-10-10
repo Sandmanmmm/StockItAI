@@ -172,19 +172,20 @@ async function initializePrisma() {
           console.log(`   Connection pool limit: ${connectionLimit}`)
           console.log(`   Connection timeout: ${connectionTimeout}s`)
           
+          // Build DATABASE_URL with connection pool parameters
+          let databaseUrl = process.env.DATABASE_URL
+          if (databaseUrl && !databaseUrl.includes('connection_limit')) {
+            const separator = databaseUrl.includes('?') ? '&' : '?'
+            databaseUrl = `${databaseUrl}${separator}connection_limit=${connectionLimit}&pool_timeout=${connectionTimeout}`
+            console.log(`   📊 Applied connection pool settings to URL`)
+          }
+          
           rawPrisma = new PrismaClient({
             log: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
             errorFormat: 'pretty',
             datasources: {
               db: {
-                url: process.env.DATABASE_URL
-              }
-            },
-            // Limit connections per serverless instance to prevent pool exhaustion
-            __internal: {
-              engine: {
-                connection_limit: connectionLimit,
-                pool_timeout: connectionTimeout
+                url: databaseUrl
               }
             }
           })
