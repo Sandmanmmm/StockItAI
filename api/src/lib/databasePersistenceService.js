@@ -70,17 +70,59 @@ export class DatabasePersistenceService {
         )
         console.log(`✅ [PRE-TRANSACTION] Supplier resolved in ${Date.now() - preTransactionStart}ms`)
         
-        // Handle PO number conflicts by removing the number from extracted data
-        let skipPoNumberUpdate = false
-        if (options.poNumberConflict) {
-          console.log(`⚠️ Retrying transaction after PO number conflict: ${options.poNumberConflict}`)
-          console.log(`   Will skip updating PO number to avoid conflict`)
-          skipPoNumberUpdate = true
+        // OPTIMIZATION: Pre-check for available PO number (Solution 3)
+        // This reduces transaction retries by finding available suffix beforehand
+        // Note: Small race condition window still exists, handled by optimistic fallback
+        let suggestedPoNumber = null
+        const originalPoNumber = aiResult.extractedData?.poNumber || aiResult.extractedData?.number
+        
+        if (originalPoNumber) {
+          // Get ALL existing POs with this base number in ONE query
+          const existingPOs = await prisma.purchaseOrder.findMany({
+            where: {
+              merchantId: merchantId,
+              number: {
+                startsWith: originalPoNumber  // Finds: 3541, 3541-1, 3541-2, etc.
+              }
+            },
+            select: { number: true }
+          })
           
-          // Remove PO number from extracted data so updatePurchaseOrder doesn't try to update it
-          if (aiResult.extractedData) {
-            delete aiResult.extractedData.poNumber
-            delete aiResult.extractedData.number
+          if (existingPOs.length > 0) {
+            console.log(`   Found ${existingPOs.length} existing POs with base number ${originalPoNumber}`)
+            
+            // Parse all existing suffixes
+            const existingSuffixes = new Set()
+            existingPOs.forEach(po => {
+              if (po.number === originalPoNumber) {
+                existingSuffixes.add(0)  // Base number exists (no suffix)
+              } else if (po.number.startsWith(`${originalPoNumber}-`)) {
+                const suffixPart = po.number.substring(originalPoNumber.length + 1)
+                // Only consider numeric suffixes
+                if (/^\d+$/.test(suffixPart)) {
+                  existingSuffixes.add(parseInt(suffixPart, 10))
+                }
+              }
+            })
+            
+            // Find first available suffix (lowest number)
+            let suffix = 1
+            while (existingSuffixes.has(suffix) && suffix <= 100) {
+              suffix++
+            }
+            
+            if (suffix <= 100) {
+              suggestedPoNumber = `${originalPoNumber}-${suffix}`
+              console.log(`✅ Pre-check suggests available PO number: ${suggestedPoNumber}`)
+              console.log(`   (Existing suffixes: ${Array.from(existingSuffixes).sort((a, b) => a - b).join(', ')})`)
+              
+              // Update AI result with suggested number
+              // Optimistic fallback will handle if this conflicts due to race
+              if (aiResult.extractedData) {
+                aiResult.extractedData.poNumber = suggestedPoNumber
+                aiResult.extractedData.number = suggestedPoNumber
+              }
+            }
           }
         }
         
@@ -93,7 +135,6 @@ export class DatabasePersistenceService {
         console.log(`🔍 Database save mode check:`)
         console.log(`   options.purchaseOrderId:`, options.purchaseOrderId)
         console.log(`   Will ${options.purchaseOrderId ? 'UPDATE' : 'CREATE'} purchase order`)
-        console.log(`   Skip PO number update: ${skipPoNumberUpdate}`)
         
         const purchaseOrder = options.purchaseOrderId 
           ? await this.updatePurchaseOrder(
@@ -194,19 +235,6 @@ export class DatabasePersistenceService {
         
       } catch (error) {
         lastError = error
-        
-        // Special handling for PO number conflicts
-        if (error.code === 'PO_NUMBER_CONFLICT') {
-          console.log(`⚠️ PO number conflict detected: ${error.conflictingNumber}`)
-          console.log(`   Transaction was aborted by PostgreSQL`)
-          console.log(`   Retrying entire operation without changing PO number...`)
-          
-          // Retry the ENTIRE transaction without the PO number change
-          return await this.persistAIResults(aiResult, merchantId, fileName, {
-            ...options,
-            poNumberConflict: error.conflictingNumber // Signal to skip PO number update
-          })
-        }
         
         console.error(`❌ Database persistence failed (attempt ${attempt}/${maxRetries}):`, error.message)
         
@@ -433,49 +461,86 @@ export class DatabasePersistenceService {
       return purchaseOrder
       
     } catch (error) {
-      // Handle unique constraint violation (duplicate PO number)
+      // OPTIMISTIC LOCKING FALLBACK (Solution 2)
+      // Handle unique constraint violation with automatic suffix retry
       if (error.code === 'P2002') {
-        console.log(`⚠️ PO number ${extractedPoNumber} already exists, finding and updating instead...`)
+        console.log(`⚠️ PO number ${extractedPoNumber} conflicts (pre-check race condition or concurrent upload)`)
+        console.log(`   Using optimistic locking fallback to find next available suffix...`)
         
-        // Find the existing PO
-        const existingPO = await tx.purchaseOrder.findFirst({
-          where: {
+        // Try incrementing suffixes until we find one that works
+        const basePoNumber = extractedPoNumber
+        let suffix = 1
+        let attempts = 0
+        const maxAttempts = 100
+        
+        while (attempts < maxAttempts) {
+          const tryNumber = `${basePoNumber}-${suffix}`
+          
+          try {
+            console.log(`   Attempting to create with suffix: ${tryNumber}`)
+            
+            const purchaseOrder = await tx.purchaseOrder.create({
+              data: {
+                number: tryNumber,
+                supplierName: extractedData.vendor?.name || extractedData.supplierName || 'Unknown',
+                orderDate: parseDate(extractedData.orderDate || extractedData.date),
+                dueDate: parseDate(extractedData.dueDate || extractedData.deliveryDate),
+                totalAmount: totalAmount,
+                currency: extractedData.currency || 'USD',
+                status: status,
+                confidence: overallConfidence / 100,
+                rawData: extractedData,
+                processingNotes: aiResult.processingNotes || (aiResult.model ? `Processed by ${aiResult.model}` : 'Processing in progress...'),
+                fileName: fileName,
+                fileSize: options.fileSize || null,
+                fileUrl: options.fileUrl || null,
+                merchantId: merchantId,
+                supplierId: supplierId,
+                jobStatus: 'completed'
+              }
+            })
+            
+            console.log(`✅ Created purchase order with suffix: ${purchaseOrder.number}`)
+            return purchaseOrder
+            
+          } catch (retryError) {
+            if (retryError.code === 'P2002') {
+              // This suffix is also taken, try next
+              suffix++
+              attempts++
+              console.log(`   Conflict on ${tryNumber}, trying next suffix...`)
+              continue
+            }
+            // Other error - re-throw
+            throw retryError
+          }
+        }
+        
+        // If we exhausted all suffixes, use timestamp as final fallback
+        console.error(`⚠️ Exhausted ${maxAttempts} suffix attempts, using timestamp fallback`)
+        const timestampNumber = `${basePoNumber}-${Date.now()}`
+        const purchaseOrder = await tx.purchaseOrder.create({
+          data: {
+            number: timestampNumber,
+            supplierName: extractedData.vendor?.name || extractedData.supplierName || 'Unknown',
+            orderDate: parseDate(extractedData.orderDate || extractedData.date),
+            dueDate: parseDate(extractedData.dueDate || extractedData.deliveryDate),
+            totalAmount: totalAmount,
+            currency: extractedData.currency || 'USD',
+            status: status,
+            confidence: overallConfidence / 100,
+            rawData: extractedData,
+            processingNotes: aiResult.processingNotes || (aiResult.model ? `Processed by ${aiResult.model}` : 'Processing in progress...'),
+            fileName: fileName,
+            fileSize: options.fileSize || null,
+            fileUrl: options.fileUrl || null,
             merchantId: merchantId,
-            number: extractedPoNumber
+            supplierId: supplierId,
+            jobStatus: 'completed'
           }
         })
-        
-        if (existingPO) {
-          console.log(`✅ Found existing PO ${existingPO.id}, updating with new AI data...`)
-          // Update the existing PO instead
-          return await this.updatePurchaseOrder(tx, existingPO.id, aiResult, merchantId, fileName, supplierId, options)
-        } else {
-          // Shouldn't happen, but fallback to unique number
-          console.error(`❌ Unique constraint failed but couldn't find existing PO, generating unique number...`)
-          const uniqueNumber = `${extractedPoNumber}-${Date.now()}`
-          const purchaseOrder = await tx.purchaseOrder.create({
-            data: {
-              number: uniqueNumber,
-              supplierName: extractedData.vendor?.name || extractedData.supplierName || 'Unknown',
-              orderDate: parseDate(extractedData.orderDate || extractedData.date),
-              dueDate: parseDate(extractedData.dueDate || extractedData.deliveryDate),
-              totalAmount: totalAmount,
-              currency: extractedData.currency || 'USD',
-              status: status,
-              confidence: overallConfidence / 100,
-              rawData: extractedData,
-              processingNotes: aiResult.processingNotes || (aiResult.model ? `Processed by ${aiResult.model}` : 'Processing in progress...'),
-              fileName: fileName,
-              fileSize: options.fileSize || null,
-              fileUrl: options.fileUrl || null,
-              merchantId: merchantId,
-              supplierId: supplierId,
-              jobStatus: 'completed'
-            }
-          })
-          console.log(`📋 Created purchase order with unique number: ${purchaseOrder.number}`)
-          return purchaseOrder
-        }
+        console.log(`📋 Created purchase order with timestamp: ${purchaseOrder.number}`)
+        return purchaseOrder
       }
       // Re-throw other errors
       throw error
@@ -582,18 +647,54 @@ export class DatabasePersistenceService {
       return purchaseOrder
       
     } catch (updateError) {
-      // Handle unique constraint violation (P2002) - conflicting PO number
-      // IMPORTANT: P2002 aborts the transaction, so we need to throw and let
-      // the outer transaction handler retry the ENTIRE transaction without the number
+      // OPTIMISTIC LOCKING FALLBACK (Solution 2) - Same as CREATE scenario
+      // Handle unique constraint violation with automatic suffix retry
       if (updateError.code === 'P2002') {
-        console.log(`⚠️ PO number ${updateData.number} conflicts with existing PO`)
-        console.log(`   ⚠️ Transaction aborted by PostgreSQL - need to retry entire operation`)
+        console.log(`⚠️ PO number ${updateData.number} conflicts with existing PO (pre-check race or concurrent update)`)
+        console.log(`   Using optimistic locking fallback to find next available suffix...`)
         
-        // Throw a special error that tells the caller to retry without number change
-        const error = new Error(`PO_NUMBER_CONFLICT: ${updateData.number}`)
-        error.code = 'PO_NUMBER_CONFLICT'
-        error.conflictingNumber = updateData.number
-        throw error
+        // Try incrementing suffixes until we find one that works
+        const basePoNumber = updateData.number
+        let suffix = 1
+        let attempts = 0
+        const maxAttempts = 100
+        
+        while (attempts < maxAttempts) {
+          const tryNumber = `${basePoNumber}-${suffix}`
+          
+          try {
+            console.log(`   Attempting to update with suffix: ${tryNumber}`)
+            
+            const purchaseOrder = await tx.purchaseOrder.update({
+              where: { id: purchaseOrderId },
+              data: { ...updateData, number: tryNumber }
+            })
+            
+            console.log(`✅ Updated purchase order with suffix: ${purchaseOrder.number}`)
+            return purchaseOrder
+            
+          } catch (retryError) {
+            if (retryError.code === 'P2002') {
+              // This suffix is also taken, try next
+              suffix++
+              attempts++
+              console.log(`   Conflict on ${tryNumber}, trying next suffix...`)
+              continue
+            }
+            // Other error - re-throw
+            throw retryError
+          }
+        }
+        
+        // If we exhausted all suffixes, use timestamp as final fallback
+        console.error(`⚠️ Exhausted ${maxAttempts} suffix attempts, using timestamp fallback`)
+        const timestampNumber = `${basePoNumber}-${Date.now()}`
+        const purchaseOrder = await tx.purchaseOrder.update({
+          where: { id: purchaseOrderId },
+          data: { ...updateData, number: timestampNumber }
+        })
+        console.log(`📋 Updated purchase order with timestamp: ${purchaseOrder.number}`)
+        return purchaseOrder
       }
       
       // Handle PO not found (P2025) - fallback to create
