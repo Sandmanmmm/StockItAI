@@ -1299,8 +1299,12 @@ export class WorkflowOrchestrator {
             reviewNotes: reviewNotes
           })
 
-          productDrafts.push(productDraft)
-          console.log(`✅ Created product draft: ${productDraft.originalTitle} (ID: ${productDraft.id})`)
+          if (productDraft) {
+            productDrafts.push(productDraft)
+            console.log(`✅ Created product draft: ${productDraft.originalTitle} (ID: ${productDraft.id})`)
+          } else {
+            console.error(`❌ Product draft creation returned null for item ${index}`)
+          }
           
         } catch (itemError) {
           console.error(`❌ Failed to create product draft for item ${index}:`, itemError)
