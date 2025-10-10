@@ -8,6 +8,10 @@
 import { db } from './src/lib/db.js'
 import { storageService } from './src/lib/storageService.js'
 import { workflowIntegration } from './src/lib/workflowIntegration.js'
+import { processorRegistrationService } from './src/lib/processorRegistrationService.js'
+
+// Track processor initialization state across function invocations
+let processorsInitialized = false
 
 export default async function handler(req, res) {
   const startTime = Date.now()
@@ -127,6 +131,16 @@ export default async function handler(req, res) {
     // Extract purchaseOrderId from upload metadata
     const purchaseOrderId = upload.metadata?.purchaseOrderId
     console.log(`📝 Purchase Order ID from upload metadata: ${purchaseOrderId}`)
+
+    // Initialize queue processors if not already done (required for workflow execution)
+    if (!processorsInitialized) {
+      console.log(`🚀 Initializing queue processors...`)
+      await processorRegistrationService.initializeAllProcessors()
+      processorsInitialized = true
+      console.log(`✅ Queue processors initialized successfully`)
+    } else {
+      console.log(`✅ Queue processors already initialized`)
+    }
 
     // Process the file through workflow integration
     console.log(`🔄 Starting file processing...`)
