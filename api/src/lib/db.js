@@ -523,7 +523,9 @@ export const db = {
       errorFormat: 'pretty'
     })
     prismaVersion = PRISMA_CLIENT_VERSION
-    prisma = createRetryablePrismaClient(rawPrisma)
+    
+    // Phase 2: Use extension directly instead of wrapper
+    prisma = createPrismaClientWithExtensions(rawPrisma)
     return prisma
   },
 
@@ -754,8 +756,8 @@ export const db = {
   }
 }
 
-// Export retry utilities for direct use
-export { withPrismaRetry, createRetryablePrismaClient }
+// Export retry utilities for direct use (Phase 2: Removed createRetryablePrismaClient)
+export { withPrismaRetry }
 
 const prismaWarmupPromise = initializePrisma().catch(error => {
   console.error('❌ Initial Prisma warmup failed:', error)
