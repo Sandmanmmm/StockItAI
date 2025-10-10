@@ -89,6 +89,7 @@ async function processWorkflow(workflow) {
       purchaseOrderId: workflow.purchaseOrderId,
       aiSettings: aiSettings || {},
       buffer: fileBuffer, // Some methods expect 'buffer' instead of 'fileBuffer'
+      existingWorkflowId: workflowId, // Pass existing workflow ID to prevent duplicate creation
       metadata: {
         uploadedBy: 'user',
         source: 'cron-processing',

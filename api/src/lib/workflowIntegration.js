@@ -50,7 +50,17 @@ export class WorkflowIntegrationService {
         }
       }
 
-      const workflowId = await this.orchestrator.startWorkflow(workflowData)
+      // Check if workflow already exists (e.g., from cron job)
+      let workflowId
+      if (uploadData.existingWorkflowId) {
+        console.log(`🔄 Using existing workflow ID: ${uploadData.existingWorkflowId}`)
+        workflowId = uploadData.existingWorkflowId
+        // Just schedule the AI parsing stage without creating a new workflow
+        await this.orchestrator.scheduleNextStage(workflowId, 'ai_parsing', workflowData)
+      } else {
+        console.log(`🎬 Creating new workflow for upload ${uploadData.uploadId}`)
+        workflowId = await this.orchestrator.startWorkflow(workflowData)
+      }
 
       // Update upload record with workflow ID
       await this.updateUploadWithWorkflow(uploadData.uploadId, workflowId)

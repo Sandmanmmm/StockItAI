@@ -783,8 +783,8 @@ export class WorkflowOrchestrator {
         throw new Error('AI parsing returned no extracted data')
       }
       
-      // Check confidence - it might be at aiResult.confidence or aiResult.confidence.overall
-      const confidence = aiResult.confidence?.overall || aiResult.confidence
+      // Check confidence - use normalized (0-1) for calculations, overall (0-100) for display
+      const confidence = aiResult.confidence?.normalized || aiResult.confidence?.overall / 100 || aiResult.confidence || 0
       if (confidence === undefined || confidence === null) {
         console.error('❌ AI parsing returned no confidence score')
         throw new Error('AI parsing returned no confidence score')
@@ -792,7 +792,7 @@ export class WorkflowOrchestrator {
       
       console.log('🎯 AI parsing completed successfully')
       console.log('   Model:', aiResult.model)
-      console.log('   Confidence:', `${((confidence || 0) * 100).toFixed(1)}%`)
+      console.log('   Confidence:', `${aiResult.confidence?.overall || 0}%`)
       
       job.progress(90)
       
@@ -1086,26 +1086,39 @@ export class WorkflowOrchestrator {
           }
 
           // Find a session for this merchant (required by our schema)
-          let session = await prisma.session.findFirst({
-            where: { merchantId: merchantId }
-          });
+          // Wrap in retry logic to handle engine warmup delays
+          let session
+          try {
+            session = await prismaOperation(
+              (prisma) => prisma.session.findFirst({
+                where: { merchantId: merchantId }
+              }),
+              `Find session for merchant ${merchantId}`
+            )
+          } catch (error) {
+            console.warn(`⚠️ Could not find session for merchant ${merchantId}:`, error.message)
+            session = null
+          }
 
           if (!session) {
             console.warn(`⚠️ No session found for merchant ${merchantId}, creating temporary session`)
             try {
-              session = await prisma.session.create({
-                data: {
-                  shop: `temp-${merchantId}-${Date.now()}`,
-                  state: 'temporary',
-                  isOnline: false,
-                  accessToken: 'temp-token-for-processing',
-                  merchantId: merchantId
-                }
-              })
+              session = await prismaOperation(
+                (prisma) => prisma.session.create({
+                  data: {
+                    shop: `temp-${merchantId}-${Date.now()}`,
+                    state: 'temporary',
+                    isOnline: false,
+                    accessToken: 'temp-token-for-processing',
+                    merchantId: merchantId
+                  }
+                }),
+                `Create temporary session for merchant ${merchantId}`
+              )
               console.log(`✅ Created temporary session: ${session.id}`)
-            } catch (sessionError) {
-              console.error(`❌ Failed to create temporary session:`, sessionError)
-              throw new Error(`No session found for merchant ${merchantId} and failed to create temporary session: ${sessionError.message}`)
+            } catch (createError) {
+              console.error(`❌ Failed to create temporary session:`, createError.message)
+              throw new Error(`Cannot create product draft without valid session`)
             }
           }
 

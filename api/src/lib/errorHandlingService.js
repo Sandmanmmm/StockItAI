@@ -81,14 +81,20 @@ export class ErrorHandlingService {
   async handleAIParsingResult(workflowId, aiResult, confidenceThreshold = 0.8) {
     try {
       // Handle confidence as either object {overall, normalized} or legacy single value
+      // Extract normalized (0-1) value for calculations
       const confidence = typeof aiResult.confidence === 'object' 
         ? aiResult.confidence.normalized || 0
         : aiResult.confidence || 0
       const extractedData = aiResult.extractedData || aiResult
       
-      console.log(`🤖 AI parsing completed for workflow ${workflowId} - Confidence: ${(confidence * 100).toFixed(1)}%`)
+      // For display, use the overall percentage directly (already 0-100)
+      const displayConfidence = typeof aiResult.confidence === 'object'
+        ? aiResult.confidence.overall || 0
+        : (confidence * 100).toFixed(1)
       
-      // Check confidence threshold
+      console.log(`🤖 AI parsing completed for workflow ${workflowId} - Confidence: ${displayConfidence}%`)
+      
+      // Check confidence threshold (use normalized 0-1 value)
       if (confidence < CONFIDENCE_THRESHOLDS.REJECT) {
         return await this.handleLowConfidence(workflowId, confidence, 'critical', extractedData)
       } else if (confidence < confidenceThreshold) {

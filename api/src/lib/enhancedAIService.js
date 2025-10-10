@@ -194,7 +194,7 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
               }
             ],
             max_tokens: 16000, // Increased to handle large POs with 50+ line items
-            temperature: 0.1
+            temperature: 0 // Set to 0 for deterministic extraction (same image → same result)
           })
           
           console.log('⏳ Waiting for vision API response (200s timeout)...')
@@ -234,7 +234,7 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
             }
           ],
           max_tokens: 16000, // Increased to handle large POs with 50+ line items
-          temperature: 0.1
+          temperature: 0 // Set to 0 for deterministic extraction
         })
         
       } else {
@@ -580,7 +580,7 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
         }
       ],
       max_tokens: 16000, // Increased to handle large POs with 50+ line items
-      temperature: 0.3 // Slightly higher for retry
+      temperature: 0 // Changed from 0.3 - we want accuracy, not "different perspective"
     })
 
     // Process result similar to main parsing
@@ -635,7 +635,7 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
             }
           ],
           max_tokens: 16000, // Increased to handle large POs with 50+ line items
-          temperature: 0.1
+          temperature: 0 // Set to 0 for deterministic extraction
         })
         
         const duration = Date.now() - startTime
@@ -743,7 +743,7 @@ Document Content (Chunk 1/${chunks.length}):\n${chunks[0]}`
         model: "gpt-4o-mini",
         messages: [{ role: "user", content: firstChunkPrompt }],
         max_tokens: 16000, // Increased to handle large POs with 50+ line items
-        temperature: 0.1
+        temperature: 0 // Set to 0 for deterministic extraction
       })
     } catch (error) {
       console.error('❌ Failed to process first chunk:', error.message)
@@ -791,7 +791,7 @@ Document Content (Chunk ${i + 1}/${chunks.length}):\n${chunks[i]}`
           model: "gpt-4o-mini",
           messages: [{ role: "user", content: chunkPrompt }],
           max_tokens: 16000, // Increased to handle large POs with 50+ line items
-          temperature: 0.1
+          temperature: 0 // Set to 0 for deterministic extraction
         })
         
         const chunkResult = JSON.parse(chunkResponse.choices[0]?.message?.content || '{}')
