@@ -265,6 +265,37 @@ export class WorkflowOrchestrator {
       data
     }
     
+    // Create database workflow record for cron job tracking
+    try {
+      const prisma = await db.getClient()
+      await prisma.workflowExecution.create({
+        data: {
+          workflowId,
+          type: 'purchase_order_processing',
+          status: 'pending', // Cron job looks for 'pending' status
+          currentStage: WORKFLOW_STAGES.AI_PARSING,
+          stagesTotal: 9,
+          stagesCompleted: 0,
+          progressPercent: 0,
+          inputData: {
+            uploadId: data.uploadId,
+            fileName: data.fileName,
+            fileSize: data.fileSize,
+            mimeType: data.mimeType,
+            merchantId: data.merchantId
+          },
+          merchantId: data.merchantId,
+          uploadId: data.uploadId,
+          purchaseOrderId: data.purchaseOrderId,
+          startedAt: new Date()
+        }
+      })
+      console.log(`✅ Database workflow record created for ${workflowId}`)
+    } catch (dbError) {
+      console.error(`⚠️ Failed to create database workflow record:`, dbError.message)
+      // Continue anyway - Redis metadata is primary, database is for cron tracking
+    }
+    
     // Save workflow metadata to Redis
     await this.setWorkflowMetadata(workflowId, workflowMetadata)
     
