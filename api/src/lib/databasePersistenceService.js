@@ -70,15 +70,19 @@ export class DatabasePersistenceService {
         )
         console.log(`✅ [PRE-TRANSACTION] Supplier resolved in ${Date.now() - preTransactionStart}ms`)
         
-        // OPTIMIZATION: Pre-check for available PO number (Solution 3)
-        // This reduces transaction retries by finding available suffix beforehand
-        // Note: Small race condition window still exists, handled by optimistic fallback
-        let suggestedPoNumber = null
+        // Start database transaction - now only fast writes, no expensive queries
+        const result = await prisma.$transaction(async (tx) => {
+        
+        // OPTIMIZATION: Pre-check for available PO number (Solution 3) - INSIDE TRANSACTION
+        // This is inside tx so it benefits from warmup protection and connection stability
+        // Fast query (SELECT with index) so minimal impact on transaction time
         const originalPoNumber = aiResult.extractedData?.poNumber || aiResult.extractedData?.number
         
         if (originalPoNumber) {
+          const preCheckStart = Date.now()
+          
           // Get ALL existing POs with this base number in ONE query
-          const existingPOs = await prisma.purchaseOrder.findMany({
+          const existingPOs = await tx.purchaseOrder.findMany({
             where: {
               merchantId: merchantId,
               number: {
@@ -88,9 +92,9 @@ export class DatabasePersistenceService {
             select: { number: true }
           })
           
+          console.log(`🔍 Pre-check completed in ${Date.now() - preCheckStart}ms (found ${existingPOs.length} existing POs)`)
+          
           if (existingPOs.length > 0) {
-            console.log(`   Found ${existingPOs.length} existing POs with base number ${originalPoNumber}`)
-            
             // Parse all existing suffixes
             const existingSuffixes = new Set()
             existingPOs.forEach(po => {
@@ -112,7 +116,7 @@ export class DatabasePersistenceService {
             }
             
             if (suffix <= 100) {
-              suggestedPoNumber = `${originalPoNumber}-${suffix}`
+              const suggestedPoNumber = `${originalPoNumber}-${suffix}`
               console.log(`✅ Pre-check suggests available PO number: ${suggestedPoNumber}`)
               console.log(`   (Existing suffixes: ${Array.from(existingSuffixes).sort((a, b) => a - b).join(', ')})`)
               
@@ -125,9 +129,6 @@ export class DatabasePersistenceService {
             }
           }
         }
-        
-        // Start database transaction - now only fast writes, no expensive queries
-        const result = await prisma.$transaction(async (tx) => {
         
         // Supplier already resolved above - just use the result
         
