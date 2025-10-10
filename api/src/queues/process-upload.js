@@ -16,10 +16,13 @@ export default async function handler(req, res) {
   console.log(`📦 Queue processing started for upload: ${uploadId}`)
   
   let workflowId = null
+  let prisma
   
   try {
+    prisma = await db.getClient()
+
     // Fetch upload record
-    const upload = await db.client.upload.findUnique({
+    const upload = await prisma.upload.findUnique({
       where: { id: uploadId },
       include: {
         merchant: true
@@ -35,7 +38,7 @@ export default async function handler(req, res) {
 
     // Update workflow status to processing
     if (workflowId) {
-      await db.client.workflowExecution.update({
+      await prisma.workflowExecution.update({
         where: { workflowId },
         data: {
           status: 'processing',
@@ -52,7 +55,7 @@ export default async function handler(req, res) {
 
     // Update progress
     if (workflowId) {
-      await db.client.workflowExecution.update({
+      await prisma.workflowExecution.update({
         where: { workflowId },
         data: {
           currentStage: 'preparing_workflow',
@@ -62,7 +65,7 @@ export default async function handler(req, res) {
     }
 
     // Get merchant AI settings
-    const aiSettings = await db.client.merchantAISettings.findUnique({
+    const aiSettings = await prisma.merchantAISettings.findUnique({
       where: { merchantId }
     })
 
@@ -85,7 +88,7 @@ export default async function handler(req, res) {
 
     // Update progress
     if (workflowId) {
-      await db.client.workflowExecution.update({
+      await prisma.workflowExecution.update({
         where: { workflowId },
         data: {
           currentStage: 'parsing_file',
@@ -103,12 +106,12 @@ export default async function handler(req, res) {
 
     // Update workflow to completed (processUploadedFile should handle this, but double-check)
     if (workflowId) {
-      const workflow = await db.client.workflowExecution.findUnique({
+      const workflow = await prisma.workflowExecution.findUnique({
         where: { workflowId }
       })
       
       if (workflow && workflow.status !== 'completed') {
-        await db.client.workflowExecution.update({
+        await prisma.workflowExecution.update({
           where: { workflowId },
           data: {
             status: 'completed',
@@ -120,7 +123,7 @@ export default async function handler(req, res) {
     }
 
     // Update upload status
-    await db.client.upload.update({
+    await prisma.upload.update({
       where: { id: uploadId },
       data: {
         status: 'processed',
@@ -143,7 +146,7 @@ export default async function handler(req, res) {
 
     // Update workflow status to failed
     if (workflowId) {
-      await db.client.workflowExecution.update({
+      await prisma.workflowExecution.update({
         where: { workflowId },
         data: {
           status: 'failed',
@@ -156,7 +159,7 @@ export default async function handler(req, res) {
     }
 
     // Update upload status to failed
-    await db.client.upload.update({
+    await prisma.upload.update({
       where: { id: uploadId },
       data: {
         status: 'failed',

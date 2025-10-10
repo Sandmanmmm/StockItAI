@@ -24,10 +24,13 @@ async function processWorkflow(workflow) {
   console.log(`⏰ Started at: ${new Date().toISOString()}`)
 
   let workflowId = workflow.workflowId
+  let prisma
 
   try {
+    prisma = await db.getClient()
+
     // Update workflow status to 'processing'
-    await db.client.workflowExecution.update({
+    await prisma.workflowExecution.update({
       where: { workflowId },
       data: { 
         status: 'processing',
@@ -37,7 +40,7 @@ async function processWorkflow(workflow) {
     })
 
     // Get the upload record
-    const upload = await db.client.upload.findUnique({
+    const upload = await prisma.upload.findUnique({
       where: { id: workflow.uploadId },
       include: {
         merchant: true
@@ -57,7 +60,7 @@ async function processWorkflow(workflow) {
     console.log(`✅ File downloaded successfully (${fileBuffer.length} bytes)`)
 
     // Update progress
-    await db.client.workflowExecution.update({
+    await prisma.workflowExecution.update({
       where: { workflowId },
       data: {
         currentStage: 'preparing_workflow',
@@ -66,7 +69,7 @@ async function processWorkflow(workflow) {
     })
 
     // Get merchant AI settings
-    const aiSettings = await db.client.merchantAISettings.findUnique({
+    const aiSettings = await prisma.merchantAISettings.findUnique({
       where: { merchantId: workflow.merchantId }
     })
 
@@ -95,7 +98,7 @@ async function processWorkflow(workflow) {
     }
 
     // Update progress
-    await db.client.workflowExecution.update({
+    await prisma.workflowExecution.update({
       where: { workflowId },
       data: {
         currentStage: 'parsing_file',
@@ -111,13 +114,13 @@ async function processWorkflow(workflow) {
     console.log(`📊 Result:`, JSON.stringify(result, null, 2))
 
     // Double-check workflow status (processUploadedFile should handle this)
-    const finalWorkflow = await db.client.workflowExecution.findUnique({
+    const finalWorkflow = await prisma.workflowExecution.findUnique({
       where: { workflowId }
     })
     
     if (finalWorkflow && finalWorkflow.status !== 'completed') {
       console.log(`⚠️ Workflow not marked complete, updating status...`)
-      await db.client.workflowExecution.update({
+      await prisma.workflowExecution.update({
         where: { workflowId },
         data: {
           status: 'completed',
@@ -128,7 +131,7 @@ async function processWorkflow(workflow) {
     }
 
     // Update upload status
-    await db.client.upload.update({
+    await prisma.upload.update({
       where: { id: workflow.uploadId },
       data: {
         status: 'processed',
@@ -151,7 +154,9 @@ async function processWorkflow(workflow) {
 
     // Mark workflow as failed
     try {
-      await db.client.workflowExecution.update({
+      const prismaClient = prisma ?? (await db.getClient())
+
+      await prismaClient.workflowExecution.update({
         where: { workflowId },
         data: {
           status: 'failed',
@@ -161,7 +166,7 @@ async function processWorkflow(workflow) {
       })
 
       // Mark upload as failed
-      await db.client.upload.update({
+      await prismaClient.upload.update({
         where: { id: workflow.uploadId },
         data: {
           status: 'failed',
@@ -196,9 +201,13 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Unauthorized - Vercel Cron authentication required' })
   }
 
+  let prisma
+
   try {
+    prisma = await db.getClient()
+
     // Find all pending workflows
-    const pendingWorkflows = await db.client.workflowExecution.findMany({
+    const pendingWorkflows = await prisma.workflowExecution.findMany({
       where: {
         status: 'pending'
       },
@@ -265,8 +274,5 @@ export default async function handler(req, res) {
       executionTime: cronExecutionTime,
       timestamp: new Date().toISOString()
     })
-  } finally {
-    // Ensure database connection is properly handled
-    await db.client.$disconnect()
   }
 }

@@ -16,15 +16,6 @@ router.get('/test', (req, res) => {
 // GET /api/purchase-orders - Get purchase orders with filtering and pagination
 router.get('/', async (req, res) => {
   try {
-    // Validate database connection
-    if (!db || !db.client) {
-      console.error('Database client not available')
-      return res.status(500).json({
-        success: false,
-        error: 'Database connection unavailable'
-      })
-    }
-
     // Get merchant from authenticated request (set by verifyShopifyRequest middleware)
     const merchant = req.merchant
     
@@ -74,9 +65,11 @@ router.get('/', async (req, res) => {
     let orders = []
     let total = 0
 
+    const prisma = await db.getClient()
+
     try {
       // Get orders with safe includes
-      orders = await db.client.purchaseOrder.findMany({
+      orders = await prisma.purchaseOrder.findMany({
         where,
         select: {
           id: true,
@@ -131,7 +124,7 @@ router.get('/', async (req, res) => {
       })
 
       // Get total count
-      total = await db.client.purchaseOrder.count({ where })
+  total = await prisma.purchaseOrder.count({ where })
 
     } catch (queryError) {
       console.error('Database query error:', queryError)
@@ -179,7 +172,9 @@ router.get('/:id', async (req, res) => {
       })
     }
 
-    const order = await db.client.purchaseOrder.findFirst({
+  const prisma = await db.getClient()
+
+  const order = await prisma.purchaseOrder.findFirst({
       where: { 
         id: req.params.id,
         merchantId: merchant.id 
@@ -228,7 +223,9 @@ router.post('/', async (req, res) => {
 
     const { lineItems, ...orderData } = req.body
 
-    const order = await db.client.purchaseOrder.create({
+  const prisma = await db.getClient()
+
+  const order = await prisma.purchaseOrder.create({
       data: {
         ...orderData,
         merchantId: merchant.id,
@@ -272,7 +269,9 @@ router.put('/:id', async (req, res) => {
       })
     }
 
-    const order = await db.client.purchaseOrder.updateMany({
+  const prisma = await db.getClient()
+
+  const order = await prisma.purchaseOrder.updateMany({
       where: { 
         id: req.params.id,
         merchantId: merchant.id 
@@ -288,7 +287,7 @@ router.put('/:id', async (req, res) => {
     }
 
     // Fetch updated order
-    const updatedOrder = await db.client.purchaseOrder.findFirst({
+    const updatedOrder = await prisma.purchaseOrder.findFirst({
       where: { 
         id: req.params.id,
         merchantId: merchant.id 
@@ -324,10 +323,11 @@ router.delete('/:id', async (req, res) => {
     }
 
     const poId = req.params.id
+    const prisma = await db.getClient()
 
     // Manually delete related records in the correct order to respect foreign key constraints
     // 1. Delete product images (depends on product drafts)
-    await db.client.productImage.deleteMany({
+    await prisma.productImage.deleteMany({
       where: {
         productDraft: {
           purchaseOrderId: poId
@@ -336,7 +336,7 @@ router.delete('/:id', async (req, res) => {
     })
 
     // 2. Delete product variants (depends on product drafts)
-    await db.client.productVariant.deleteMany({
+    await prisma.productVariant.deleteMany({
       where: {
         productDraft: {
           purchaseOrderId: poId
@@ -345,7 +345,7 @@ router.delete('/:id', async (req, res) => {
     })
 
     // 3. Delete product review history (depends on product drafts)
-    await db.client.productReviewHistory.deleteMany({
+    await prisma.productReviewHistory.deleteMany({
       where: {
         productDraft: {
           purchaseOrderId: poId
@@ -354,14 +354,14 @@ router.delete('/:id', async (req, res) => {
     })
 
     // 4. Delete product drafts
-    await db.client.productDraft.deleteMany({
+    await prisma.productDraft.deleteMany({
       where: {
         purchaseOrderId: poId
       }
     })
 
     // 5. Delete image review product images
-    await db.client.imageReviewProductImage.deleteMany({
+    await prisma.imageReviewProductImage.deleteMany({
       where: {
         product: {
           session: {
@@ -372,7 +372,7 @@ router.delete('/:id', async (req, res) => {
     })
 
     // 6. Delete image review products
-    await db.client.imageReviewProduct.deleteMany({
+    await prisma.imageReviewProduct.deleteMany({
       where: {
         session: {
           purchaseOrderId: poId
@@ -381,28 +381,28 @@ router.delete('/:id', async (req, res) => {
     })
 
     // 7. Delete image review sessions
-    await db.client.imageReviewSession.deleteMany({
+    await prisma.imageReviewSession.deleteMany({
       where: {
         purchaseOrderId: poId
       }
     })
 
     // 8. Delete workflow executions
-    await db.client.workflowExecution.deleteMany({
+    await prisma.workflowExecution.deleteMany({
       where: {
         purchaseOrderId: poId
       }
     })
 
     // 9. Delete PO line items
-    await db.client.pOLineItem.deleteMany({
+    await prisma.pOLineItem.deleteMany({
       where: {
         purchaseOrderId: poId
       }
     })
 
     // 10. Finally, delete the purchase order itself
-    const order = await db.client.purchaseOrder.deleteMany({
+    const order = await prisma.purchaseOrder.deleteMany({
       where: { 
         id: poId,
         merchantId: merchant.id 
@@ -444,7 +444,9 @@ router.post('/:id/deny', async (req, res) => {
     const { reason } = req.body
 
     // Update the purchase order status to denied
-    const updatedOrder = await db.client.purchaseOrder.update({
+    const prisma = await db.getClient()
+
+    const updatedOrder = await prisma.purchaseOrder.update({
       where: { 
         id: req.params.id,
         merchantId: merchant.id 
@@ -504,7 +506,9 @@ router.post('/:id/approve', async (req, res) => {
       if (editedData.processingNotes) updateData.processingNotes = editedData.processingNotes
     }
 
-    const updatedOrder = await db.client.purchaseOrder.update({
+    const prisma = await db.getClient()
+
+    const updatedOrder = await prisma.purchaseOrder.update({
       where: { 
         id: req.params.id,
         merchantId: merchant.id 
@@ -516,7 +520,7 @@ router.post('/:id/approve', async (req, res) => {
 
     // TODO: Trigger Shopify sync workflow here
     // For now, just mark as completed (approved and ready)
-    await db.client.purchaseOrder.update({
+    await prisma.purchaseOrder.update({
       where: { id: req.params.id },
       data: {
         status: 'completed', // Final successful state after approval
@@ -573,7 +577,9 @@ router.post('/:id/edit', async (req, res) => {
     if (editedData.processingNotes) updateData.processingNotes = editedData.processingNotes
     if (editedData.status) updateData.status = editedData.status
 
-    const updatedOrder = await db.client.purchaseOrder.update({
+    const prisma = await db.getClient()
+
+    const updatedOrder = await prisma.purchaseOrder.update({
       where: { 
         id: req.params.id,
         merchantId: merchant.id 
@@ -598,7 +604,7 @@ router.post('/:id/edit', async (req, res) => {
       // In a full implementation, you'd handle create/update/delete operations
       for (const item of editedData.lineItems) {
         if (item.id) {
-          await db.client.pOLineItem.update({
+          await prisma.pOLineItem.update({
             where: { id: item.id },
             data: {
               sku: item.sku,
@@ -639,7 +645,9 @@ router.post('/:id/reject', async (req, res) => {
     const { reason } = req.body
     
     // Update PO status to rejected with reason
-    const updatedPO = await db.client.purchaseOrder.update({
+    const prisma = await db.getClient()
+
+    const updatedPO = await prisma.purchaseOrder.update({
       where: { id },
       data: {
         status: 'rejected',
@@ -674,7 +682,9 @@ router.post('/:id/reprocess', async (req, res) => {
     const { id } = req.params
     
     // Get the PO with upload information
-    const po = await db.client.purchaseOrder.findUnique({
+    const prisma = await db.getClient()
+
+    const po = await prisma.purchaseOrder.findUnique({
       where: { id },
       include: {
         upload: true
@@ -695,7 +705,7 @@ router.post('/:id/reprocess', async (req, res) => {
     // const workflowId = `reprocess_${Date.now()}` // Will be generated by startWorkflow
     
     // Update PO status to processing
-    await db.client.purchaseOrder.update({
+    await prisma.purchaseOrder.update({
       where: { id },
       data: {
         status: 'processing',

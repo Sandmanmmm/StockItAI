@@ -18,13 +18,15 @@ router.get('/', async (req, res) => {
       })
     }
 
-    const settings = await db.client.aISettings.findFirst({
+    const prisma = await db.getClient()
+
+    const settings = await prisma.aISettings.findFirst({
       where: { merchantId: merchant.id }
     })
 
     if (!settings) {
       // Create default settings if none exist
-      const defaultSettings = await db.client.aISettings.create({
+      const defaultSettings = await prisma.aISettings.create({
         data: {
           merchantId: merchant.id
         }
@@ -71,20 +73,22 @@ router.put('/', async (req, res) => {
     }
 
     // Check if settings exist
-    const existingSettings = await db.client.aISettings.findFirst({
+    const prisma = await db.getClient()
+
+    const existingSettings = await prisma.aISettings.findFirst({
       where: { merchantId: merchant.id }
     })
 
     let settings
     if (existingSettings) {
       // Update existing settings
-      settings = await db.client.aISettings.update({
+      settings = await prisma.aISettings.update({
         where: { merchantId: merchant.id },
         data: req.body
       })
     } else {
       // Create new settings
-      settings = await db.client.aISettings.create({
+      settings = await prisma.aISettings.create({
         data: {
           ...req.body,
           merchantId: merchant.id
@@ -117,7 +121,9 @@ router.post('/test', async (req, res) => {
       })
     }
 
-    const settings = await db.client.aISettings.findFirst({
+    const prisma = await db.getClient()
+
+    const settings = await prisma.aISettings.findFirst({
       where: { merchantId: merchant.id }
     })
 

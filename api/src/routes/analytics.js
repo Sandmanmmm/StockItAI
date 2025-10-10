@@ -18,6 +18,8 @@ router.get('/dashboard', async (req, res) => {
       })
     }
 
+    const prisma = await db.getClient()
+
     // Get various stats in parallel
     const [
       totalPOs,
@@ -28,12 +30,12 @@ router.get('/dashboard', async (req, res) => {
       recentOrders
     ] = await Promise.all([
       // Total purchase orders
-      db.client.purchaseOrder.count({
+      prisma.purchaseOrder.count({
         where: { merchantId: merchant.id }
       }),
       
       // Pending purchase orders
-      db.client.purchaseOrder.count({
+      prisma.purchaseOrder.count({
         where: { 
           merchantId: merchant.id,
           status: 'pending'
@@ -41,7 +43,7 @@ router.get('/dashboard', async (req, res) => {
       }),
       
       // Processed today
-      db.client.purchaseOrder.count({
+      prisma.purchaseOrder.count({
         where: {
           merchantId: merchant.id,
           createdAt: {
@@ -51,13 +53,13 @@ router.get('/dashboard', async (req, res) => {
       }),
       
       // Average AI confidence
-      db.client.purchaseOrder.aggregate({
+      prisma.purchaseOrder.aggregate({
         where: { merchantId: merchant.id },
         _avg: { confidence: true }
       }),
       
       // Total active suppliers
-      db.client.supplier.count({
+      prisma.supplier.count({
         where: { 
           merchantId: merchant.id,
           status: 'active'
@@ -65,7 +67,7 @@ router.get('/dashboard', async (req, res) => {
       }),
       
       // Recent orders for activity feed
-      db.client.purchaseOrder.findMany({
+      prisma.purchaseOrder.findMany({
         where: { merchantId: merchant.id },
         include: {
           supplier: {
@@ -119,7 +121,9 @@ router.get('/suppliers', async (req, res) => {
       })
     }
 
-    const suppliers = await db.client.supplier.findMany({
+    const prisma = await db.getClient()
+
+    const suppliers = await prisma.supplier.findMany({
       where: { merchantId: merchant.id },
       include: {
         _count: {
@@ -187,6 +191,8 @@ router.get('/trends', async (req, res) => {
 
     const { period = '7d' } = req.query
     
+  const prisma = await db.getClient()
+
     let startDate
     switch (period) {
       case '24h':
@@ -202,7 +208,7 @@ router.get('/trends', async (req, res) => {
         startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
     }
 
-    const orders = await db.client.purchaseOrder.findMany({
+  const orders = await prisma.purchaseOrder.findMany({
       where: {
         merchantId: merchant.id,
         createdAt: {

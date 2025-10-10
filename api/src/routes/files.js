@@ -13,8 +13,10 @@ router.get('/po/:purchaseOrderId', async (req, res) => {
   try {
     const { purchaseOrderId } = req.params
     
+    const prisma = await db.getClient()
+
     // Get PurchaseOrder record from database
-    const purchaseOrder = await db.client.purchaseOrder.findUnique({
+    const purchaseOrder = await prisma.purchaseOrder.findUnique({
       where: { id: purchaseOrderId }
     })
     
@@ -97,8 +99,10 @@ router.get('/po/:purchaseOrderId/download', async (req, res) => {
   try {
     const { purchaseOrderId } = req.params
     
+    const prisma = await db.getClient()
+
     // Get PurchaseOrder record from database
-    const purchaseOrder = await db.client.purchaseOrder.findUnique({
+    const purchaseOrder = await prisma.purchaseOrder.findUnique({
       where: { id: purchaseOrderId }
     })
     
@@ -181,8 +185,10 @@ router.get('/:uploadId', async (req, res) => {
   try {
     const { uploadId } = req.params
     
+    const prisma = await db.getClient()
+
     // Get upload record from database
-    const upload = await db.client.upload.findUnique({
+    const upload = await prisma.upload.findUnique({
       where: { id: uploadId }
     })
     

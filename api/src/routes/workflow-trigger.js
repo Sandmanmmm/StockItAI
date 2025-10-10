@@ -22,8 +22,10 @@ router.post('/trigger/:uploadId', async (req, res) => {
     
     console.log(`🚀 Workflow trigger requested for upload: ${uploadId}`)
 
-    // Get upload record
-    const upload = await db.client.upload.findUnique({
+  const prisma = await db.getClient()
+
+  // Get upload record
+  const upload = await prisma.upload.findUnique({
       where: { id: uploadId }
     })
 
@@ -35,7 +37,7 @@ router.post('/trigger/:uploadId', async (req, res) => {
     }
 
     // Get workflow execution record
-    const workflow = await db.client.workflowExecution.findUnique({
+  const workflow = await prisma.workflowExecution.findUnique({
       where: { workflowId: upload.workflowId }
     })
 
@@ -57,7 +59,7 @@ router.post('/trigger/:uploadId', async (req, res) => {
     }
 
     // Get merchant AI settings
-    const aiSettings = await db.client.aISettings.findUnique({
+  const aiSettings = await prisma.aISettings.findUnique({
       where: { merchantId: upload.merchantId }
     })
 
@@ -105,7 +107,7 @@ router.post('/trigger/:uploadId', async (req, res) => {
         console.error(`❌ Background workflow processing failed for upload ${uploadId}:`, error)
         
         // Update workflow status to failed
-        await db.client.workflowExecution.update({
+  await prisma.workflowExecution.update({
           where: { workflowId: upload.workflowId },
           data: {
             status: 'failed',
@@ -115,7 +117,7 @@ router.post('/trigger/:uploadId', async (req, res) => {
         })
 
         // Update upload status
-        await db.client.upload.update({
+  await prisma.upload.update({
           where: { id: uploadId },
           data: {
             status: 'failed',

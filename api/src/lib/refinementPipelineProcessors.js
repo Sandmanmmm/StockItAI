@@ -22,11 +22,14 @@ const pipelineService = new RefinementPipelineService()
 export async function processNormalization(job) {
   console.log(`🔧 [NORMALIZATION] Processing job ${job.id}`)
   
+  let prisma
+
   try {
     const { purchaseOrderId, lineItems, merchantId } = job.data
+    prisma = await db.getClient()
     
     // Get merchant config for normalization
-    const merchant = await db.client.merchant.findUnique({
+    const merchant = await prisma.merchant.findUnique({
       where: { id: merchantId }
     })
     
@@ -39,7 +42,7 @@ export async function processNormalization(job) {
     
     // Update line items in database with normalized data
     await Promise.all(normalizedItems.map(async (item) => {
-      await db.client.pOLineItem.update({
+      await prisma.pOLineItem.update({
         where: { id: item.id },
         data: {
           unitCost: item.unitCost,
@@ -54,7 +57,7 @@ export async function processNormalization(job) {
     }))
     
     // Update purchase order status
-    await db.client.purchaseOrder.update({
+    await prisma.purchaseOrder.update({
       where: { id: purchaseOrderId },
       data: {
         status: 'normalized',
@@ -76,7 +79,8 @@ export async function processNormalization(job) {
     console.error(`❌ [NORMALIZATION] Job ${job.id} failed:`, error)
     
     // Update purchase order with error status
-    await db.client.purchaseOrder.update({
+    const prismaClient = prisma ?? (await db.getClient())
+    await prismaClient.purchaseOrder.update({
       where: { id: job.data.purchaseOrderId },
       data: {
         status: 'failed',
@@ -95,15 +99,18 @@ export async function processNormalization(job) {
 export async function processMerchantConfig(job) {
   console.log(`⚙️ [MERCHANT-CONFIG] Processing job ${job.id}`)
   
+  let prisma
+
   try {
     const { purchaseOrderId, lineItems, merchantId } = job.data
+    prisma = await db.getClient()
     
     // Apply merchant configurations
     const configuredItems = await pipelineService.applyMerchantConfigs(lineItems, merchantId)
     
     // Update line items in database with configured data
     await Promise.all(configuredItems.map(async (item) => {
-      await db.client.pOLineItem.update({
+      await prisma.pOLineItem.update({
         where: { id: item.id },
         data: {
           unitCost: item.unitCost,
@@ -125,7 +132,7 @@ export async function processMerchantConfig(job) {
     }))
     
     // Update purchase order status
-    await db.client.purchaseOrder.update({
+    await prisma.purchaseOrder.update({
       where: { id: purchaseOrderId },
       data: {
         status: 'configured',
@@ -147,7 +154,8 @@ export async function processMerchantConfig(job) {
     console.error(`❌ [MERCHANT-CONFIG] Job ${job.id} failed:`, error)
     
     // Update purchase order with error status
-    await db.client.purchaseOrder.update({
+    const prismaClient = prisma ?? (await db.getClient())
+    await prismaClient.purchaseOrder.update({
       where: { id: job.data.purchaseOrderId },
       data: {
         status: 'failed',
@@ -166,8 +174,11 @@ export async function processMerchantConfig(job) {
 export async function processAIEnrichment(job) {
   console.log(`🤖 [AI-ENRICHMENT] Processing job ${job.id}`)
   
+  let prisma
+
   try {
     const { purchaseOrderId, lineItems, merchantId } = job.data
+    prisma = await db.getClient()
     
     // Apply AI enrichment
     const enrichedItems = await pipelineService.enrichWithAI(lineItems, merchantId)
@@ -176,7 +187,7 @@ export async function processAIEnrichment(job) {
     await Promise.all(enrichedItems.map(async (item) => {
       const existingNotes = item.aiNotes ? JSON.parse(item.aiNotes) : {}
       
-      await db.client.pOLineItem.update({
+      await prisma.pOLineItem.update({
         where: { id: item.id },
         data: {
           description: item.enhancedDescription || item.description,
@@ -198,7 +209,7 @@ export async function processAIEnrichment(job) {
     }))
     
     // Update purchase order status
-    await db.client.purchaseOrder.update({
+    await prisma.purchaseOrder.update({
       where: { id: purchaseOrderId },
       data: {
         status: 'enriched',
@@ -220,7 +231,8 @@ export async function processAIEnrichment(job) {
     console.error(`❌ [AI-ENRICHMENT] Job ${job.id} failed:`, error)
     
     // Update purchase order with error status
-    await db.client.purchaseOrder.update({
+    const prismaClient = prisma ?? (await db.getClient())
+    await prismaClient.purchaseOrder.update({
       where: { id: job.data.purchaseOrderId },
       data: {
         status: 'failed',
@@ -239,11 +251,14 @@ export async function processAIEnrichment(job) {
 export async function processShopifyPayload(job) {
   console.log(`🛍️ [SHOPIFY-PAYLOAD] Processing job ${job.id}`)
   
+  let prisma
+
   try {
     const { purchaseOrderId, lineItems, merchantId } = job.data
+    prisma = await db.getClient()
     
     // Get purchase order data for context
-    const purchaseOrder = await db.client.purchaseOrder.findUnique({
+    const purchaseOrder = await prisma.purchaseOrder.findUnique({
       where: { id: purchaseOrderId },
       include: {
         supplier: true
@@ -259,7 +274,7 @@ export async function processShopifyPayload(job) {
     
     // Create product drafts in database
     await Promise.all(shopifyProducts.map(async (productData) => {
-      await db.client.productDraft.create({
+      await prisma.productDraft.create({
         data: {
           lineItemId: productData.originalLineItem.id,
           title: productData.shopifyProduct.title,
@@ -283,7 +298,7 @@ export async function processShopifyPayload(job) {
     }))
     
     // Update purchase order status to completed
-    await db.client.purchaseOrder.update({
+    await prisma.purchaseOrder.update({
       where: { id: purchaseOrderId },
       data: {
         status: 'completed',
@@ -298,7 +313,8 @@ export async function processShopifyPayload(job) {
     console.error(`❌ [SHOPIFY-PAYLOAD] Job ${job.id} failed:`, error)
     
     // Update purchase order with error status
-    await db.client.purchaseOrder.update({
+    const prismaClient = prisma ?? (await db.getClient())
+    await prismaClient.purchaseOrder.update({
       where: { id: job.data.purchaseOrderId },
       data: {
         status: 'failed',

@@ -346,9 +346,10 @@ export class RefinementConfigService {
    * Add or update a category mapping rule
    */
   async addCategoryMapping(merchantId, mapping) {
+    const prisma = await this.getPrisma();
     const config = await this.ensureConfigExists(merchantId);
     
-    return await this.prisma.categoryMapping.create({
+    return await prisma.categoryMapping.create({
       data: {
         merchantId,
         configId: config.id,
@@ -365,9 +366,10 @@ export class RefinementConfigService {
    * Add or update a pricing rule
    */
   async addPricingRule(merchantId, rule) {
+    const prisma = await this.getPrisma();
     const config = await this.ensureConfigExists(merchantId);
     
-    return await this.prisma.pricingRule.create({
+    return await prisma.pricingRule.create({
       data: {
         merchantId,
         configId: config.id,
@@ -389,9 +391,10 @@ export class RefinementConfigService {
    * Add content rule
    */
   async addContentRule(merchantId, rule) {
+    const prisma = await this.getPrisma();
     const config = await this.ensureConfigExists(merchantId);
     
-    return await this.prisma.contentRule.create({
+    return await prisma.contentRule.create({
       data: {
         merchantId,
         configId: config.id,
@@ -412,9 +415,10 @@ export class RefinementConfigService {
    * Add deduplication rule
    */
   async addDeduplicationRule(merchantId, rule) {
+    const prisma = await this.getPrisma();
     const config = await this.ensureConfigExists(merchantId);
     
-    return await this.prisma.deduplicationRule.create({
+    return await prisma.deduplicationRule.create({
       data: {
         merchantId,
         configId: config.id,
@@ -435,7 +439,8 @@ export class RefinementConfigService {
    * Update category mapping
    */
   async updateCategoryMapping(merchantId, mappingId, mapping) {
-    return await this.prisma.categoryMapping.update({
+    const prisma = await this.getPrisma();
+    return await prisma.categoryMapping.update({
       where: {
         id: mappingId,
         merchantId: merchantId
@@ -454,7 +459,8 @@ export class RefinementConfigService {
    * Delete category mapping
    */
   async deleteCategoryMapping(merchantId, mappingId) {
-    return await this.prisma.categoryMapping.delete({
+    const prisma = await this.getPrisma();
+    return await prisma.categoryMapping.delete({
       where: {
         id: mappingId,
         merchantId: merchantId
@@ -466,7 +472,8 @@ export class RefinementConfigService {
    * Delete pricing rule
    */
   async deletePricingRule(merchantId, ruleId) {
-    return await this.prisma.pricingRule.delete({
+    const prisma = await this.getPrisma();
+    return await prisma.pricingRule.delete({
       where: {
         id: ruleId,
         merchantId: merchantId
@@ -478,7 +485,8 @@ export class RefinementConfigService {
    * Delete content rule
    */
   async deleteContentRule(merchantId, ruleId) {
-    return await this.prisma.contentRule.delete({
+    const prisma = await this.getPrisma();
+    return await prisma.contentRule.delete({
       where: {
         id: ruleId,
         merchantId: merchantId
@@ -490,7 +498,8 @@ export class RefinementConfigService {
    * Delete deduplication rule
    */
   async deleteDeduplicationRule(merchantId, ruleId) {
-    return await this.prisma.deduplicationRule.delete({
+    const prisma = await this.getPrisma();
+    return await prisma.deduplicationRule.delete({
       where: {
         id: ruleId,
         merchantId: merchantId
@@ -648,12 +657,13 @@ export class RefinementConfigService {
    * Ensure configuration exists for merchant
    */
   async ensureConfigExists(merchantId) {
-    let config = await this.prisma.merchantRefinementConfig.findUnique({
+    const prisma = await this.getPrisma();
+    let config = await prisma.merchantRefinementConfig.findUnique({
       where: { merchantId }
     });
 
     if (!config) {
-      const merchant = await this.prisma.merchant.findUnique({
+      const merchant = await prisma.merchant.findUnique({
         where: { id: merchantId },
         select: { shopDomain: true }
       });
@@ -662,7 +672,7 @@ export class RefinementConfigService {
         throw new Error(`Merchant ${merchantId} not found`);
       }
 
-      config = await this.prisma.merchantRefinementConfig.create({
+      config = await prisma.merchantRefinementConfig.create({
         data: {
           merchantId,
           shopDomain: merchant.shopDomain,

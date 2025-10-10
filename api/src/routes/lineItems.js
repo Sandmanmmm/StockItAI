@@ -18,8 +18,10 @@ router.get('/purchase-order/:poId', async (req, res) => {
       })
     }
 
+    const prisma = await db.getClient()
+
     // Verify the purchase order belongs to the merchant
-    const po = await db.client.purchaseOrder.findFirst({
+    const po = await prisma.purchaseOrder.findFirst({
       where: { 
         id: req.params.poId,
         merchantId: merchant.id 
@@ -33,7 +35,7 @@ router.get('/purchase-order/:poId', async (req, res) => {
       })
     }
 
-    const lineItems = await db.client.pOLineItem.findMany({
+    const lineItems = await prisma.pOLineItem.findMany({
       where: { purchaseOrderId: req.params.poId },
       orderBy: { createdAt: 'asc' }
     })
@@ -62,8 +64,10 @@ router.put('/:id', async (req, res) => {
       })
     }
 
+    const prisma = await db.getClient()
+
     // Get the line item to verify merchant access
-    const lineItem = await db.client.pOLineItem.findFirst({
+    const lineItem = await prisma.pOLineItem.findFirst({
       where: { id: req.params.id },
       include: {
         purchaseOrder: {
@@ -79,7 +83,7 @@ router.put('/:id', async (req, res) => {
       })
     }
 
-    const updatedLineItem = await db.client.pOLineItem.update({
+    const updatedLineItem = await prisma.pOLineItem.update({
       where: { id: req.params.id },
       data: req.body
     })
@@ -110,8 +114,10 @@ router.post('/:id/match-shopify', async (req, res) => {
 
     const { shopifyProductId, shopifyVariantId } = req.body
 
+    const prisma = await db.getClient()
+
     // Get the line item to verify merchant access
-    const lineItem = await db.client.pOLineItem.findFirst({
+    const lineItem = await prisma.pOLineItem.findFirst({
       where: { id: req.params.id },
       include: {
         purchaseOrder: {
@@ -127,7 +133,7 @@ router.post('/:id/match-shopify', async (req, res) => {
       })
     }
 
-    const updatedLineItem = await db.client.pOLineItem.update({
+  const updatedLineItem = await prisma.pOLineItem.update({
       where: { id: req.params.id },
       data: {
         shopifyProductId,

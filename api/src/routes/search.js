@@ -33,8 +33,10 @@ router.get('/', async (req, res) => {
 
     const searchTerm = query.replace(/[%_]/g, '') // basic sanitization
 
+    const prisma = await db.getClient()
+
     const [purchaseOrders, suppliers] = await Promise.all([
-      db.client.purchaseOrder.findMany({
+      prisma.purchaseOrder.findMany({
         where: {
           merchantId: merchant.id,
           OR: [
@@ -64,7 +66,7 @@ router.get('/', async (req, res) => {
         ],
         take: limit
       }),
-      db.client.supplier.findMany({
+  prisma.supplier.findMany({
         where: {
           merchantId: merchant.id,
           OR: [

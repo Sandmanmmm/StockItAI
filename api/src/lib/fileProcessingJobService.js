@@ -269,15 +269,16 @@ export class FileProcessingJobService {
   async savePurchaseOrderToDatabase(extractedData, uploadId, fileName, merchantId, supplierId) {
     try {
       const { purchaseOrder: poData, lineItems, confidence } = extractedData
+      const prisma = await db.getClient()
       
       // Find or create supplier
       let supplier = null
       if (supplierId) {
-        supplier = await db.client.supplier.findFirst({
+        supplier = await prisma.supplier.findFirst({
           where: { id: supplierId, merchantId }
         })
       } else if (poData.supplierName) {
-        supplier = await db.client.supplier.findFirst({
+        supplier = await prisma.supplier.findFirst({
           where: { 
             name: poData.supplierName,
             merchantId 
@@ -286,7 +287,7 @@ export class FileProcessingJobService {
       }
 
       // Create purchase order
-      const purchaseOrder = await db.client.purchaseOrder.create({
+      const purchaseOrder = await prisma.purchaseOrder.create({
         data: {
           number: poData.number || `PO-${Date.now()}`,
           supplierName: poData.supplierName,
@@ -336,7 +337,8 @@ export class FileProcessingJobService {
    */
   async saveProcessingError(uploadId, merchantId, errorMessage) {
     try {
-      await db.client.purchaseOrder.create({
+      const prisma = await db.getClient()
+      await prisma.purchaseOrder.create({
         data: {
           number: `ERROR-${uploadId}`,
           supplierName: 'Unknown',

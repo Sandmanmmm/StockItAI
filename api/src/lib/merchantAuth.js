@@ -118,7 +118,9 @@ export async function validateJobOwnership(req, res, next) {
 
     // Check if job belongs to this merchant
     // This would typically query the database to verify job ownership
-    const jobOwner = await db.client.purchaseOrder.findFirst({
+    const prisma = await db.getClient()
+
+    const jobOwner = await prisma.purchaseOrder.findFirst({
       where: {
         OR: [
           { analysisJobId: jobId },

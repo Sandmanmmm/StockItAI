@@ -43,8 +43,10 @@ router.post('/po-file/:uploadId', async (req, res) => {
       })
     }
 
+    const prisma = await db.getClient()
+
     // Get merchant AI settings
-    const aiSettings = await db.client.aiSettings.findUnique({
+    const aiSettings = await prisma.aiSettings.findUnique({
       where: { merchantId: merchant.id }
     })
 
@@ -132,10 +134,12 @@ router.get('/status/:uploadId', async (req, res) => {
         jobStatus.finishedOn - jobStatus.createdAt : null
     }
 
-    // If completed, include the purchase order data
+  const prisma = await db.getClient()
+
+  // If completed, include the purchase order data
     if (jobStatus.status === 'completed' && jobStatus.result?.purchaseOrder) {
       try {
-        const purchaseOrder = await db.client.purchaseOrder.findFirst({
+    const purchaseOrder = await prisma.purchaseOrder.findFirst({
           where: {
             id: jobStatus.result.purchaseOrder.id,
             merchantId: merchant.id
@@ -205,8 +209,10 @@ router.post('/retry/:uploadId', async (req, res) => {
       })
     }
 
+    const prismaRetry = await db.getClient()
+
     // Get merchant AI settings
-    const aiSettings = await db.client.aiSettings.findUnique({
+    const aiSettings = await prismaRetry.aiSettings.findUnique({
       where: { merchantId: merchant.id }
     })
 

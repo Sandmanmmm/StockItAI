@@ -27,6 +27,8 @@ router.post('/analyze-po', upload.single('file'), async (req, res) => {
       })
     }
 
+    const prisma = await db.getClient()
+
     const file = req.file
     if (!file) {
       return res.status(400).json({
@@ -53,7 +55,7 @@ router.post('/analyze-po', upload.single('file'), async (req, res) => {
     }
 
     // Create PO record in database (pending analysis)
-    const purchaseOrder = await db.client.purchaseOrder.create({
+  const purchaseOrder = await prisma.purchaseOrder.create({
       data: {
         number: 'PENDING', // Will be updated after analysis
         supplierName: 'Analyzing...', // Will be updated after analysis
@@ -94,7 +96,7 @@ router.post('/analyze-po', upload.single('file'), async (req, res) => {
     })
 
     // Update PO with job ID
-    await db.client.purchaseOrder.update({
+  await prisma.purchaseOrder.update({
       where: { id: purchaseOrder.id },
       data: { 
         analysisJobId: job.id.toString(),
@@ -140,6 +142,8 @@ router.post('/apply-po-changes', async (req, res) => {
       })
     }
 
+    const prisma = await db.getClient()
+
     const { 
       purchaseOrderId,
       syncType = 'full', // 'inventory', 'products', 'purchase_orders', 'full'
@@ -156,7 +160,7 @@ router.post('/apply-po-changes', async (req, res) => {
     }
 
     // Verify PO exists and belongs to merchant
-    const purchaseOrder = await db.client.purchaseOrder.findFirst({
+  const purchaseOrder = await prisma.purchaseOrder.findFirst({
       where: {
         id: purchaseOrderId,
         merchantId: merchant.id
@@ -208,7 +212,7 @@ router.post('/apply-po-changes', async (req, res) => {
     })
 
     // Update PO with sync job ID
-    await db.client.purchaseOrder.update({
+  await prisma.purchaseOrder.update({
       where: { id: purchaseOrderId },
       data: { 
         syncJobId: job.id.toString(),
@@ -255,8 +259,10 @@ router.get('/po-job-status/:purchaseOrderId', async (req, res) => {
 
     const { purchaseOrderId } = req.params
 
+    const prisma = await db.getClient()
+
     // Get PO with job information
-    const purchaseOrder = await db.client.purchaseOrder.findFirst({
+    const purchaseOrder = await prisma.purchaseOrder.findFirst({
       where: {
         id: purchaseOrderId,
         merchantId: merchant.id
@@ -360,6 +366,8 @@ router.get('/po-processing-queue', async (req, res) => {
 
     const { limit = 20, status = 'all' } = req.query
 
+    const prisma = await db.getClient()
+
     // Get queue statistics
     const queueStats = await enhancedJobService.getQueueStats()
 
@@ -369,7 +377,7 @@ router.get('/po-processing-queue', async (req, res) => {
       whereClause.jobStatus = status
     }
 
-    const purchaseOrders = await db.client.purchaseOrder.findMany({
+  const purchaseOrders = await prisma.purchaseOrder.findMany({
       where: whereClause,
       include: {
         lineItems: true,
@@ -432,7 +440,9 @@ router.post('/retry-failed-po/:purchaseOrderId', async (req, res) => {
     const { purchaseOrderId } = req.params
     const { jobType = 'analysis' } = req.body // 'analysis' or 'sync'
 
-    const purchaseOrder = await db.client.purchaseOrder.findFirst({
+    const prisma = await db.getClient()
+
+    const purchaseOrder = await prisma.purchaseOrder.findFirst({
       where: {
         id: purchaseOrderId,
         merchantId: merchant.id,
@@ -448,7 +458,7 @@ router.post('/retry-failed-po/:purchaseOrderId', async (req, res) => {
     }
 
     // Reset job status
-    await db.client.purchaseOrder.update({
+  await prisma.purchaseOrder.update({
       where: { id: purchaseOrderId },
       data: {
         jobStatus: 'pending',

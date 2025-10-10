@@ -64,9 +64,11 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
       customRules 
     } = req.body
     
+    const prisma = await db.getClient()
+
     try {
       // Create initial PO record in database
-      const purchaseOrder = await db.client.purchaseOrder.create({
+      const purchaseOrder = await prisma.purchaseOrder.create({
         data: {
           number: `PO-${Date.now()}`, // Temporary number, will be updated by AI processing
           supplierName: 'Processing...', // Will be updated by AI processing
@@ -95,7 +97,7 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
 
       if (!uploadResult.success) {
         // If storage upload fails, delete the database record
-        await db.client.purchaseOrder.delete({
+  await prisma.purchaseOrder.delete({
           where: { id: purchaseOrder.id }
         })
         return res.status(500).json({
@@ -105,7 +107,7 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
       }
 
       // Create upload record for workflow tracking
-      const uploadRecord = await db.client.upload.create({
+  const uploadRecord = await prisma.upload.create({
         data: {
           fileName: req.file.originalname,
           originalFileName: req.file.originalname,
@@ -124,7 +126,7 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
       })
 
       // Update PO record with file URL and upload reference
-      const updatedPO = await db.client.purchaseOrder.update({
+  const updatedPO = await prisma.purchaseOrder.update({
         where: { id: purchaseOrder.id },
         data: {
           fileUrl: uploadResult.filePath,
@@ -133,7 +135,7 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
       })
 
       // Get merchant AI settings
-      const aiSettings = await db.client.aISettings.findUnique({
+  const aiSettings = await prisma.aISettings.findUnique({
         where: { merchantId: merchant.id }
       })
 
@@ -152,7 +154,7 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
           // Generate a workflow ID and create the workflow execution record
           const workflowId = `wf_${Date.now()}_${uploadRecord.id.slice(0, 8)}`
           
-          await db.client.workflowExecution.create({
+          await prisma.workflowExecution.create({
             data: {
               workflowId,
               type: 'purchase_order_processing',
@@ -174,7 +176,7 @@ router.post('/po-file', upload.single('file'), async (req, res) => {
           })
 
           // Update upload with workflow ID
-          await db.client.upload.update({
+          await prisma.upload.update({
             where: { id: uploadRecord.id },
             data: { workflowId }
           })
@@ -314,9 +316,10 @@ router.get('/:poId/status', async (req, res) => {
     }
 
     const { poId } = req.params
+    const prisma = await db.getClient()
     
-    // Get PO record from database
-    const purchaseOrder = await db.client.purchaseOrder.findFirst({
+  // Get PO record from database
+  const purchaseOrder = await prisma.purchaseOrder.findFirst({
       where: {
         id: poId,
         merchantId: merchant.id
@@ -410,9 +413,10 @@ router.post('/:poId/process', async (req, res) => {
 
     const { poId } = req.params
     const { confidenceThreshold, customRules } = req.body
-    
+    const prisma = await db.getClient()
+
     // Get PO record
-    const purchaseOrder = await db.client.purchaseOrder.findFirst({
+    const purchaseOrder = await prisma.purchaseOrder.findFirst({
       where: {
         id: poId,
         merchantId: merchant.id
@@ -438,7 +442,7 @@ router.post('/:poId/process', async (req, res) => {
     }
 
     // Get merchant AI settings
-    const aiSettings = await db.client.aISettings.findUnique({
+    const aiSettings = await prisma.aISettings.findUnique({
       where: { merchantId: merchant.id }
     })
 
@@ -466,7 +470,7 @@ router.post('/:poId/process', async (req, res) => {
     )
     
     // Update PO status
-    await db.client.purchaseOrder.update({
+    await prisma.purchaseOrder.update({
       where: { id: purchaseOrder.id },
       data: {
         analysisJobId: jobId,
@@ -507,10 +511,11 @@ router.get('/:poId/download', async (req, res) => {
       })
     }
 
-    const { poId } = req.params
+  const { poId } = req.params
+  const prisma = await db.getClient()
     
     // Get PO record
-    const purchaseOrder = await db.client.purchaseOrder.findFirst({
+    const purchaseOrder = await prisma.purchaseOrder.findFirst({
       where: {
         id: poId,
         merchantId: merchant.id
@@ -565,8 +570,10 @@ router.get('/:uploadId/workflow-status', async (req, res) => {
       })
     }
 
+    const prisma = await db.getClient()
+
     // Get upload record
-    const upload = await db.client.upload.findFirst({
+    const upload = await prisma.upload.findFirst({
       where: {
         id: uploadId,
         merchantId: merchant.id

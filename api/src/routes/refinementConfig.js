@@ -4,7 +4,7 @@ import { RefinementConfigService } from '../services/refinementConfigService.js'
 import { db } from '../lib/db.js';
 
 const router = Router();
-const refinementConfigService = new RefinementConfigService(db.client);
+const refinementConfigService = new RefinementConfigService();
 
 /**
  * GET /api/refinement-config

@@ -166,8 +166,10 @@ router.post('/uninstall', async (req, res) => {
       return res.status(401).json({ error: 'Invalid webhook signature' })
     }
 
-    // Mark merchant as uninstalled
-    await db.client.merchant.update({
+  // Mark merchant as uninstalled
+  const prisma = await db.getClient()
+
+  await prisma.merchant.update({
       where: { shopDomain: shop },
       data: { 
         status: 'uninstalled',

@@ -14,6 +14,40 @@ import { processorRegistrationService } from './src/lib/processorRegistrationSer
 
 // Track processor initialization state across cron invocations
 let processorsInitialized = false
+let processorInitializationPromise = null
+
+async function ensureProcessorsInitialized() {
+  if (processorsInitialized) {
+    return
+  }
+
+  if (!processorInitializationPromise) {
+    processorInitializationPromise = (async () => {
+      console.log(`🚀 Ensuring workflow orchestrator is initialized...`)
+      try {
+        await workflowIntegration.initialize()
+        console.log(`✅ Workflow orchestrator initialized`)
+      } catch (orchestratorError) {
+        console.error(`⚠️ Failed to initialize orchestrator (continuing anyway):`, orchestratorError.message)
+      }
+
+      console.log(`🚀 Ensuring queue processors are initialized...`)
+      await processorRegistrationService.initializeAllProcessors()
+      processorsInitialized = true
+      console.log(`✅ Queue processors initialized successfully`)
+    })()
+  } else {
+    console.log(`⏳ Queue processor initialization already in progress or completed`)
+  }
+
+  try {
+    await processorInitializationPromise
+  } catch (processorError) {
+    console.error(`⚠️ Failed to initialize processors (continuing anyway):`, processorError.message)
+    processorsInitialized = false
+    processorInitializationPromise = null
+  }
+}
 
 /**
  * Process a single workflow execution
@@ -28,10 +62,13 @@ async function processWorkflow(workflow) {
   console.log(`⏰ Started at: ${new Date().toISOString()}`)
 
   let workflowId = workflow.workflowId
+  let prisma
 
   try {
+    await ensureProcessorsInitialized()
+
     // Get a stable reference to the Prisma client (now with proper connection)
-    const prisma = await db.getClient()
+    prisma = await db.getClient()
     
     // Debug: Verify prisma client is available
     if (!prisma) {
@@ -176,9 +213,9 @@ async function processWorkflow(workflow) {
     // Mark workflow as failed
     try {
       // Get a fresh client reference in case the original failed
-      const prisma = db.client
+      const prismaClient = prisma ?? (await db.getClient())
       
-      await prisma.workflowExecution.update({
+      await prismaClient.workflowExecution.update({
         where: { workflowId },
         data: {
           status: 'failed',
@@ -189,7 +226,7 @@ async function processWorkflow(workflow) {
       })
 
       // Mark upload as failed
-      await prisma.upload.update({
+      await prismaClient.upload.update({
         where: { id: workflow.uploadId },
         data: {
           status: 'failed',
@@ -234,39 +271,16 @@ export default async function handler(req, res) {
 
   console.log(`✅ Authenticated cron request from: ${userAgent}`)
 
+  let prisma
+
   try {
+    console.log(`🧭 Ensuring queue processors are ready before database work...`)
+    await ensureProcessorsInitialized()
+
     // Initialize database connection with proper async handling
-    console.log(`🔌 Initializing database connection...`)
-    const prisma = await db.getClient()
+    console.log(`� Initializing database connection...`)
+    prisma = await db.getClient()
     console.log(`✅ Database connected successfully`)
-
-    // Initialize workflow orchestrator on first run
-    if (!processorsInitialized) {
-      console.log(`🚀 Initializing workflow orchestrator...`)
-      try {
-        await workflowIntegration.initialize()
-        console.log(`✅ Workflow orchestrator initialized`)
-      } catch (orchestratorError) {
-        console.error(`⚠️ Failed to initialize orchestrator:`, orchestratorError.message)
-        // Continue anyway - services will be created on-demand
-      }
-    }
-
-    // Initialize queue processors on first run (or if not yet initialized)
-    if (!processorsInitialized) {
-      console.log(`🚀 Initializing queue processors...`)
-      try {
-        await processorRegistrationService.initializeAllProcessors()
-        processorsInitialized = true
-        console.log(`✅ Queue processors initialized successfully`)
-      } catch (processorError) {
-        console.error(`⚠️ Failed to initialize processors (continuing anyway):`, processorError.message)
-        // Don't fail the cron job if processor initialization fails
-        // The queues will be created on-demand by addJob
-      }
-    } else {
-      console.log(`✅ Queue processors already initialized`)
-    }
 
     // Find all pending workflows
     const pendingWorkflows = await prismaOperation(
@@ -365,6 +379,12 @@ export default async function handler(req, res) {
     })
   } finally {
     // Ensure database connection is properly handled
-    await db.client.$disconnect()
+    if (prisma?.$disconnect) {
+      try {
+        await prisma.$disconnect()
+      } catch (disconnectError) {
+        console.warn(`⚠️ Error while disconnecting Prisma client:`, disconnectError.message)
+      }
+    }
   }
 }

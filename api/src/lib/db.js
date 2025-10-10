@@ -18,6 +18,7 @@ let connectionPromise = null // Store the connection promise for concurrent requ
 let healthCheckPromise = null // Lock for concurrent health checks
 let warmupComplete = false // Track if engine warmup is complete
 let warmupPromise = null // Promise for warmup completion
+let clientDeprecationWarned = false
 const PRISMA_CLIENT_VERSION = 'v5_transaction_recovery' // Increment to force recreation
 
 // Increase process listener limit for Prisma reconnections
@@ -344,6 +345,17 @@ export const db = {
   
   // Synchronous getter for backward compatibility (but may not be connected)
   get client() {
+    const allowLegacyAccess = process.env.ALLOW_LEGACY_DB_CLIENT === '1'
+
+    if (process.env.NODE_ENV === 'production' && !allowLegacyAccess) {
+      throw new Error('Direct db.client access is disabled. Use await db.getClient() or prismaOperation instead.')
+    }
+
+    if (!clientDeprecationWarned) {
+      console.warn('⚠️  db.client getter is deprecated. Use await db.getClient() or prismaOperation to ensure warmup-aware access.')
+      clientDeprecationWarned = true
+    }
+
     // Return existing client if available, otherwise create new one
     if (prisma) {
       // Add error handler to detect fatal errors and force reconnect

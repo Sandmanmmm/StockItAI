@@ -38,6 +38,8 @@ export class ShopifySyncJobProcessor {
     console.log(`🔄 Processing Shopify sync job ${job.id} for PO ${purchaseOrderId} (type: ${syncType})`)
 
     try {
+      const prisma = await db.getClient()
+
       // Update job status in database
       await this.updatePOSyncStatus(purchaseOrderId, {
         syncJobId: job.id.toString(),
@@ -47,8 +49,8 @@ export class ShopifySyncJobProcessor {
 
       // Get merchant session and PO data
       const [merchant, purchaseOrder] = await Promise.all([
-        db.client.merchant.findUnique({ where: { id: merchantId } }),
-        db.client.purchaseOrder.findUnique({
+        prisma.merchant.findUnique({ where: { id: merchantId } }),
+        prisma.purchaseOrder.findUnique({
           where: { id: purchaseOrderId },
           include: {
             lineItems: true,
@@ -62,7 +64,7 @@ export class ShopifySyncJobProcessor {
       }
 
       // Get Shopify session
-      const session = await db.client.session.findFirst({
+      const session = await prisma.session.findFirst({
         where: { merchantId }
       })
 
@@ -371,7 +373,8 @@ export class ShopifySyncJobProcessor {
    * Update PO sync status in database
    */
   async updatePOSyncStatus(purchaseOrderId, statusData) {
-    await db.client.purchaseOrder.update({
+    const prisma = await db.getClient()
+    await prisma.purchaseOrder.update({
       where: { id: purchaseOrderId },
       data: statusData
     })

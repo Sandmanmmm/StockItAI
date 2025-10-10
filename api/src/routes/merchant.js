@@ -56,7 +56,9 @@ router.put('/', async (req, res) => {
       })
     }
 
-    const updatedMerchant = await db.client.merchant.update({
+    const prisma = await db.getClient()
+
+    const updatedMerchant = await prisma.merchant.update({
       where: { id: req.shop.id },
       data: {
         name: req.body.name,

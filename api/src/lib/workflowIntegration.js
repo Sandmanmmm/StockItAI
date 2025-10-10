@@ -112,7 +112,9 @@ export class WorkflowIntegrationService {
   async getUploadWorkflowStatus(uploadId) {
     try {
       // Get upload record to find workflow ID
-      const upload = await db.client.upload.findUnique({
+  const prisma = await db.getClient()
+
+  const upload = await prisma.upload.findUnique({
         where: { id: uploadId }
       })
 
@@ -125,14 +127,14 @@ export class WorkflowIntegrationService {
       }
 
       // Get workflow execution to find purchase order
-      const workflowExecution = await db.client.workflowExecution.findUnique({
+  const workflowExecution = await prisma.workflowExecution.findUnique({
         where: { workflowId: upload.workflowId }
       })
 
       // Get purchase order if available
       let purchaseOrder = null
       if (workflowExecution?.purchaseOrderId) {
-        purchaseOrder = await db.client.purchaseOrder.findUnique({
+  purchaseOrder = await prisma.purchaseOrder.findUnique({
           where: { id: workflowExecution.purchaseOrderId }
         })
       }
@@ -290,7 +292,9 @@ export class WorkflowIntegrationService {
    * Update upload record with workflow ID
    */
   async updateUploadWithWorkflow(uploadId, workflowId) {
-    await db.client.upload.update({
+  const prisma = await db.getClient()
+
+  await prisma.upload.update({
       where: { id: uploadId },
       data: {
         workflowId,
@@ -313,7 +317,9 @@ export class WorkflowIntegrationService {
       updateData.errorMessage = errorMessage
     }
 
-    await db.client.upload.update({
+  const prisma = await db.getClient()
+
+  await prisma.upload.update({
       where: { id: uploadId },
       data: updateData
     })
