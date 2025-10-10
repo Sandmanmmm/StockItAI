@@ -193,7 +193,7 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
                 ]
               }
             ],
-            max_tokens: 4000,
+            max_tokens: 16000, // Increased to handle large POs with 50+ line items
             temperature: 0.1
           })
           
@@ -233,7 +233,7 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
               content: `Please extract purchase order information from this CSV data:\n\n${csvContent}`
             }
           ],
-          max_tokens: 4000,
+          max_tokens: 16000, // Increased to handle large POs with 50+ line items
           temperature: 0.1
         })
         
@@ -579,7 +579,7 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
           ]
         }
       ],
-      max_tokens: 4000,
+      max_tokens: 16000, // Increased to handle large POs with 50+ line items
       temperature: 0.3 // Slightly higher for retry
     })
 
@@ -634,7 +634,7 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
               content: `${this.defaultPrompt}\n\nDocument Content:\n${text}`
             }
           ],
-          max_tokens: 4000,
+          max_tokens: 16000, // Increased to handle large POs with 50+ line items
           temperature: 0.1
         })
         
@@ -742,7 +742,7 @@ Document Content (Chunk 1/${chunks.length}):\n${chunks[0]}`
       firstResponse = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [{ role: "user", content: firstChunkPrompt }],
-        max_tokens: 4000,
+        max_tokens: 16000, // Increased to handle large POs with 50+ line items
         temperature: 0.1
       })
     } catch (error) {
@@ -790,7 +790,7 @@ Document Content (Chunk ${i + 1}/${chunks.length}):\n${chunks[i]}`
         const chunkResponse = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [{ role: "user", content: chunkPrompt }],
-          max_tokens: 4000,
+          max_tokens: 16000, // Increased to handle large POs with 50+ line items
           temperature: 0.1
         })
         
