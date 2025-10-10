@@ -7,7 +7,8 @@
 // This ensures proper module resolution and dependency management
 
 import { PrismaClient } from '@prisma/client'
-// Phase 2: Removed createRetryablePrismaClient import - retry logic now in extension
+// Phase 2: Import withPrismaRetry for utility functions (backwards compatibility)
+import { withPrismaRetry } from './prismaRetryWrapper.js'
 
 // Prisma client singleton
 let prisma
