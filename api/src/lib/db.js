@@ -47,6 +47,14 @@ function isFatalPrismaError(error) {
     return true
   }
   
+  // Network/timeout errors - can't reach database server
+  if (errorMessage.includes("Can't reach database server") || 
+      errorMessage.includes('connect ETIMEDOUT') ||
+      errorMessage.includes('connect ECONNREFUSED')) {
+    console.error(`🚨 Fatal: Network/timeout error - database unreachable`)
+    return true
+  }
+  
   return false
 }
 
@@ -226,7 +234,8 @@ async function initializePrisma() {
           // Limit connection pool size for serverless (prevent pool exhaustion)
           // Supabase free tier: 60 max connections
           // With many serverless instances, keep pool small per instance
-          const connectionLimit = parseInt(process.env.PRISMA_CONNECTION_LIMIT || '3', 10)
+          // Increased from 3 to 5 to reduce contention while staying safe
+          const connectionLimit = parseInt(process.env.PRISMA_CONNECTION_LIMIT || '5', 10)
           const connectionTimeout = parseInt(process.env.PRISMA_CONNECTION_TIMEOUT || '10', 10)
           console.log(`   Connection pool limit: ${connectionLimit}`)
           console.log(`   Connection timeout: ${connectionTimeout}s`)

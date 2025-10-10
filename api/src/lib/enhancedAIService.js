@@ -348,10 +348,33 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
       }
     }
 
-    // Validate confidence score
-    if (typeof result.confidence !== 'number' || result.confidence < 0 || result.confidence > 1) {
+    // CRITICAL: Add top-level model field for database persistence
+    enhanced.model = 'gpt-4o-mini' // Default model used for text processing
+
+    // Validate confidence score - convert to nested structure if needed
+    let confidenceValue = 0.5 // Default
+    
+    if (typeof result.confidence === 'number') {
+      confidenceValue = result.confidence
+    } else if (typeof result.confidence === 'object' && result.confidence?.overall) {
+      confidenceValue = result.confidence.overall
+    }
+    
+    // Normalize confidence to 0-1 range if it's in 0-100 range
+    if (confidenceValue > 1) {
+      confidenceValue = confidenceValue / 100
+    }
+    
+    // Ensure confidence is valid
+    if (confidenceValue < 0 || confidenceValue > 1 || isNaN(confidenceValue)) {
       console.warn(`⚠️ Invalid confidence score for workflow ${workflowId}, defaulting to 0.5`)
-      enhanced.confidence = 0.5
+      confidenceValue = 0.5
+    }
+    
+    // Store both formats for compatibility
+    enhanced.confidence = {
+      overall: Math.round(confidenceValue * 100), // Store as percentage (0-100)
+      normalized: confidenceValue // Store as decimal (0-1)
     }
 
     // Add quality assessment
@@ -360,19 +383,22 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
     // Add extraction completeness score
     enhanced.completenessScore = this.calculateCompletenessScore(result.extractedData)
     
-    // Adjust confidence based on quality indicators
-    enhanced.adjustedConfidence = this.adjustConfidenceBasedOnQuality(
-      enhanced.confidence,
+    // Adjust confidence based on quality indicators (pass normalized value)
+    const adjustedConfidenceNormalized = this.adjustConfidenceBasedOnQuality(
+      confidenceValue, // Pass the normalized (0-1) value
       enhanced.qualityAssessment,
       enhanced.completenessScore
     )
 
-    // Use adjusted confidence as the final confidence
-    enhanced.confidence = enhanced.adjustedConfidence
+    // Update confidence with adjusted values in both formats
+    enhanced.confidence = {
+      overall: Math.round(adjustedConfidenceNormalized * 100), // Store as percentage (0-100)
+      normalized: adjustedConfidenceNormalized // Store as decimal (0-1)
+    }
 
     console.log(`📊 AI parsing quality assessment for workflow ${workflowId}:`)
-    console.log(`  Original confidence: ${(result.confidence * 100).toFixed(1)}%`)
-    console.log(`  Adjusted confidence: ${(enhanced.confidence * 100).toFixed(1)}%`)
+    console.log(`  Original confidence: ${Math.round(confidenceValue * 100)}%`)
+    console.log(`  Adjusted confidence: ${enhanced.confidence.overall}%`)
     console.log(`  Completeness score: ${(enhanced.completenessScore * 100).toFixed(1)}%`)
     console.log(`  Quality: ${enhanced.qualityAssessment.overall}`)
 
@@ -732,12 +758,89 @@ Document Content (Chunk 1/${chunks.length}):\n${chunks[0]}`
       return firstResponse
     }
     
-    // For now, return the first chunk result
-    // In the future, we could implement more sophisticated chunk merging
-    console.log('✅ Large document processing completed (using first chunk result)')
-    console.log('💡 Note: Full multi-chunk processing can be implemented for better accuracy')
+    // Process remaining chunks to collect all line items
+    console.log(`🔄 Processing remaining ${chunks.length - 1} chunks to collect all line items...`)
     
-    return firstResponse
+    const allLineItems = []
+    
+    // Extract line items from first chunk
+    try {
+      const firstResult = JSON.parse(firstResponse.choices[0]?.message?.content || '{}')
+      if (firstResult.lineItems && Array.isArray(firstResult.lineItems)) {
+        allLineItems.push(...firstResult.lineItems)
+        console.log(`📋 First chunk: extracted ${firstResult.lineItems.length} line items`)
+      }
+    } catch (error) {
+      console.warn('⚠️ Could not parse first chunk response, will try other chunks')
+    }
+    
+    // Process subsequent chunks to extract additional line items
+    for (let i = 1; i < chunks.length; i++) {
+      console.log(`🔍 Processing chunk ${i + 1}/${chunks.length}...`)
+      
+      const chunkPrompt = `Extract ONLY the line items from this portion of a purchase order document.
+This is chunk ${i + 1} of ${chunks.length} from a larger document.
+Return a JSON object with a "lineItems" array containing all products/items found in this chunk.
+
+Each line item should have: productCode, description, quantity, unitPrice, total
+
+Document Content (Chunk ${i + 1}/${chunks.length}):\n${chunks[i]}`
+      
+      try {
+        const chunkResponse = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [{ role: "user", content: chunkPrompt }],
+          max_tokens: 4000,
+          temperature: 0.1
+        })
+        
+        const chunkResult = JSON.parse(chunkResponse.choices[0]?.message?.content || '{}')
+        
+        if (chunkResult.lineItems && Array.isArray(chunkResult.lineItems)) {
+          allLineItems.push(...chunkResult.lineItems)
+          console.log(`📋 Chunk ${i + 1}: extracted ${chunkResult.lineItems.length} line items (total: ${allLineItems.length})`)
+        }
+        
+        // Add small delay between API calls to avoid rate limiting
+        if (i < chunks.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500))
+        }
+        
+      } catch (error) {
+        console.warn(`⚠️ Failed to process chunk ${i + 1}:`, error.message)
+        // Continue with other chunks even if one fails
+      }
+    }
+    
+    // Merge the results - use first chunk structure but with all line items
+    try {
+      const finalResult = JSON.parse(firstResponse.choices[0]?.message?.content || '{}')
+      
+      // Replace line items with the complete merged set
+      if (allLineItems.length > 0) {
+        finalResult.lineItems = allLineItems
+        console.log(`✅ Multi-chunk processing complete: merged ${allLineItems.length} total line items`)
+      }
+      
+      // Create a new response object with the merged content
+      const mergedResponse = {
+        ...firstResponse,
+        choices: [{
+          ...firstResponse.choices[0],
+          message: {
+            ...firstResponse.choices[0].message,
+            content: JSON.stringify(finalResult, null, 2)
+          }
+        }]
+      }
+      
+      return mergedResponse
+      
+    } catch (error) {
+      console.error('❌ Failed to merge chunk results:', error.message)
+      console.log('⚠️ Falling back to first chunk result')
+      return firstResponse
+    }
   }
 
   // ==========================================
