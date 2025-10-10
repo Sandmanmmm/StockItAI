@@ -1027,18 +1027,37 @@ export class WorkflowOrchestrator {
       console.log(`   PO ID from job data: ${data.purchaseOrderId}`)
       
       // Get the saved line items from the database
-      const lineItemsFromDb = await prisma.pOLineItem.findMany({
-        where: { purchaseOrderId: purchaseOrder.id }
-      })
+      // Wrap in retry logic to handle engine warmup delays
+      let lineItemsFromDb
+      try {
+        lineItemsFromDb = await prismaOperation(
+          (prisma) => prisma.pOLineItem.findMany({
+            where: { purchaseOrderId: purchaseOrder.id }
+          }),
+          `Find line items for PO ${purchaseOrder.id}`
+        )
+      } catch (error) {
+        console.error(`❌ Failed to fetch line items:`, error.message)
+        throw new Error(`Could not retrieve line items: ${error.message}`)
+      }
       
       console.log(`🔍 DEBUG - Line items query result: ${lineItemsFromDb.length} items found`)
       
       if (!lineItemsFromDb || lineItemsFromDb.length === 0) {
         // Debug: Check if line items exist for any PO
-        const allLineItems = await prisma.pOLineItem.findMany({
-          take: 10,
-          orderBy: { createdAt: 'desc' }
-        })
+        let allLineItems
+        try {
+          allLineItems = await prismaOperation(
+            (prisma) => prisma.pOLineItem.findMany({
+              take: 10,
+              orderBy: { createdAt: 'desc' }
+            }),
+            `Find recent line items for debugging`
+          )
+        } catch (error) {
+          console.warn(`⚠️ Could not fetch debug line items:`, error.message)
+          allLineItems = []
+        }
         console.log(`🔍 DEBUG - Recent line items in database: ${allLineItems.length}`)
         if (allLineItems.length > 0) {
           console.log(`🔍 DEBUG - Sample line item PO IDs:`, allLineItems.slice(0, 3).map(li => li.purchaseOrderId))
@@ -1075,9 +1094,19 @@ export class WorkflowOrchestrator {
 
           // Check if a product draft already exists for this line item
           // NOTE: lineItemId is NOT unique, so we use findFirst instead of findUnique
-          const existingDraft = await prisma.productDraft.findFirst({
-            where: { lineItemId: lineItem.id }  // FIXED: Use lineItemId (actual DB field) and findFirst
-          });
+          // Wrap in retry logic to handle engine warmup delays
+          let existingDraft
+          try {
+            existingDraft = await prismaOperation(
+              (prisma) => prisma.productDraft.findFirst({
+                where: { lineItemId: lineItem.id }  // FIXED: Use lineItemId (actual DB field) and findFirst
+              }),
+              `Find existing product draft for line item ${lineItem.id}`
+            )
+          } catch (error) {
+            console.warn(`⚠️ Could not check for existing draft:`, error.message)
+            existingDraft = null
+          }
 
           if (existingDraft) {
             console.log(`⏭️ Product draft already exists for line item ${lineItem.id}, skipping...`)
@@ -1279,13 +1308,22 @@ export class WorkflowOrchestrator {
         console.log('⚠️ No product drafts in accumulated data, checking database...')
         
         // Try to get product drafts from database
-        draftsFromDb = await prisma.productDraft.findMany({
-          where: { purchaseOrderId },
-          include: {
-            POLineItem: true,
-            images: true
-          }
-        })
+        // Wrap in retry logic to handle engine warmup delays
+        try {
+          draftsFromDb = await prismaOperation(
+            (prisma) => prisma.productDraft.findMany({
+              where: { purchaseOrderId },
+              include: {
+                POLineItem: true,
+                images: true
+              }
+            }),
+            `Find product drafts for PO ${purchaseOrderId}`
+          )
+        } catch (error) {
+          console.warn(`⚠️ Could not fetch product drafts from database:`, error.message)
+          draftsFromDb = null
+        }
         
         if (!draftsFromDb || draftsFromDb.length === 0) {
           console.log('⚠️ No product drafts found in database either - skipping image attachment')
@@ -1312,7 +1350,7 @@ export class WorkflowOrchestrator {
         
         // Use database drafts
         draftsToProcess = draftsFromDb
-        console.log(`✅ Loaded ${draftsFromDb.length} product drafts from database`)
+        console.log(`✅ Loaded ${draftsToProcess.length} product drafts from database`)
       }
 
       console.log(`🖼️ Found ${draftsToProcess.length} product drafts to process`)
@@ -1336,9 +1374,9 @@ export class WorkflowOrchestrator {
       let imagesFoundCount = 0
 
       // Process each draft to find and attach images
-      for (const [index, draft] of draftsFromDb.entries()) {
+      for (const [index, draft] of draftsToProcess.entries()) {
         try {
-          console.log(`🔍 [${index + 1}/${draftsFromDb.length}] Searching images for: ${draft.originalTitle}`)
+          console.log(`🔍 [${index + 1}/${draftsToProcess.length}] Searching images for: ${draft.originalTitle}`)
           
           // Prepare item data for image search (matching the format expected by imageProcessingService)
           const itemForSearch = {
@@ -1358,21 +1396,29 @@ export class WorkflowOrchestrator {
 
             // Save images to database
             for (const [imgIndex, image] of images.slice(0, 3).entries()) {  // Top 3 images
-              await prisma.productImage.create({
-                data: {
-                  productDraftId: draft.id,
-                  originalUrl: image.url,
-                  altText: draft.originalTitle,
-                  position: imgIndex,
-                  isEnhanced: false,
-                  enhancementData: {
-                    source: image.source || 'google_images_scraping',
-                    confidence: image.confidence || 0.5,
-                    searchQuery: image.searchQuery || itemForSearch.productName,
-                    originalSearchResult: true
-                  }
-                }
-              })
+              // Wrap in retry logic to handle engine warmup delays
+              try {
+                await prismaOperation(
+                  (prisma) => prisma.productImage.create({
+                    data: {
+                      productDraftId: draft.id,
+                      originalUrl: image.url,
+                      altText: draft.originalTitle,
+                      position: imgIndex,
+                      isEnhanced: false,
+                      enhancementData: {
+                        source: image.source || 'google_images_scraping',
+                        confidence: image.confidence || 0.5,
+                        searchQuery: image.searchQuery || itemForSearch.productName,
+                        originalSearchResult: true
+                      }
+                    }
+                  }),
+                  `Create product image for draft ${draft.id}`
+                )
+              } catch (error) {
+                console.warn(`⚠️ Failed to save image ${imgIndex + 1}:`, error.message)
+              }
             }
             
             console.log(`   💾 Saved ${Math.min(3, images.length)} images to database`)
@@ -1381,16 +1427,16 @@ export class WorkflowOrchestrator {
           }
 
           processedCount++
-          job.progress(20 + (processedCount / draftsFromDb.length) * 60)
+          job.progress(20 + (processedCount / draftsToProcess.length) * 60)
           
           // Update DB progress with item counts
-          const currentProgress = Math.round(20 + (processedCount / draftsFromDb.length) * 60)
+          const currentProgress = Math.round(20 + (processedCount / draftsToProcess.length) * 60)
           await this.updatePurchaseOrderProgress(
             purchaseOrderId,
             WORKFLOW_STAGES.IMAGE_ATTACHMENT,
             currentProgress,
             processedCount,
-            draftsFromDb.length
+            draftsToProcess.length
           )
 
         } catch (itemError) {
@@ -1400,7 +1446,7 @@ export class WorkflowOrchestrator {
       }
 
       console.log(`🖼️ Image attachment completed:`)
-      console.log(`   - Processed: ${processedCount}/${draftsFromDb.length} drafts`)
+      console.log(`   - Processed: ${processedCount}/${draftsToProcess.length} drafts`)
       console.log(`   - Images found for: ${imagesFoundCount} products`)
 
       job.progress(85)
@@ -1425,20 +1471,30 @@ export class WorkflowOrchestrator {
 
         if (merchantId && imagesFoundCount > 0) {
           // Get all images for this PO
-          const allImages = await prisma.productImage.findMany({
-            where: {
-              productDraft: {
-                purchaseOrderId
-              }
-            },
-            include: {
-              productDraft: {
+          // Wrap in retry logic to handle engine warmup delays
+          let allImages
+          try {
+            allImages = await prismaOperation(
+              (prisma) => prisma.productImage.findMany({
+                where: {
+                  productDraft: {
+                    purchaseOrderId
+                  }
+                },
                 include: {
-                  POLineItem: true
+                  productDraft: {
+                    include: {
+                      POLineItem: true
+                    }
+                  }
                 }
-              }
-            }
-          })
+              }),
+              `Find product images for PO ${purchaseOrderId}`
+            )
+          } catch (error) {
+            console.warn(`⚠️ Could not fetch product images:`, error.message)
+            allImages = []
+          }
 
           console.log(`🖼️ Found ${allImages.length} images in database for review session`)
 
