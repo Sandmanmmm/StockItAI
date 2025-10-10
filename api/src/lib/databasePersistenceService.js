@@ -58,7 +58,7 @@ export class DatabasePersistenceService {
           console.warn(`⚠️ WARNING: No line items found in extracted data!`)
         }
         
-        // ⚡ CRITICAL OPTIMIZATION: Find/create supplier BEFORE transaction starts
+        // ⚡ CRITICAL OPTIMIZATION #1: Find/create supplier BEFORE transaction starts
         // This avoids expensive fuzzy matching (50+ seconds) inside the 8-second transaction timeout
         console.log(`🔍 [PRE-TRANSACTION] Finding or creating supplier...`)
         const preTransactionStart = Date.now()
@@ -534,38 +534,12 @@ export class DatabasePersistenceService {
       updatedAt: new Date()
     }
     
-    // Only update the number if we have extracted PO number and it's different
+    // Update PO number if extracted by AI
+    // Trust database constraint - it will reject conflicts with P2002 error
     if (extractedData.poNumber || extractedData.number) {
       const extractedPoNumber = extractedData.poNumber || extractedData.number
-      console.log(`   Extracted PO number: ${extractedPoNumber}`)
-      
-      // Check if this number would conflict by fetching current PO
-      try {
-        const currentPO = await tx.purchaseOrder.findUnique({
-          where: { id: purchaseOrderId },
-          select: { number: true, merchantId: true }
-        })
-        
-        if (currentPO && currentPO.number !== extractedPoNumber) {
-          // Check if the extracted number conflicts with another PO
-          const conflictingPO = await tx.purchaseOrder.findFirst({
-            where: {
-              merchantId: currentPO.merchantId,
-              number: extractedPoNumber,
-              id: { not: purchaseOrderId } // Exclude current PO
-            }
-          })
-          
-          if (!conflictingPO) {
-            updateData.number = extractedPoNumber
-            console.log(`   ✅ Updating PO number to: ${extractedPoNumber}`)
-          } else {
-            console.log(`   ⚠️ PO number ${extractedPoNumber} conflicts with existing PO, keeping current number: ${currentPO.number}`)
-          }
-        }
-      } catch (error) {
-        console.log(`   ⚠️ Could not check PO number conflicts, keeping current number:`, error.message)
-      }
+      updateData.number = extractedPoNumber
+      console.log(`   Attempting to update PO number to: ${extractedPoNumber}`)
     }
 
     try {
@@ -576,12 +550,31 @@ export class DatabasePersistenceService {
       
       console.log(`📋 Updated purchase order: ${purchaseOrder.number} (${status})`)
       return purchaseOrder
+      
     } catch (updateError) {
+      // Handle unique constraint violation (P2002) - conflicting PO number
+      if (updateError.code === 'P2002') {
+        console.log(`⚠️ PO number ${updateData.number} conflicts with existing PO`)
+        console.log(`   Retrying update while keeping current PO number...`)
+        
+        // Remove conflicting number and retry without changing it
+        delete updateData.number
+        
+        const purchaseOrder = await tx.purchaseOrder.update({
+          where: { id: purchaseOrderId },
+          data: updateData
+        })
+        
+        console.log(`📋 Updated purchase order (kept original number): ${purchaseOrder.number} (${status})`)
+        return purchaseOrder
+      }
+      
+      // Handle PO not found (P2025) - fallback to create
       if (updateError.code === 'P2025') {
         console.log(`❌ Purchase order ${purchaseOrderId} not found for update, creating new one instead`)
-        // Fallback to creating a new purchase order
         return await this.createPurchaseOrder(tx, aiResult, merchantId, fileName, supplierId, options)
       }
+      
       throw updateError
     }
   }
