@@ -22,34 +22,44 @@ export class DatabasePersistenceService {
    */
   async persistAIResults(aiResult, merchantId, fileName, options = {}) {
     const startTime = Date.now()
-    
-    try {
-      console.log(`📊 Persisting AI results to database for ${fileName}`)
-      console.log(`   Model: ${aiResult.model}, Confidence: ${(aiResult.confidence?.overall || 0)}%`)
-      
-      // Get shared Prisma client (warmup-aware)
-      const prisma = await db.getClient()
-      
-      // Validate extracted data
-      if (!aiResult.extractedData) {
-        throw new Error('No extracted data in AI result')
-      }
-      
-      // Log line items data for debugging
-      const lineItemsData = aiResult.extractedData?.lineItems || aiResult.extractedData?.items || []
-      console.log(`🔍 DEBUG - AI Result Structure:`)
-      console.log(`   - Has extractedData: ${!!aiResult.extractedData}`)
-      console.log(`   - extractedData.lineItems: ${aiResult.extractedData?.lineItems?.length || 0}`)
-      console.log(`   - extractedData.items: ${aiResult.extractedData?.items?.length || 0}`)
-      console.log(`   - extractedData keys:`, Object.keys(aiResult.extractedData || {}))
-      console.log(`   - Full extractedData:`, JSON.stringify(aiResult.extractedData, null, 2))
-      
-      if (lineItemsData.length === 0) {
-        console.warn(`⚠️ WARNING: No line items found in extracted data!`)
-      }
-      
-      // Start database transaction with extended timeout for large POs
-      const result = await prisma.$transaction(async (tx) => {
+    const maxRetries = 3
+    let lastError = null
+
+    // Retry loop for transient connection errors
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        if (attempt > 1) {
+          console.log(`� Retry attempt ${attempt}/${maxRetries} after connection error`)
+          // Wait before retry with exponential backoff
+          await new Promise(resolve => setTimeout(resolve, Math.min(1000 * Math.pow(2, attempt - 1), 5000)))
+        }
+
+        console.log(`�📊 Persisting AI results to database for ${fileName}`)
+        console.log(`   Model: ${aiResult.model}, Confidence: ${(aiResult.confidence?.overall || 0)}%`)
+        
+        // Get shared Prisma client (warmup-aware)
+        const prisma = await db.getClient()
+        
+        // Validate extracted data
+        if (!aiResult.extractedData) {
+          throw new Error('No extracted data in AI result')
+        }
+        
+        // Log line items data for debugging
+        const lineItemsData = aiResult.extractedData?.lineItems || aiResult.extractedData?.items || []
+        console.log(`🔍 DEBUG - AI Result Structure:`)
+        console.log(`   - Has extractedData: ${!!aiResult.extractedData}`)
+        console.log(`   - extractedData.lineItems: ${aiResult.extractedData?.lineItems?.length || 0}`)
+        console.log(`   - extractedData.items: ${aiResult.extractedData?.items?.length || 0}`)
+        console.log(`   - extractedData keys:`, Object.keys(aiResult.extractedData || {}))
+        console.log(`   - Full extractedData:`, JSON.stringify(aiResult.extractedData, null, 2))
+        
+        if (lineItemsData.length === 0) {
+          console.warn(`⚠️ WARNING: No line items found in extracted data!`)
+        }
+        
+        // Start database transaction with extended timeout for large POs
+        const result = await prisma.$transaction(async (tx) => {
         
         // 1. Find or create supplier
         const supplier = await this.findOrCreateSupplier(
@@ -140,31 +150,50 @@ export class DatabasePersistenceService {
       })
       
       // Verify line items persisted after transaction commit
-      const postCommitCount = await prisma.pOLineItem.count({
-        where: { purchaseOrderId: result.purchaseOrder.id }
-      })
-      console.log(`✅ POST-COMMIT VERIFICATION: ${postCommitCount} line items found for PO ${result.purchaseOrder.id}`)
-      
-      if (postCommitCount === 0 && result.lineItems.length > 0) {
-        console.error(`❌ CRITICAL: Line items lost after commit! Created ${result.lineItems.length}, found ${postCommitCount}`)
+        const postCommitCount = await prisma.pOLineItem.count({
+          where: { purchaseOrderId: result.purchaseOrder.id }
+        })
+        console.log(`✅ POST-COMMIT VERIFICATION: ${postCommitCount} line items found for PO ${result.purchaseOrder.id}`)
+        
+        if (postCommitCount === 0 && result.lineItems.length > 0) {
+          console.error(`❌ CRITICAL: Line items lost after commit! Created ${result.lineItems.length}, found ${postCommitCount}`)
+        }
+        
+        // Update supplier performance metrics
+        if (result.supplier) {
+          await this.updateSupplierMetrics(result.supplier.id, aiResult.confidence?.overall)
+        }
+        
+        // Success - return result and exit retry loop
+        return {
+          success: true,
+          ...result
+        }
+        
+      } catch (error) {
+        lastError = error
+        console.error(`❌ Database persistence failed (attempt ${attempt}/${maxRetries}):`, error.message)
+        
+        // Check if error is retryable (connection/engine errors)
+        const isRetryable = error.message?.includes('Engine') || 
+                           error.message?.includes('empty') ||
+                           error.message?.includes('not yet connected') ||
+                           error.message?.includes('timeout') ||
+                           error.code === 'P1001' || // Can't reach database
+                           error.code === 'P2024'    // Timed out fetching
+        
+        if (!isRetryable || attempt === maxRetries) {
+          // Non-retryable error or max retries reached - throw
+          throw new Error(`Database persistence failed after ${attempt} attempts: ${error.message}`)
+        }
+        
+        // Will retry on next loop iteration
+        console.log(`⏳ Will retry due to transient connection error...`)
       }
-      
-      // Update supplier performance metrics
-      if (result.supplier) {
-        await this.updateSupplierMetrics(result.supplier.id, aiResult.confidence?.overall)
-      }
-      
-      return {
-        success: true,
-        ...result
-      }
-      
-    } catch (error) {
-      console.error('❌ Database persistence failed:', error.message)
-      // RE-THROW error to ensure proper error propagation
-      // This prevents false success messages from being logged
-      throw new Error(`Database persistence failed: ${error.message}`)
     }
+    
+    // Should never reach here (loop always returns or throws)
+    throw new Error(`Database persistence failed after ${maxRetries} attempts: ${lastError?.message}`)
   }
 
   /**
