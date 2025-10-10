@@ -1278,7 +1278,7 @@ export class WorkflowOrchestrator {
         WORKFLOW_STAGES.IMAGE_ATTACHMENT,
         20,
         0,
-        draftsFromDb.length
+        draftsToProcess.length
       )
 
       // Import the image processing service
