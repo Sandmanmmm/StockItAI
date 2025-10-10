@@ -70,6 +70,20 @@ export class DatabasePersistenceService {
         )
         console.log(`✅ [PRE-TRANSACTION] Supplier resolved in ${Date.now() - preTransactionStart}ms`)
         
+        // Handle PO number conflicts by removing the number from extracted data
+        let skipPoNumberUpdate = false
+        if (options.poNumberConflict) {
+          console.log(`⚠️ Retrying transaction after PO number conflict: ${options.poNumberConflict}`)
+          console.log(`   Will skip updating PO number to avoid conflict`)
+          skipPoNumberUpdate = true
+          
+          // Remove PO number from extracted data so updatePurchaseOrder doesn't try to update it
+          if (aiResult.extractedData) {
+            delete aiResult.extractedData.poNumber
+            delete aiResult.extractedData.number
+          }
+        }
+        
         // Start database transaction - now only fast writes, no expensive queries
         const result = await prisma.$transaction(async (tx) => {
         
@@ -79,6 +93,7 @@ export class DatabasePersistenceService {
         console.log(`🔍 Database save mode check:`)
         console.log(`   options.purchaseOrderId:`, options.purchaseOrderId)
         console.log(`   Will ${options.purchaseOrderId ? 'UPDATE' : 'CREATE'} purchase order`)
+        console.log(`   Skip PO number update: ${skipPoNumberUpdate}`)
         
         const purchaseOrder = options.purchaseOrderId 
           ? await this.updatePurchaseOrder(
@@ -179,6 +194,20 @@ export class DatabasePersistenceService {
         
       } catch (error) {
         lastError = error
+        
+        // Special handling for PO number conflicts
+        if (error.code === 'PO_NUMBER_CONFLICT') {
+          console.log(`⚠️ PO number conflict detected: ${error.conflictingNumber}`)
+          console.log(`   Transaction was aborted by PostgreSQL`)
+          console.log(`   Retrying entire operation without changing PO number...`)
+          
+          // Retry the ENTIRE transaction without the PO number change
+          return await this.persistAIResults(aiResult, merchantId, fileName, {
+            ...options,
+            poNumberConflict: error.conflictingNumber // Signal to skip PO number update
+          })
+        }
+        
         console.error(`❌ Database persistence failed (attempt ${attempt}/${maxRetries}):`, error.message)
         
         // Check if error is retryable (connection/engine errors)
@@ -535,7 +564,8 @@ export class DatabasePersistenceService {
     }
     
     // Update PO number if extracted by AI
-    // Trust database constraint - it will reject conflicts with P2002 error
+    // Note: If conflict occurs, the ENTIRE update will be included in updateData
+    // but we'll just skip changing the number (keep existing)
     if (extractedData.poNumber || extractedData.number) {
       const extractedPoNumber = extractedData.poNumber || extractedData.number
       updateData.number = extractedPoNumber
@@ -553,20 +583,17 @@ export class DatabasePersistenceService {
       
     } catch (updateError) {
       // Handle unique constraint violation (P2002) - conflicting PO number
+      // IMPORTANT: P2002 aborts the transaction, so we need to throw and let
+      // the outer transaction handler retry the ENTIRE transaction without the number
       if (updateError.code === 'P2002') {
         console.log(`⚠️ PO number ${updateData.number} conflicts with existing PO`)
-        console.log(`   Retrying update while keeping current PO number...`)
+        console.log(`   ⚠️ Transaction aborted by PostgreSQL - need to retry entire operation`)
         
-        // Remove conflicting number and retry without changing it
-        delete updateData.number
-        
-        const purchaseOrder = await tx.purchaseOrder.update({
-          where: { id: purchaseOrderId },
-          data: updateData
-        })
-        
-        console.log(`📋 Updated purchase order (kept original number): ${purchaseOrder.number} (${status})`)
-        return purchaseOrder
+        // Throw a special error that tells the caller to retry without number change
+        const error = new Error(`PO_NUMBER_CONFLICT: ${updateData.number}`)
+        error.code = 'PO_NUMBER_CONFLICT'
+        error.conflictingNumber = updateData.number
+        throw error
       }
       
       // Handle PO not found (P2025) - fallback to create
