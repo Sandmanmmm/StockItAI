@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client'
+import { db, prismaOperation } from './db.js'
 import { autoMatchSupplier } from '../services/supplierMatchingService.js'
 
 /**
@@ -7,7 +7,9 @@ import { autoMatchSupplier } from '../services/supplierMatchingService.js'
  */
 export class DatabasePersistenceService {
   constructor() {
-    this.prisma = new PrismaClient()
+    // Use shared warmup-aware Prisma client instead of creating new instance
+    // This prevents connection pool exhaustion in serverless
+    this.prisma = null // Will be set dynamically via db.getClient()
   }
 
   /**
@@ -24,6 +26,9 @@ export class DatabasePersistenceService {
     try {
       console.log(`📊 Persisting AI results to database for ${fileName}`)
       console.log(`   Model: ${aiResult.model}, Confidence: ${(aiResult.confidence?.overall || 0)}%`)
+      
+      // Get shared Prisma client (warmup-aware)
+      const prisma = await db.getClient()
       
       // Validate extracted data
       if (!aiResult.extractedData) {
@@ -44,7 +49,7 @@ export class DatabasePersistenceService {
       }
       
       // Start database transaction with extended timeout for large POs
-      const result = await this.prisma.$transaction(async (tx) => {
+      const result = await prisma.$transaction(async (tx) => {
         
         // 1. Find or create supplier
         const supplier = await this.findOrCreateSupplier(
@@ -130,12 +135,12 @@ export class DatabasePersistenceService {
           processingTime: Date.now() - startTime
         }
       }, {
-        maxWait: 30000, // Maximum time to wait to start transaction (30s)
-        timeout: 120000 // Maximum transaction time (120s = 2 minutes)
+        maxWait: 20000, // Maximum time to wait to start transaction (20s, reduced from 30s)
+        timeout: 60000 // Maximum transaction time (60s = 1 minute, reduced from 2 minutes for serverless)
       })
       
       // Verify line items persisted after transaction commit
-      const postCommitCount = await this.prisma.pOLineItem.count({
+      const postCommitCount = await prisma.pOLineItem.count({
         where: { purchaseOrderId: result.purchaseOrder.id }
       })
       console.log(`✅ POST-COMMIT VERIFICATION: ${postCommitCount} line items found for PO ${result.purchaseOrder.id}`)
@@ -649,13 +654,16 @@ export class DatabasePersistenceService {
    */
   async updateSupplierMetrics(supplierId, confidence) {
     try {
-      await this.prisma.supplier.update({
-        where: { id: supplierId },
-        data: {
-          averageAccuracy: confidence ? confidence / 100 : undefined,
-          lastSync: new Date()
-        }
-      })
+      await prismaOperation(
+        (client) => client.supplier.update({
+          where: { id: supplierId },
+          data: {
+            averageAccuracy: confidence ? confidence / 100 : undefined,
+            lastSync: new Date()
+          }
+        }),
+        'Update supplier metrics'
+      )
     } catch (error) {
       console.warn('⚠️ Failed to update supplier metrics:', error.message)
     }
@@ -672,37 +680,46 @@ export class DatabasePersistenceService {
     else if (timeRange === '90d') startDate.setDate(startDate.getDate() - 90)
     
     try {
-      const stats = await this.prisma.aIProcessingAudit.aggregate({
-        where: {
-          createdAt: { gte: startDate },
-          purchaseOrder: { merchantId }
-        },
-        _count: { id: true },
-        _sum: { tokenCount: true },
-        _avg: { 
-          confidence: true,
-          processingTime: true
-        }
-      })
+      const stats = await prismaOperation(
+        (client) => client.aIProcessingAudit.aggregate({
+          where: {
+            createdAt: { gte: startDate },
+            purchaseOrder: { merchantId }
+          },
+          _count: { id: true },
+          _sum: { tokenCount: true },
+          _avg: { 
+            confidence: true,
+            processingTime: true
+          }
+        }),
+        'Get processing stats aggregate'
+      )
       
-      const statusCounts = await this.prisma.aIProcessingAudit.groupBy({
-        by: ['status'],
-        where: {
-          createdAt: { gte: startDate },
-          purchaseOrder: { merchantId }
-        },
-        _count: { id: true }
-      })
+      const statusCounts = await prismaOperation(
+        (client) => client.aIProcessingAudit.groupBy({
+          by: ['status'],
+          where: {
+            createdAt: { gte: startDate },
+            purchaseOrder: { merchantId }
+          },
+          _count: { id: true }
+        }),
+        'Get status counts'
+      )
       
-      const modelUsage = await this.prisma.aIProcessingAudit.groupBy({
-        by: ['model'],
-        where: {
-          createdAt: { gte: startDate },
-          purchaseOrder: { merchantId }
-        },
-        _count: { id: true },
-        _sum: { tokenCount: true }
-      })
+      const modelUsage = await prismaOperation(
+        (client) => client.aIProcessingAudit.groupBy({
+          by: ['model'],
+          where: {
+            createdAt: { gte: startDate },
+            purchaseOrder: { merchantId }
+          },
+          _count: { id: true },
+          _sum: { tokenCount: true }
+        }),
+        'Get model usage'
+      )
       
       return {
         totalProcessed: stats._count.id || 0,
@@ -731,20 +748,23 @@ export class DatabasePersistenceService {
    */
   async getRecentProcessing(merchantId, limit = 10) {
     try {
-      return await this.prisma.purchaseOrder.findMany({
-        where: { merchantId },
-        include: {
-          supplier: { select: { name: true } },
-          lineItems: { select: { id: true, productName: true, confidence: true } },
-          aiAuditTrail: { 
-            select: { model: true, tokenCount: true, confidence: true, status: true },
-            orderBy: { createdAt: 'desc' },
-            take: 1
-          }
-        },
-        orderBy: { createdAt: 'desc' },
-        take: limit
-      })
+      return await prismaOperation(
+        (client) => client.purchaseOrder.findMany({
+          where: { merchantId },
+          include: {
+            supplier: { select: { name: true } },
+            lineItems: { select: { id: true, productName: true, confidence: true } },
+            aiAuditTrail: { 
+              select: { model: true, tokenCount: true, confidence: true, status: true },
+              orderBy: { createdAt: 'desc' },
+              take: 1
+            }
+          },
+          orderBy: { createdAt: 'desc' },
+          take: limit
+        }),
+        'Get recent processing'
+      )
     } catch (error) {
       console.error('❌ Failed to get recent processing:', error.message)
       return []
@@ -752,10 +772,11 @@ export class DatabasePersistenceService {
   }
 
   /**
-   * Close database connection
+   * Close database connection (no-op now that we use shared client)
    */
   async disconnect() {
-    await this.prisma.$disconnect()
+    // No-op: shared client is managed by db.js
+    console.log('📝 DatabasePersistenceService.disconnect() called (no-op with shared client)')
   }
 }
 
