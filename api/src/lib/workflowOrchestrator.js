@@ -455,7 +455,7 @@ export class WorkflowOrchestrator {
    * @param {string} stage - Stage where failure occurred
    * @param {Error} error - Error details
    */
-  async failWorkflow(workflowId, stage, error) {
+  async failWorkflow(workflowId, stage, error, purchaseOrderId = null) {
     console.log(`❌ Failing workflow ${workflowId} at stage ${stage}: ${error.message}`)
     
     const metadata = await this.getWorkflowMetadata(workflowId)
@@ -472,13 +472,16 @@ export class WorkflowOrchestrator {
       await this.setWorkflowMetadata(workflowId, metadata)
       
       // CRITICAL: Also update the PO record in database to "failed" status
-      if (metadata.purchaseOrderId) {
+      // Try passed purchaseOrderId first, fallback to metadata
+      const poId = purchaseOrderId || metadata.purchaseOrderId
+      
+      if (poId) {
         try {
-          console.log(`📊 Updating PO ${metadata.purchaseOrderId} status to failed due to workflow failure`)
+          console.log(`📊 Updating PO ${poId} status to failed due to workflow failure`)
           
           await prismaOperation(
             (prisma) => prisma.purchaseOrder.update({
-              where: { id: metadata.purchaseOrderId },
+              where: { id: poId },
               data: {
                 status: 'failed',
                 jobStatus: 'failed',
@@ -488,16 +491,16 @@ export class WorkflowOrchestrator {
                 updatedAt: new Date()
               }
             }),
-            `Mark PO ${metadata.purchaseOrderId} as failed`
+            `Mark PO ${poId} as failed`
           )
           
-          console.log(`✅ PO ${metadata.purchaseOrderId} status updated to failed`)
+          console.log(`✅ PO ${poId} status updated to failed`)
           
         } catch (dbError) {
           console.error(`❌ Failed to update PO status to failed: ${dbError.message}`)
         }
       } else {
-        console.log('⚠️ No purchaseOrderId in workflow metadata, cannot update PO status')
+        console.log('⚠️ No purchaseOrderId in workflow metadata or parameters, cannot update PO status')
       }
     }
   }
@@ -953,7 +956,7 @@ export class WorkflowOrchestrator {
       
     } catch (error) {
       console.error('❌ Database save failed:', error)
-      await this.failWorkflow(workflowId, WORKFLOW_STAGES.DATABASE_SAVE, error)
+      await this.failWorkflow(workflowId, WORKFLOW_STAGES.DATABASE_SAVE, error, purchaseOrderId)
       throw error
     }
   }
