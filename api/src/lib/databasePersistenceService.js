@@ -71,7 +71,13 @@ export class DatabasePersistenceService {
         console.log(`✅ [PRE-TRANSACTION] Supplier resolved in ${Date.now() - preTransactionStart}ms`)
         
         // Start database transaction - now only fast writes, no expensive queries
+        const txStartTime = Date.now()
+        const txId = `tx_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+        console.log(`🔒 [${txId}] Starting transaction...`)
+        
         const result = await prisma.$transaction(async (tx) => {
+          const txAge = Date.now() - txStartTime
+          console.log(`🔒 [${txId}] Inside transaction (age: ${txAge}ms)`)
         
         // OPTIMIZATION: Pre-check for available PO number (Solution 3) - INSIDE TRANSACTION
         // This is inside tx so it benefits from warmup protection and connection stability
@@ -207,6 +213,13 @@ export class DatabasePersistenceService {
         console.log(`   ✓ Verification: ${verifyCount} line items in transaction before commit`)
         console.log(`   Audit ID: ${auditRecord.id}`)
         
+        const txDuration = Date.now() - txStartTime
+        console.log(`🔒 [${txId}] Transaction body complete (duration: ${txDuration}ms)`)
+        
+        if (txDuration > 7000) {
+          console.warn(`⚠️ [${txId}] Transaction took ${txDuration}ms - approaching 8s timeout!`)
+        }
+        
         return {
           purchaseOrder,
           supplier,
@@ -219,6 +232,9 @@ export class DatabasePersistenceService {
         timeout: 8000, // Maximum transaction time (8s, leaving 2s buffer for 10s function timeout)
         isolationLevel: 'ReadCommitted' // Reduce lock contention
       })
+      
+      const txCommitDuration = Date.now() - txStartTime
+      console.log(`🔒 [${txId}] Transaction committed successfully (total: ${txCommitDuration}ms)`)
       
       // Verify line items persisted after transaction commit
         const postCommitCount = await prisma.pOLineItem.count({
