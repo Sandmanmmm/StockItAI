@@ -287,31 +287,69 @@ async function initializePrisma() {
           warmupPromise = (async () => {
             await new Promise(resolve => setTimeout(resolve, warmupDelayMs))
             
-            // Quick verification with retry logic
-            let verified = false
+            // TWO-PHASE VERIFICATION: Both raw SQL and model operations must succeed
+            // Phase 1: Verify raw query engine (connection layer)
+            let rawVerified = false
             for (let i = 0; i < 3; i++) {
               try {
                 await rawPrisma.$queryRaw`SELECT 1 as healthcheck`
-                console.log(`✅ Engine verified - ready for queries`)
-                verified = true
+                console.log(`✅ Engine verified (Phase 1: Raw SQL) - connection layer ready`)
+                rawVerified = true
                 break
               } catch (error) {
                 if (i < 2) {
-                  console.warn(`⚠️ Verification attempt ${i + 1}/3 failed, retrying in 500ms...`)
+                  console.warn(`⚠️ Phase 1 verification attempt ${i + 1}/3 failed, retrying in 500ms...`)
                   await new Promise(resolve => setTimeout(resolve, 500))
                 } else {
-                  console.error(`❌ Engine verification failed after 3 attempts:`, error.message)
+                  console.error(`❌ Phase 1 verification failed after 3 attempts:`, error.message)
                   throw error
                 }
               }
             }
             
-            // Mark warmup complete after verification succeeds
+            // Phase 2: Verify model operation engine (query planner layer)
+            // CRITICAL: This catches cases where raw SQL works but model ops don't
+            // Use a simple findFirst with where clause to test full query path
+            let modelVerified = false
+            for (let i = 0; i < 3; i++) {
+              try {
+                // Test actual model operation - this uses a different engine path than $queryRaw
+                // Using a lightweight query that won't fail on "no records" but will fail on engine issues
+                await rawPrisma.workflowExecution.findFirst({ 
+                  where: { id: '__warmup_test__' }, 
+                  select: { id: true } 
+                })
+                console.log(`✅ Engine verified (Phase 2: Model Operations) - query planner ready`)
+                modelVerified = true
+                break
+              } catch (error) {
+                // P2025 (record not found) is expected and means engine is working
+                if (error.code === 'P2025' || error.message.includes('No')) {
+                  console.log(`✅ Engine verified (Phase 2: Model Operations) - query planner ready`)
+                  modelVerified = true
+                  break
+                }
+                
+                if (i < 2) {
+                  console.warn(`⚠️ Phase 2 verification attempt ${i + 1}/3 failed, retrying in 500ms...`)
+                  await new Promise(resolve => setTimeout(resolve, 500))
+                } else {
+                  console.error(`❌ Phase 2 verification failed after 3 attempts:`, error.message)
+                  throw error
+                }
+              }
+            }
+            
+            if (!rawVerified || !modelVerified) {
+              throw new Error('Engine warmup verification incomplete')
+            }
+            
+            // Mark warmup complete after BOTH phases succeed
             warmupComplete = true
             
             // Phase 3: Log actual warmup duration for metrics
             const actualWarmupMs = Date.now() - warmupStartTime
-            console.log(`✅ Warmup complete in ${actualWarmupMs}ms - engine ready for production queries`)
+            console.log(`✅ Warmup complete in ${actualWarmupMs}ms - engine fully ready for all operations`)
           })()
           
           // Wait for warmup to complete before continuing
