@@ -112,6 +112,14 @@ async function initializePrisma() {
         try {
           await healthCheckPromise
           console.log(`✅ Health check completed by other request - client is healthy`)
+          // Check if client still exists after wait (might have been disconnected)
+          if (!prisma) {
+            console.log(`⚠️ Client was disconnected during health check, will reconnect`)
+            if (isConnecting && connectionPromise) {
+              await connectionPromise
+              return await initializePrisma()
+            }
+          }
           return prisma
         } catch (error) {
           console.log(`❌ Health check failed by other request - will reconnect`)
@@ -126,10 +134,19 @@ async function initializePrisma() {
       // Run health check with lock to prevent concurrent checks
       healthCheckPromise = (async () => {
         try {
-          // CRITICAL: Health check FIRST before logging or returning
-          // Serverless functions may reuse memory but engine connections die
-          // Use raw client for health check to avoid retry wrapper interference
-          await rawPrisma.$queryRaw`SELECT 1 as healthcheck`
+          // CRITICAL: Check if client still exists before health check
+          // It might have been nulled by another concurrent request
+          if (!rawPrisma || !prisma) {
+            throw new Error('Client was disconnected before health check could run')
+          }
+          
+          // CRITICAL: Use real model query, not raw SQL
+          // $queryRaw uses different engine path than model queries
+          // Health check must match actual usage patterns
+          await rawPrisma.session.findFirst({ 
+            where: { id: 'health_check_non_existent' },
+            select: { id: true }
+          })
           console.log(`✅ Reusing existing Prisma client (version ${PRISMA_CLIENT_VERSION})`)
           console.log(`✅ Reused client health check passed`)
           healthCheckPromise = null // Clear lock
