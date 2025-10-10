@@ -15,6 +15,7 @@ let rawPrisma // underlying Prisma client before proxy wrapping
 let prismaVersion = null
 let isConnecting = false // Connection lock to prevent concurrent initialization
 let connectionPromise = null // Store the connection promise for concurrent requests
+let healthCheckPromise = null // Lock for concurrent health checks
 const PRISMA_CLIENT_VERSION = 'v5_transaction_recovery' // Increment to force recreation
 
 // Increase process listener limit for Prisma reconnections
@@ -70,6 +71,7 @@ async function forceDisconnect() {
     prismaVersion = null
     isConnecting = false
     connectionPromise = null
+    healthCheckPromise = null // Clear health check lock
     console.log(`✅ Client cleared, next request will create fresh connection`)
   }
 }
@@ -104,26 +106,50 @@ async function initializePrisma() {
     
     // Reuse existing client if version matches AND it's fully connected
     if (prisma && prismaVersion === PRISMA_CLIENT_VERSION) {
-      // CRITICAL: Health check FIRST before logging or returning
-      // Serverless functions may reuse memory but engine connections die
-      try {
-        // Use raw client for health check to avoid retry wrapper interference
-        await rawPrisma.$queryRaw`SELECT 1 as healthcheck`
-        console.log(`✅ Reusing existing Prisma client (version ${PRISMA_CLIENT_VERSION})`)
-        console.log(`✅ Reused client health check passed`)
-        return prisma // Client is healthy!
-      } catch (error) {
-        console.warn(`⚠️ Existing client health check failed:`, error.message)
-        
-        // Set connection lock BEFORE disconnecting
-        // This prevents other concurrent requests from using dead client
-        isConnecting = true
-        
-        // ANY failure on reused client = force reconnect
-        console.log(`🔄 Forcing full reconnect due to failed health check`)
-        await forceDisconnect()
-        // Fall through to create new client (isConnecting flag is set)
+      // If another request is already health-checking, wait for its result
+      if (healthCheckPromise) {
+        console.log(`⏳ Another request is health-checking, waiting...`)
+        try {
+          await healthCheckPromise
+          console.log(`✅ Health check completed by other request - client is healthy`)
+          return prisma
+        } catch (error) {
+          console.log(`❌ Health check failed by other request - will reconnect`)
+          // Fall through to reconnection logic (isConnecting should be set)
+          if (isConnecting && connectionPromise) {
+            await connectionPromise
+            return await initializePrisma()
+          }
+        }
       }
+      
+      // Run health check with lock to prevent concurrent checks
+      healthCheckPromise = (async () => {
+        try {
+          // CRITICAL: Health check FIRST before logging or returning
+          // Serverless functions may reuse memory but engine connections die
+          // Use raw client for health check to avoid retry wrapper interference
+          await rawPrisma.$queryRaw`SELECT 1 as healthcheck`
+          console.log(`✅ Reusing existing Prisma client (version ${PRISMA_CLIENT_VERSION})`)
+          console.log(`✅ Reused client health check passed`)
+          healthCheckPromise = null // Clear lock
+          return prisma // Client is healthy!
+        } catch (error) {
+          console.warn(`⚠️ Existing client health check failed:`, error.message)
+          
+          // Set connection lock BEFORE disconnecting
+          // This prevents other concurrent requests from using dead client
+          isConnecting = true
+          healthCheckPromise = null // Clear health check lock
+          
+          // ANY failure on reused client = force reconnect
+          console.log(`🔄 Forcing full reconnect due to failed health check`)
+          await forceDisconnect()
+          throw error // Propagate to waiting requests
+        }
+      })()
+      
+      return await healthCheckPromise
     }
     
     if (!prisma) {
