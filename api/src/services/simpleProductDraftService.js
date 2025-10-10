@@ -1,3 +1,5 @@
+import { prismaOperation } from '../lib/db.js';
+
 export class SimpleProductDraftService {
   constructor(dbProvider) {
     this.db = dbProvider;
@@ -19,43 +21,45 @@ export class SimpleProductDraftService {
    * Create a new product draft using our actual Prisma schema
    */
   async createProductDraft(data) {
-    const prisma = await this._getClient();
-
     // First create the draft without any heavy relation loading
-    const created = await prisma.productDraft.create({
-      data
-    });
+    const created = await prismaOperation(
+      (client) => client.productDraft.create({ data }),
+      'Create product draft'
+    );
 
     // Follow up with a lightweight read for just the fields we need downstream
-    const productDraft = await prisma.productDraft.findUnique({
-      where: { id: created.id },
-      select: {
-        id: true,
-        lineItemId: true,
-        sessionId: true,
-        merchantId: true,
-        supplierId: true,
-        purchaseOrderId: true,
-        originalTitle: true,
-        refinedTitle: true,
-        originalDescription: true,
-        refinedDescription: true,
-        originalPrice: true,
-        priceRefined: true,
-        estimatedMargin: true,
-        status: true,
-        tags: true,
-        createdAt: true,
-        updatedAt: true,
-        POLineItem: {
-          select: {
-            id: true,
-            sku: true,
-            productName: true
+    const productDraft = await prismaOperation(
+      (client) => client.productDraft.findUnique({
+        where: { id: created.id },
+        select: {
+          id: true,
+          lineItemId: true,
+          sessionId: true,
+          merchantId: true,
+          supplierId: true,
+          purchaseOrderId: true,
+          originalTitle: true,
+          refinedTitle: true,
+          originalDescription: true,
+          refinedDescription: true,
+          originalPrice: true,
+          priceRefined: true,
+          estimatedMargin: true,
+          status: true,
+          tags: true,
+          createdAt: true,
+          updatedAt: true,
+          POLineItem: {
+            select: {
+              id: true,
+              sku: true,
+              productName: true
+            }
           }
         }
-      }
-    });
+      }),
+      'Find created product draft'
+    );
 
     if (productDraft && productDraft.POLineItem && !productDraft.lineItem) {
       productDraft.lineItem = productDraft.POLineItem;
@@ -68,61 +72,64 @@ export class SimpleProductDraftService {
    * Get all product drafts for a merchant
    */
   async getProductDrafts(merchantId) {
-    const prisma = await this._getClient();
-    return await prisma.productDraft.findMany({
-      where: { merchantId },
-      include: {
-        Session: true,
-        supplier: true,
-        purchaseOrder: true,
-        POLineItem: true,
-        images: true,
-        variants: true
-      },
-      orderBy: { createdAt: 'desc' }
-    });
+    return await prismaOperation(
+      (client) => client.productDraft.findMany({
+        where: { merchantId },
+        include: {
+          Session: true,
+          supplier: true,
+          purchaseOrder: true,
+          POLineItem: true,
+          images: true,
+          variants: true
+        },
+        orderBy: { createdAt: 'desc' }
+      }),
+      'Get product drafts for merchant'
+    );
   }
 
   /**
    * Update a product draft
    */
   async updateProductDraft(id, data) {
-    const prisma = await this._getClient();
     const updateData = { 
       ...data,
       reviewedAt: data.reviewedBy ? new Date() : undefined
     };
     
-    return await prisma.productDraft.update({
-      where: { id },
-      data: updateData,
-      include: {
-        Session: true,
-        merchant: true,
-        supplier: true,
-        purchaseOrder: true,
-        POLineItem: true,
-        images: true,
-        variants: true
-      }
-    });
+    return await prismaOperation(
+      (client) => client.productDraft.update({
+        where: { id },
+        data: updateData,
+        include: {
+          Session: true,
+          merchant: true,
+          supplier: true,
+          purchaseOrder: true,
+          POLineItem: true,
+          images: true,
+          variants: true
+        }
+      }),
+      'Update product draft'
+    );
   }
 
   /**
    * Delete a product draft
    */
   async deleteProductDraft(id) {
-    const prisma = await this._getClient();
-    return await prisma.productDraft.delete({
-      where: { id }
-    });
+    return await prismaOperation(
+      (client) => client.productDraft.delete({ where: { id } }),
+      'Delete product draft'
+    );
   }
 
   /**
    * Get analytics for product drafts
    */
   async getAnalytics(merchantId) {
-    const prisma = await this._getClient();
     const [
       total,
       byStatus,
@@ -130,35 +137,45 @@ export class SimpleProductDraftService {
       recentCount
     ] = await Promise.all([
       // Total count
-      prisma.productDraft.count({
-        where: { merchantId }
-      }),
+      prismaOperation(
+        (client) => client.productDraft.count({ where: { merchantId } }),
+        'Count total product drafts'
+      ),
       
       // Count by status
-      prisma.productDraft.groupBy({
-        by: ['status'],
-        where: { merchantId },
-        _count: true
-      }),
+      prismaOperation(
+        (client) => client.productDraft.groupBy({
+          by: ['status'],
+          where: { merchantId },
+          _count: true
+        }),
+        'Group product drafts by status'
+      ),
       
       // Average margin
-      prisma.productDraft.aggregate({
-        where: { 
-          merchantId,
-          estimatedMargin: { not: null }
-        },
-        _avg: { estimatedMargin: true }
-      }),
+      prismaOperation(
+        (client) => client.productDraft.aggregate({
+          where: { 
+            merchantId,
+            estimatedMargin: { not: null }
+          },
+          _avg: { estimatedMargin: true }
+        }),
+        'Calculate average margin'
+      ),
       
       // Recent count (last 7 days)
-      prisma.productDraft.count({
-        where: {
-          merchantId,
-          createdAt: {
-            gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+      prismaOperation(
+        (client) => client.productDraft.count({
+          where: {
+            merchantId,
+            createdAt: {
+              gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+            }
           }
-        }
-      })
+        }),
+        'Count recent product drafts'
+      )
     ]);
 
     return {
