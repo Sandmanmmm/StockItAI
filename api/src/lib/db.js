@@ -757,8 +757,9 @@ export const db = {
   }
 }
 
-// Export retry utilities for direct use (Phase 2: Removed createRetryablePrismaClient)
-export { withPrismaRetry }
+// Re-export retry utilities for backwards compatibility (imported above for local use)
+// Using re-export syntax to make it available to other modules
+export { withPrismaRetry } from './prismaRetryWrapper.js'
 
 const prismaWarmupPromise = initializePrisma().catch(error => {
   console.error('❌ Initial Prisma warmup failed:', error)
