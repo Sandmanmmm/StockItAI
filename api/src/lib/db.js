@@ -317,7 +317,19 @@ async function initializePrisma() {
                     }
                   }
                   
-                  // Add retry logic at extension level for extra safety
+                  // CRITICAL FIX: Skip retry logic for transaction operations
+                  // Transactions have strict timeouts (8s) and retries can cause them to timeout
+                  // resulting in "Transaction not found" errors
+                  // The warmup wait above is sufficient for transaction operations
+                  const isTransactionOperation = args?.__prismaTransactionContext !== undefined
+                  
+                  if (isTransactionOperation) {
+                    // Inside a transaction - execute immediately without retries
+                    // The transaction timeout is too short for retry delays
+                    return await query(args)
+                  }
+                  
+                  // Add retry logic at extension level for non-transaction operations
                   const maxRetries = 3
                   let lastError
                   

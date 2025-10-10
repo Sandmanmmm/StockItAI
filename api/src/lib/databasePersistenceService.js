@@ -145,8 +145,9 @@ export class DatabasePersistenceService {
           processingTime: Date.now() - startTime
         }
       }, {
-        maxWait: 20000, // Maximum time to wait to start transaction (20s, reduced from 30s)
-        timeout: 60000 // Maximum transaction time (60s = 1 minute, reduced from 2 minutes for serverless)
+        maxWait: 5000, // Maximum time to wait to start transaction (5s for serverless)
+        timeout: 8000, // Maximum transaction time (8s, leaving 2s buffer for 10s function timeout)
+        isolationLevel: 'ReadCommitted' // Reduce lock contention
       })
       
       // Verify line items persisted after transaction commit

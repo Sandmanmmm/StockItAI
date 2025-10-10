@@ -498,7 +498,26 @@ export class WorkflowOrchestrator {
     const completedStages = Object.values(metadata.stages).filter(s => s.status === 'completed').length
     metadata.progress = Math.round((completedStages / totalStages) * 100)
 
+    // Save to Redis
     await this.setWorkflowMetadata(workflowId, metadata)
+    
+    // CRITICAL: Also update database workflowExecution record for cron job tracking
+    // This prevents cron from thinking workflows are "stuck" when they're actually processing
+    try {
+      const prisma = await db.getClient()
+      await prisma.workflowExecution.update({
+        where: { workflowId },
+        data: {
+          currentStage: stage,
+          progressPercent: metadata.progress,
+          stagesCompleted: completedStages,
+          updatedAt: new Date() // This is critical - cron uses updatedAt to detect stuck workflows
+        }
+      })
+    } catch (dbError) {
+      // Non-fatal - Redis is the source of truth, database is just for cron tracking
+      console.warn(`⚠️ Failed to update database workflowExecution record (non-fatal):`, dbError.message)
+    }
   }
 
   /**
@@ -520,7 +539,29 @@ export class WorkflowOrchestrator {
     metadata.progress = 100
     metadata.result = result
 
+    // Save to Redis
     await this.setWorkflowMetadata(workflowId, metadata)
+    
+    // CRITICAL: Mark workflow as completed in database so cron doesn't reprocess it
+    try {
+      const prisma = await db.getClient()
+      await prisma.workflowExecution.update({
+        where: { workflowId },
+        data: {
+          status: 'completed',
+          currentStage: 'completed',
+          progressPercent: 100,
+          stagesCompleted: Object.keys(metadata.stages).length,
+          completedAt: new Date(),
+          updatedAt: new Date()
+        }
+      })
+      console.log(`✅ Workflow ${workflowId} marked as completed in database`)
+    } catch (dbError) {
+      console.error(`❌ Failed to mark workflow as completed in database:`, dbError.message)
+      // Still throw since completion is critical
+      throw dbError
+    }
   }
 
   /**
@@ -543,7 +584,27 @@ export class WorkflowOrchestrator {
         stack: error.stack
       }
 
+      // Save to Redis
       await this.setWorkflowMetadata(workflowId, metadata)
+      
+      // CRITICAL: Mark workflow as failed in database
+      try {
+        const prisma = await db.getClient()
+        await prisma.workflowExecution.update({
+          where: { workflowId },
+          data: {
+            status: 'failed',
+            currentStage: stage,
+            failedStage: stage,
+            errorMessage: error.message,
+            completedAt: new Date(),
+            updatedAt: new Date()
+          }
+        })
+        console.log(`✅ Workflow ${workflowId} marked as failed in database`)
+      } catch (dbError) {
+        console.error(`❌ Failed to mark workflow as failed in database:`, dbError.message)
+      }
       
       // CRITICAL: Also update the PO record in database to "failed" status
       // Try passed purchaseOrderId first, fallback to metadata
