@@ -280,6 +280,7 @@ async function initializePrisma() {
           const warmupDelayMs = parseInt(process.env.PRISMA_WARMUP_MS || '2500', 10)
           console.log(`⏳ Waiting ${warmupDelayMs}ms for engine warmup...`)
           
+          // Force rebuild: 2025-10-10-19:35 - Ensure two-phase warmup deploys
           // Phase 3: Track warmup duration for metrics
           const warmupStartTime = Date.now()
           
