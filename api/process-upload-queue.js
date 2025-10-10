@@ -160,39 +160,32 @@ export default async function handler(req, res) {
       aiSettings: aiSettings
     })
 
-    console.log(`✅ File processing completed successfully`)
+    console.log(`✅ File processing queued successfully - workflow ${result.workflowId} started`)
 
-    // Update workflow to completed
-    if (workflowId) {
-      await prisma.workflowExecution.update({
-        where: { workflowId },
-        data: {
-          status: 'completed',
-          currentStage: 'completed',
-          progressPercent: 100,
-          completedAt: new Date()
-        }
-      })
-    }
-
-    // Update upload status
+    // Don't mark workflow as completed here - let the workflow orchestrator handle completion
+    // after all stages finish. Just update the upload workflow ID reference.
+    
+    // Update upload status to indicate processing has started
     await prisma.upload.update({
       where: { id: uploadId },
       data: {
-        status: 'processed',
+        status: 'processing',
+        workflowId: result.workflowId,
         updatedAt: new Date()
       }
     })
 
-    console.log(`📬 Queue processing completed successfully for upload: ${uploadId}`)
-    console.log(`⏱️ Total execution time: ${Date.now() - startTime}ms`)
+    console.log(`📬 Queue handler completed - workflow stages running in background`)
+    console.log(`⏱️ Queue handler execution time: ${Date.now() - startTime}ms`)
+    console.log(`🔄 Workflow ${result.workflowId} will complete asynchronously via Bull queues`)
     console.log(`✅ ========== QUEUE HANDLER COMPLETE ==========`)
 
     return res.status(200).json({
       success: true,
       uploadId,
-      workflowId,
-      result
+      workflowId: result.workflowId,
+      message: result.message,
+      estimatedCompletionTime: result.estimatedCompletionTime
     })
 
   } catch (error) {
