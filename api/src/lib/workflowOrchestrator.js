@@ -435,9 +435,52 @@ export class WorkflowOrchestrator {
    * @param {string} status - Stage status
    */
   async updateWorkflowStage(workflowId, stage, status) {
-    const metadata = await this.getWorkflowMetadata(workflowId)
+    let metadata = await this.getWorkflowMetadata(workflowId)
+    
+    // If metadata not found in Redis, try to recreate from database
     if (!metadata) {
-      throw new Error(`Workflow ${workflowId} not found`)
+      console.warn(`⚠️ Workflow metadata not found in Redis for ${workflowId}, attempting to recreate from database...`)
+      
+      try {
+        const prisma = await db.getClient()
+        const dbWorkflow = await prisma.workflowExecution.findUnique({
+          where: { workflowId }
+        })
+        
+        if (dbWorkflow) {
+          console.log(`✅ Found workflow in database, recreating Redis metadata`)
+          
+          // Recreate metadata from database record
+          metadata = {
+            workflowId,
+            status: dbWorkflow.status || 'active',
+            currentStage: dbWorkflow.currentStage || stage,
+            stages: {
+              [WORKFLOW_STAGES.AI_PARSING]: { status: 'pending' },
+              [WORKFLOW_STAGES.DATABASE_SAVE]: { status: 'pending' },
+              [WORKFLOW_STAGES.DATA_NORMALIZATION]: { status: 'pending' },
+              [WORKFLOW_STAGES.MERCHANT_CONFIG]: { status: 'pending' },
+              [WORKFLOW_STAGES.AI_ENRICHMENT]: { status: 'pending' },
+              [WORKFLOW_STAGES.SHOPIFY_PAYLOAD]: { status: 'pending' },
+              [WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION]: { status: 'pending' },
+              [WORKFLOW_STAGES.SHOPIFY_SYNC]: { status: 'pending' },
+              [WORKFLOW_STAGES.STATUS_UPDATE]: { status: 'pending' }
+            },
+            startedAt: dbWorkflow.startedAt?.toISOString() || new Date().toISOString(),
+            progress: dbWorkflow.progressPercent || 0,
+            data: dbWorkflow.inputData || {}
+          }
+          
+          // Save recreated metadata to Redis
+          await this.setWorkflowMetadata(workflowId, metadata)
+          console.log(`✅ Redis metadata recreated for workflow ${workflowId}`)
+        } else {
+          throw new Error(`Workflow ${workflowId} not found in database or Redis`)
+        }
+      } catch (dbError) {
+        console.error(`❌ Failed to recreate workflow metadata from database:`, dbError.message)
+        throw new Error(`Workflow ${workflowId} not found and could not be recreated`)
+      }
     }
 
     // Update stage
