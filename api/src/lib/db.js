@@ -313,7 +313,18 @@ async function initializePrisma() {
                       console.log(`⏳ [EXTENSION] Waiting for warmup before ${model}.${operation}...`)
                       await warmupPromise
                     } else {
-                      console.warn(`⚠️ [EXTENSION] Warmup not complete but no promise - proceeding with caution`)
+                      // Warmup not complete but no promise - likely mid-reconnect
+                      // Wait a bit and check again (reconnection in progress)
+                      console.warn(`⚠️ [EXTENSION] Warmup not complete and no promise - waiting for reconnect to finish...`)
+                      await new Promise(resolve => setTimeout(resolve, 100))
+                      
+                      // Check again after waiting
+                      if (!warmupComplete && warmupPromise) {
+                        console.log(`⏳ [EXTENSION] Reconnect detected, waiting for new warmup before ${model}.${operation}...`)
+                        await warmupPromise
+                      } else if (!warmupComplete) {
+                        console.warn(`⚠️ [EXTENSION] Still no warmup promise after wait - proceeding with caution for ${model}.${operation}`)
+                      }
                     }
                   }
                   
