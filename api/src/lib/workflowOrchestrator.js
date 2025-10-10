@@ -108,10 +108,9 @@ export class WorkflowOrchestrator {
     console.log('🎭 Initializing WorkflowOrchestrator...')
     
     // Initialize refinementConfigService with async DB client
-    if (!this.refinementConfigService) {
-      const prisma = await db.getClient()
-      this.refinementConfigService = new RefinementConfigService(prisma)
-    }
+    // ALWAYS reinitialize to ensure fresh client after reconnections
+    const prisma = await db.getClient()
+    this.refinementConfigService = new RefinementConfigService(prisma)
     
     // Initialize Redis connection
     await this.redis.initializeConnections()

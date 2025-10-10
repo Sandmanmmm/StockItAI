@@ -240,6 +240,18 @@ export default async function handler(req, res) {
     const prisma = await db.getClient()
     console.log(`✅ Database connected successfully`)
 
+    // Initialize workflow orchestrator on first run
+    if (!processorsInitialized) {
+      console.log(`🚀 Initializing workflow orchestrator...`)
+      try {
+        await workflowIntegration.initialize()
+        console.log(`✅ Workflow orchestrator initialized`)
+      } catch (orchestratorError) {
+        console.error(`⚠️ Failed to initialize orchestrator:`, orchestratorError.message)
+        // Continue anyway - services will be created on-demand
+      }
+    }
+
     // Initialize queue processors on first run (or if not yet initialized)
     if (!processorsInitialized) {
       console.log(`🚀 Initializing queue processors...`)

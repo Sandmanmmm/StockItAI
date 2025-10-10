@@ -52,9 +52,31 @@ async function prismaOperationInternal(operation, operationName = 'Database oper
     throw new Error('prismaOperation requires a function argument')
   }
 
-  const client = await initializePrisma()
-  const execute = () => operation(client)
-  return withPrismaRetry(execute, { operationName })
+  let retries = 0
+  const maxRetries = 2
+  
+  while (retries <= maxRetries) {
+    try {
+      const client = await initializePrisma()
+      const execute = () => operation(client)
+      return await withPrismaRetry(execute, { operationName })
+    } catch (error) {
+      const errorMessage = error.message || ''
+      const isEngineError = 
+        errorMessage.includes('Response from the Engine was empty') ||
+        errorMessage.includes('Engine is not yet connected') ||
+        errorMessage.includes('Connection is closed')
+      
+      if (isEngineError && retries < maxRetries) {
+        console.warn(`⚠️ Engine failure during ${operationName}, reconnecting... (attempt ${retries + 1}/${maxRetries})`)
+        await forceDisconnect()
+        retries++
+        continue
+      }
+      
+      throw error
+    }
+  }
 }
 
 // Force disconnect and clear client (for error recovery)
