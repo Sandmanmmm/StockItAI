@@ -325,7 +325,19 @@ async function initializePrisma() {
             query: {
               $allModels: {
                 async $allOperations({ model, operation, args, query }) {
-                  // Ensure engine is warmed up before EVERY operation
+                  // CRITICAL: Check if we're inside a transaction first
+                  // Transactions have strict timeouts (8s) and can't afford warmup delays
+                  // We must ensure warmup happens BEFORE starting the transaction
+                  const isTransactionOperation = args?.__prismaTransactionContext !== undefined
+                  
+                  if (isTransactionOperation) {
+                    // Inside a transaction - execute immediately
+                    // Connection MUST be warm before transaction started
+                    // No warmup wait, no retries - transaction timeout is too strict
+                    return await query(args)
+                  }
+                  
+                  // For non-transaction operations: Ensure engine is warmed up
                   if (!warmupComplete) {
                     if (warmupPromise) {
                       console.log(`⏳ [EXTENSION] Waiting for warmup before ${model}.${operation}...`)
@@ -344,18 +356,6 @@ async function initializePrisma() {
                         console.warn(`⚠️ [EXTENSION] Still no warmup promise after wait - proceeding with caution for ${model}.${operation}`)
                       }
                     }
-                  }
-                  
-                  // CRITICAL FIX: Skip retry logic for transaction operations
-                  // Transactions have strict timeouts (8s) and retries can cause them to timeout
-                  // resulting in "Transaction not found" errors
-                  // The warmup wait above is sufficient for transaction operations
-                  const isTransactionOperation = args?.__prismaTransactionContext !== undefined
-                  
-                  if (isTransactionOperation) {
-                    // Inside a transaction - execute immediately without retries
-                    // The transaction timeout is too short for retry delays
-                    return await query(args)
                   }
                   
                   // Add comprehensive retry logic at extension level for non-transaction operations
