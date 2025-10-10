@@ -7,7 +7,7 @@
 // This ensures proper module resolution and dependency management
 
 import { PrismaClient } from '@prisma/client'
-import { withPrismaRetry, createRetryablePrismaClient } from './prismaRetryWrapper.js'
+// Phase 2: Removed createRetryablePrismaClient import - retry logic now in extension
 
 // Prisma client singleton
 let prisma
@@ -193,10 +193,17 @@ async function initializePrisma() {
           
           console.log(`✅ Reusing existing Prisma client (version ${PRISMA_CLIENT_VERSION})`)
           console.log(`✅ Reused client health check passed`)
+          
+          // Phase 3: Track health check success
+          console.log(`📊 [METRICS] Health check: PASSED | Warmup: ${warmupComplete ? 'complete' : 'incomplete'}`)
+          
           healthCheckPromise = null // Clear lock
           return prisma // Client is healthy!
         } catch (error) {
           console.warn(`⚠️ Existing client health check failed:`, error.message)
+          
+          // Phase 3: Track health check failure
+          console.log(`📊 [METRICS] Health check: FAILED | Error: ${error.message} | Warmup: ${warmupComplete ? 'complete' : 'incomplete'}`)
           
           // Clear health check lock immediately
           healthCheckPromise = null
@@ -272,6 +279,9 @@ async function initializePrisma() {
           const warmupDelayMs = parseInt(process.env.PRISMA_WARMUP_MS || '2500', 10)
           console.log(`⏳ Waiting ${warmupDelayMs}ms for engine warmup...`)
           
+          // Phase 3: Track warmup duration for metrics
+          const warmupStartTime = Date.now()
+          
           // Set warmup promise to allow other requests to wait
           warmupPromise = (async () => {
             await new Promise(resolve => setTimeout(resolve, warmupDelayMs))
@@ -297,7 +307,10 @@ async function initializePrisma() {
             
             // Mark warmup complete after verification succeeds
             warmupComplete = true
-            console.log(`✅ Warmup complete - engine ready for production queries`)
+            
+            // Phase 3: Log actual warmup duration for metrics
+            const actualWarmupMs = Date.now() - warmupStartTime
+            console.log(`✅ Warmup complete in ${actualWarmupMs}ms - engine ready for production queries`)
           })()
           
           // Wait for warmup to complete before continuing
@@ -344,39 +357,64 @@ async function initializePrisma() {
                     return await query(args)
                   }
                   
-                  // Add retry logic at extension level for non-transaction operations
-                  // Reduced to 2 retries to fit within serverless 10s timeout
-                  // Total retry time: 500ms + 1000ms = 1.5s max
-                  const maxRetries = 2
+                  // Add comprehensive retry logic at extension level for non-transaction operations
+                  // Handles all transient connection errors that were previously in PrismaRetryWrapper
+                  // Reduced to 3 retries with exponential backoff to fit within serverless 10s timeout
+                  // Total retry time: 200ms + 400ms + 800ms = 1.4s max
+                  const maxRetries = 3
                   let lastError
+                  
+                  // Helper to check if error is retryable
+                  const isRetryableError = (error) => {
+                    if (!error) return false
+                    const errorMessage = error?.message || String(error)
+                    
+                    const retryablePatterns = [
+                      'Engine is not yet connected',
+                      'Response from the Engine was empty',
+                      'Can\'t reach database server',
+                      'Connection pool timeout',
+                      'Timed out fetching a new connection from the connection pool',
+                      'Error in Prisma Client request',
+                      'connect ECONNREFUSED'
+                    ]
+                    
+                    return retryablePatterns.some(pattern => errorMessage.includes(pattern))
+                  }
                   
                   for (let attempt = 1; attempt <= maxRetries; attempt++) {
                     try {
-                      return await query(args)
-                    } catch (error) {
-                      lastError = error
-                      const errorMessage = error?.message || ''
+                      const result = await query(args)
                       
-                      // Check for engine warmup errors
-                      if (errorMessage.includes('Engine is not yet connected') || 
-                          errorMessage.includes('Response from the Engine was empty')) {
-                        
-                        if (attempt < maxRetries) {
-                          const delay = 500 * attempt
-                          console.warn(
-                            `⚠️ [EXTENSION] ${model}.${operation} attempt ${attempt}/${maxRetries} ` +
-                            `failed with engine error. Retrying in ${delay}ms...`
-                          )
-                          await new Promise(resolve => setTimeout(resolve, delay))
-                          continue
-                        }
-                        
-                        console.error(
-                          `❌ [EXTENSION] ${model}.${operation} failed after ${maxRetries} attempts`
-                        )
+                      // Log success if this wasn't the first attempt
+                      if (attempt > 1) {
+                        console.log(`✅ [EXTENSION] ${model}.${operation} succeeded on attempt ${attempt}/${maxRetries}`)
                       }
                       
-                      throw error
+                      return result
+                    } catch (error) {
+                      lastError = error
+                      
+                      // Check if this is a retryable error
+                      if (!isRetryableError(error)) {
+                        // Not a retryable error - fail immediately
+                        console.error(`❌ [EXTENSION] ${model}.${operation} failed with non-retryable error:`, error.message)
+                        throw error
+                      }
+                      
+                      // Check if we have retries left
+                      if (attempt >= maxRetries) {
+                        console.error(`❌ [EXTENSION] ${model}.${operation} failed after ${maxRetries} attempts:`, error.message)
+                        throw error
+                      }
+                      
+                      // Exponential backoff: 200ms, 400ms, 800ms
+                      const delay = 200 * Math.pow(2, attempt - 1)
+                      console.warn(
+                        `⚠️ [EXTENSION] ${model}.${operation} attempt ${attempt}/${maxRetries} ` +
+                        `failed: ${error.message}. Retrying in ${delay}ms...`
+                      )
+                      await new Promise(resolve => setTimeout(resolve, delay))
                     }
                   }
                   
@@ -388,8 +426,9 @@ async function initializePrisma() {
           
           console.log(`✅ Prisma Client Extension installed - all queries will wait for warmup`)
 
-          // Use the extended client instead of raw client for the proxy wrapper
-          prisma = createRetryablePrismaClient(extendedPrisma)
+          // Phase 2: Use extended client directly - retry logic is now in extension
+          // No need for additional PrismaRetryWrapper layer (was redundant)
+          prisma = extendedPrisma
           
           return prisma
         } finally {
