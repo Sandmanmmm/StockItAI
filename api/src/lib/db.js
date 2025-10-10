@@ -131,26 +131,23 @@ async function initializePrisma() {
       // If another request is already health-checking, wait for its result
       if (healthCheckPromise) {
         console.log(`⏳ Another request is health-checking, waiting...`)
-        try {
-          await healthCheckPromise
-          console.log(`✅ Health check completed by other request - client is healthy`)
-          // Check if client still exists after wait (might have been disconnected)
-          if (!prisma) {
-            console.log(`⚠️ Client was disconnected during health check, will reconnect`)
-            if (isConnecting && connectionPromise) {
-              await connectionPromise
-              return await initializePrisma()
-            }
-          }
-          return prisma
-        } catch (error) {
-          console.log(`❌ Health check failed by other request - will reconnect`)
-          // Fall through to reconnection logic (isConnecting should be set)
-          if (isConnecting && connectionPromise) {
-            await connectionPromise
-            return await initializePrisma()
-          }
+        const healthCheckResult = await healthCheckPromise
+        
+        // If health check returned null, it failed and client was disconnected
+        if (healthCheckResult === null) {
+          console.log(`⚠️ Health check failed, will reconnect`)
+          // Don't wait for isConnecting here - just recursively call
+          // This will create new client or wait for existing connection
+          return await initializePrisma()
         }
+        
+        console.log(`✅ Health check completed by other request - client is healthy`)
+        // Check if client still exists after wait (might have been disconnected)
+        if (!prisma) {
+          console.log(`⚠️ Client was disconnected during health check, will reconnect`)
+          return await initializePrisma()
+        }
+        return prisma
       }
       
       // Run health check with lock to prevent concurrent checks
@@ -176,19 +173,29 @@ async function initializePrisma() {
         } catch (error) {
           console.warn(`⚠️ Existing client health check failed:`, error.message)
           
-          // Set connection lock BEFORE disconnecting
-          // This prevents other concurrent requests from using dead client
-          isConnecting = true
-          healthCheckPromise = null // Clear health check lock
+          // Clear health check lock immediately
+          healthCheckPromise = null
           
-          // ANY failure on reused client = force reconnect
+          // ANY failure on reused client = force reconnect and recreate
           console.log(`🔄 Forcing full reconnect due to failed health check`)
           await forceDisconnect()
-          throw error // Propagate to waiting requests
+          
+          // Don't throw - fall through to create new client
+          // This prevents cascading failures when health check fails
+          console.log(`♻️ Will create fresh client after health check failure`)
+          return null // Signal that reconnection is needed
         }
       })()
       
-      return await healthCheckPromise
+      const healthCheckResult = await healthCheckPromise
+      
+      // If health check returned null, client needs recreation
+      if (healthCheckResult === null) {
+        console.log(`🔄 Health check indicated reconnection needed, creating new client...`)
+        // Fall through to creation logic below
+      } else {
+        return healthCheckResult // Client is healthy, return it
+      }
     }
     
     if (!prisma) {
