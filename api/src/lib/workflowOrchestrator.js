@@ -1226,12 +1226,13 @@ export class WorkflowOrchestrator {
 
       // Check if we have product drafts from accumulated data
       let draftsToProcess = productDrafts
+      let draftsFromDb = null
       
       if (!draftsToProcess || draftsToProcess.length === 0) {
         console.log('⚠️ No product drafts in accumulated data, checking database...')
         
         // Try to get product drafts from database
-        const draftsFromDb = await prisma.productDraft.findMany({
+        draftsFromDb = await prisma.productDraft.findMany({
           where: { purchaseOrderId },
           include: {
             POLineItem: true,
