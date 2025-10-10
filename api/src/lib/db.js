@@ -16,6 +16,8 @@ let prismaVersion = null
 let isConnecting = false // Connection lock to prevent concurrent initialization
 let connectionPromise = null // Store the connection promise for concurrent requests
 let healthCheckPromise = null // Lock for concurrent health checks
+let warmupComplete = false // Track if engine warmup is complete
+let warmupPromise = null // Promise for warmup completion
 const PRISMA_CLIENT_VERSION = 'v5_transaction_recovery' // Increment to force recreation
 
 // Increase process listener limit for Prisma reconnections
@@ -94,6 +96,8 @@ async function forceDisconnect() {
     isConnecting = false
     connectionPromise = null
     healthCheckPromise = null // Clear health check lock
+    warmupComplete = false // Reset warmup state
+    warmupPromise = null
     console.log(`✅ Client cleared, next request will create fresh connection`)
   }
 }
@@ -126,8 +130,16 @@ async function initializePrisma() {
       return await initializePrisma()
     }
     
-    // Reuse existing client if version matches AND it's fully connected
-    if (prisma && prismaVersion === PRISMA_CLIENT_VERSION) {
+    // WARMUP GATE: If client exists but warmup not complete, wait for it
+    if (prisma && !warmupComplete && warmupPromise) {
+      console.log(`⏳ Engine warming up, waiting for warmup to complete...`)
+      await warmupPromise
+      console.log(`✅ Engine warmup completed, proceeding with query`)
+      return prisma
+    }
+    
+    // Reuse existing client if version matches AND it's fully connected AND warmed up
+    if (prisma && prismaVersion === PRISMA_CLIENT_VERSION && warmupComplete) {
       // If another request is already health-checking, wait for its result
       if (healthCheckPromise) {
         console.log(`⏳ Another request is health-checking, waiting...`)
@@ -245,26 +257,37 @@ async function initializePrisma() {
           // Increased warmup time for serverless cold starts with concurrent requests
           const warmupDelayMs = parseInt(process.env.PRISMA_WARMUP_MS || '2500', 10)
           console.log(`⏳ Waiting ${warmupDelayMs}ms for engine warmup...`)
-          await new Promise(resolve => setTimeout(resolve, warmupDelayMs))
           
-          // Quick verification with retry logic
-          let verified = false
-          for (let i = 0; i < 3; i++) {
-            try {
-              await rawPrisma.$queryRaw`SELECT 1 as healthcheck`
-              console.log(`✅ Engine verified - ready for queries`)
-              verified = true
-              break
-            } catch (error) {
-              if (i < 2) {
-                console.warn(`⚠️ Verification attempt ${i + 1}/3 failed, retrying in 500ms...`)
-                await new Promise(resolve => setTimeout(resolve, 500))
-              } else {
-                console.error(`❌ Engine verification failed after 3 attempts:`, error.message)
-                throw error
+          // Set warmup promise to allow other requests to wait
+          warmupPromise = (async () => {
+            await new Promise(resolve => setTimeout(resolve, warmupDelayMs))
+            
+            // Quick verification with retry logic
+            let verified = false
+            for (let i = 0; i < 3; i++) {
+              try {
+                await rawPrisma.$queryRaw`SELECT 1 as healthcheck`
+                console.log(`✅ Engine verified - ready for queries`)
+                verified = true
+                break
+              } catch (error) {
+                if (i < 2) {
+                  console.warn(`⚠️ Verification attempt ${i + 1}/3 failed, retrying in 500ms...`)
+                  await new Promise(resolve => setTimeout(resolve, 500))
+                } else {
+                  console.error(`❌ Engine verification failed after 3 attempts:`, error.message)
+                  throw error
+                }
               }
             }
-          }
+            
+            // Mark warmup complete after verification succeeds
+            warmupComplete = true
+            console.log(`✅ Warmup complete - engine ready for production queries`)
+          })()
+          
+          // Wait for warmup to complete before continuing
+          await warmupPromise
 
           prisma = createRetryablePrismaClient(rawPrisma)
           

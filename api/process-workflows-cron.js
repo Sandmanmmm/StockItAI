@@ -7,7 +7,7 @@
  * Configured in vercel.json under "crons" section.
  */
 
-import { db } from './src/lib/db.js'
+import { db, prismaOperation } from './src/lib/db.js'
 import { storageService } from './src/lib/storageService.js'
 import { workflowIntegration } from './src/lib/workflowIntegration.js'
 import { processorRegistrationService } from './src/lib/processorRegistrationService.js'
@@ -269,30 +269,36 @@ export default async function handler(req, res) {
     }
 
     // Find all pending workflows
-    const pendingWorkflows = await prisma.workflowExecution.findMany({
-      where: {
-        status: 'pending'
-      },
-      orderBy: {
-        createdAt: 'asc'
-      },
-      take: 5 // Process up to 5 workflows per cron run to avoid timeout
-    })
+    const pendingWorkflows = await prismaOperation(
+      (client) => client.workflowExecution.findMany({
+        where: {
+          status: 'pending'
+        },
+        orderBy: {
+          createdAt: 'asc'
+        },
+        take: 5 // Process up to 5 workflows per cron run to avoid timeout
+      }),
+      'Find pending workflows'
+    )
 
     // Also find stuck "processing" workflows (processing for more than 5 minutes)
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000)
-    const stuckWorkflows = await prisma.workflowExecution.findMany({
-      where: {
-        status: 'processing',
-        updatedAt: {
-          lt: fiveMinutesAgo
-        }
-      },
-      orderBy: {
-        createdAt: 'asc'
-      },
-      take: 5
-    })
+    const stuckWorkflows = await prismaOperation(
+      (client) => client.workflowExecution.findMany({
+        where: {
+          status: 'processing',
+          updatedAt: {
+            lt: fiveMinutesAgo
+          }
+        },
+        orderBy: {
+          createdAt: 'asc'
+        },
+        take: 5
+      }),
+      'Find stuck workflows'
+    )
 
     // Combine and deduplicate workflows
     const allWorkflows = [...pendingWorkflows, ...stuckWorkflows]
