@@ -204,12 +204,19 @@ export class ProcessorRegistrationService {
   async addJob(queueName, jobData, options = {}) {
     console.log(`📋 [PERMANENT FIX] Adding job to queue: ${queueName}`);
     
-    // Map queue names to job types
+    // Map queue names to job types (must match processorConfigs in initializeAllProcessors)
     const queueNameToJobType = {
       'ai-parsing': 'ai_parsing',
-      'database-save': 'database_save', 
+      'database-save': 'database_save',
+      'product-draft-creation': 'product_draft_creation',
+      'image-attachment': 'image_attachment',
+      'background-image-processing': 'background_image_processing',
       'shopify-sync': 'shopify_sync',
-      'status-update': 'status_update'
+      'status-update': 'status_update',
+      'data-normalization': 'data_normalization',
+      'merchant-config': 'merchant_config',
+      'ai-enrichment': 'ai_enrichment',
+      'shopify-payload': 'shopify_payload'
     };
     
     // Find the queue by mapping queueName to jobType
