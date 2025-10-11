@@ -12,7 +12,7 @@
 
 import { db } from '../lib/db.js'
 import { featureFlags } from '../config/featureFlags.js'
-import supplierMatchingServicePgTrgm from './supplierMatchingServicePgTrgm.js'
+import { findMatchingSuppliersViaPgTrgm } from './supplierMatchingServicePgTrgm.js'
 import { logPerformanceMetric } from '../lib/performanceMonitoring.js'
 
 /**
@@ -343,7 +343,7 @@ export async function findMatchingSuppliers(parsedSupplier, merchantId, options 
     if (usePgTrgm) {
       // Try pg_trgm engine (fast, PostgreSQL-based)
       try {
-        results = await supplierMatchingServicePgTrgm.findMatchingSuppliersViaPgTrgm(
+        results = await findMatchingSuppliersViaPgTrgm(
           parsedSupplier,
           merchantId,
           options
