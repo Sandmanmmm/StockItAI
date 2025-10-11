@@ -115,6 +115,13 @@ class FeatureFlags {
     // Fetch from database
     try {
       const client = await db.getClient()
+      
+      // Verify client has merchantConfig model
+      if (!client || !client.merchantConfig) {
+        console.warn(`⚠️  Prisma client not ready or merchantConfig model not available`)
+        return null
+      }
+      
       this.stats.dbQueries++
       
       const merchantConfig = await client.merchantConfig.findUnique({
@@ -133,7 +140,7 @@ class FeatureFlags {
       return value
       
     } catch (error) {
-      console.error(`❌ Error fetching merchant setting ${settingKey}:`, error)
+      console.error(`❌ Error fetching merchant setting ${settingKey}:`, error.message)
       return null
     }
   }
@@ -152,6 +159,12 @@ class FeatureFlags {
     
     try {
       const client = await db.getClient()
+      
+      // Verify client has merchantConfig model
+      if (!client || !client.merchantConfig) {
+        console.warn(`⚠️  Prisma client not ready or merchantConfig model not available`)
+        return false
+      }
       
       // Get or create merchant config
       let config = await client.merchantConfig.findUnique({
