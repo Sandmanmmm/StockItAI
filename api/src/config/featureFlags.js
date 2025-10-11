@@ -37,8 +37,9 @@ class FeatureFlags {
    * Priority order:
    * 1. Request-level override (highest priority)
    * 2. Merchant-specific setting
-   * 3. Global environment variable
-   * 4. Default: false (use JavaScript implementation)
+   * 3. Rollout percentage (for gradual rollout)
+   * 4. Global environment variable (master switch)
+   * 5. Default: false (use JavaScript implementation)
    * 
    * @param {string} merchantId - Merchant ID
    * @param {string} [override] - Optional override ('pg_trgm' | 'javascript')
@@ -66,18 +67,8 @@ class FeatureFlags {
       return false
     }
     
-    // 3. Global environment variable
-    const globalSetting = process.env.USE_PG_TRGM_FUZZY_MATCHING
-    if (globalSetting === 'true') {
-      console.log(`🚩 [${merchantId}] Using pg_trgm (global env)`)
-      return true
-    }
-    if (globalSetting === 'false') {
-      console.log(`🚩 [${merchantId}] Using javascript (global env)`)
-      return false
-    }
-    
-    // 4. Check rollout percentage (for gradual rollout)
+    // 3. Check rollout percentage FIRST (for gradual rollout)
+    // This allows canary rollout even when global master switch is false
     const rolloutPercentage = this.getRolloutPercentage()
     if (rolloutPercentage > 0) {
       const shouldUse = this.isInRolloutGroup(merchantId, rolloutPercentage)
@@ -85,10 +76,20 @@ class FeatureFlags {
         console.log(`🚩 [${merchantId}] Using pg_trgm (rollout: ${rolloutPercentage}%)`)
         return true
       }
+      // If in rollout but NOT selected, continue to check other options
+      console.log(`🚩 [${merchantId}] Not in rollout group (${rolloutPercentage}% rollout active)`)
+    }
+    
+    // 4. Global environment variable (master switch)
+    // Only checked if NOT in rollout percentage
+    const globalSetting = process.env.USE_PG_TRGM_FUZZY_MATCHING
+    if (globalSetting === 'true') {
+      console.log(`🚩 [${merchantId}] Using pg_trgm (global env - 100%)`)
+      return true
     }
     
     // 5. Default: false (use JavaScript implementation - safest)
-    console.log(`🚩 [${merchantId}] Using javascript (default)`)
+    console.log(`🚩 [${merchantId}] Using javascript (default fallback)`)
     return false
   }
   
@@ -116,20 +117,20 @@ class FeatureFlags {
     try {
       const client = await db.getClient()
       
-      // Verify client has merchantConfig model
-      if (!client || !client.merchantConfig) {
-        console.warn(`⚠️  Prisma client not ready or merchantConfig model not available`)
+      // Verify client has merchant model
+      if (!client || !client.merchant) {
+        console.warn(`⚠️  Prisma client not ready or merchant model not available`)
         return null
       }
       
       this.stats.dbQueries++
       
-      const merchantConfig = await client.merchantConfig.findUnique({
-        where: { merchantId },
+      const merchant = await client.merchant.findUnique({
+        where: { id: merchantId },
         select: { settings: true }
       })
       
-      const value = merchantConfig?.settings?.[settingKey] || null
+      const value = merchant?.settings?.[settingKey] || null
       
       // Cache result
       this.cache.set(cacheKey, {
@@ -160,39 +161,35 @@ class FeatureFlags {
     try {
       const client = await db.getClient()
       
-      // Verify client has merchantConfig model
-      if (!client || !client.merchantConfig) {
-        console.warn(`⚠️  Prisma client not ready or merchantConfig model not available`)
+      // Verify client has merchant model
+      if (!client || !client.merchant) {
+        console.warn(`⚠️  Prisma client not ready or merchant model not available`)
         return false
       }
       
-      // Get or create merchant config
-      let config = await client.merchantConfig.findUnique({
-        where: { merchantId }
+      // Get merchant
+      let merchant = await client.merchant.findUnique({
+        where: { id: merchantId },
+        select: { settings: true }
       })
       
-      if (!config) {
-        // Create new config
-        config = await client.merchantConfig.create({
-          data: {
-            merchantId,
-            settings: {
-              fuzzyMatchingEngine: engine
-            }
-          }
-        })
-      } else {
-        // Update existing config
-        config = await client.merchantConfig.update({
-          where: { merchantId },
-          data: {
-            settings: {
-              ...config.settings,
-              fuzzyMatchingEngine: engine
-            }
-          }
-        })
+      if (!merchant) {
+        console.error(`❌ Merchant ${merchantId} not found`)
+        return false
       }
+      
+      // Update merchant settings
+      const updatedSettings = {
+        ...(merchant.settings || {}),
+        fuzzyMatchingEngine: engine
+      }
+      
+      await client.merchant.update({
+        where: { id: merchantId },
+        data: {
+          settings: updatedSettings
+        }
+      })
       
       // Clear cache for this merchant
       this.clearMerchantCache(merchantId)
@@ -201,7 +198,7 @@ class FeatureFlags {
       return true
       
     } catch (error) {
-      console.error(`❌ Error setting merchant engine:`, error)
+      console.error(`❌ Error setting merchant engine:`, error.message)
       return false
     }
   }
