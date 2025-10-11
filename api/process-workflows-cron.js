@@ -10,6 +10,18 @@
 import { db, prismaOperation } from './src/lib/db.js'
 import { processorRegistrationService } from './src/lib/processorRegistrationService.js'
 
+const deriveFileType = (mimeType, fileName) => {
+  if (mimeType && mimeType.includes('/')) {
+    return mimeType.split('/').pop()
+  }
+
+  if (fileName && fileName.includes('.')) {
+    return fileName.split('.').pop().toLowerCase()
+  }
+
+  return 'unknown'
+}
+
 // Track processor initialization state across cron invocations
 let processorsInitialized = false
 let processorInitializationPromise = null
@@ -91,7 +103,6 @@ async function processWorkflow(workflow) {
         fileName: true,
         fileSize: true,
         mimeType: true,
-        fileType: true,
         merchantId: true,
         supplierId: true
       }
@@ -101,7 +112,8 @@ async function processWorkflow(workflow) {
       throw new Error(`Upload not found: ${workflow.uploadId}`)
     }
 
-    console.log(`📦 Queueing file: ${upload.fileName} (${upload.fileType || 'unknown'})`)
+  const fileType = deriveFileType(upload.mimeType, upload.fileName)
+  console.log(`📦 Queueing file: ${upload.fileName} (${fileType})`)
     console.log(`📥 File URL: ${upload.fileUrl}`)
 
     // CRITICAL: Don't download/parse file in cron job - takes 40-100+ seconds!
@@ -119,7 +131,7 @@ async function processWorkflow(workflow) {
         fileName: upload.fileName,
         fileSize: upload.fileSize,
         mimeType: upload.mimeType,
-        fileType: upload.fileType,
+  fileType,
         supplierId: upload.supplierId,
         purchaseOrderId: workflow.purchaseOrderId,
         source: 'cron-processing',

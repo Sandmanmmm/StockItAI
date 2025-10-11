@@ -10,6 +10,18 @@ import { storageService } from './src/lib/storageService.js'
 import { workflowIntegration } from './src/lib/workflowIntegration.js'
 import { processorRegistrationService } from './src/lib/processorRegistrationService.js'
 
+const deriveFileType = (mimeType, fileName) => {
+  if (mimeType && mimeType.includes('/')) {
+    return mimeType.split('/').pop()
+  }
+
+  if (fileName && fileName.includes('.')) {
+    return fileName.split('.').pop().toLowerCase()
+  }
+
+  return 'unknown'
+}
+
 // Track processor initialization state across function invocations
 let processorsInitialized = false
 
@@ -52,8 +64,9 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: 'Upload not found' })
     }
 
-    workflowId = upload.workflowId
-    console.log(`📄 Processing file: ${upload.fileName} (${upload.fileType})`)
+  workflowId = upload.workflowId
+  const fileType = deriveFileType(upload.mimeType, upload.fileName)
+  console.log(`📄 Processing file: ${upload.fileName} (${fileType})`)
 
     // Update workflow status to processing
     if (workflowId) {
@@ -157,6 +170,8 @@ export default async function handler(req, res) {
       supplierId: upload.supplierId,
       purchaseOrderId: purchaseOrderId,  // Pass the existing PO ID to be updated
       buffer: fileBuffer,  // Changed from fileBuffer to buffer
+      fileBuffer,
+      fileType,
       aiSettings: aiSettings
     })
 

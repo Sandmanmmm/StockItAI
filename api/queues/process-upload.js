@@ -9,6 +9,60 @@ import { db } from '../src/lib/db.js'
 import { storageService } from '../src/lib/storageService.js'
 import { workflowIntegration } from '../src/lib/workflowIntegration.js'
 
+const deriveFileType = (mimeType, fileName) => {
+  if (mimeType && mimeType.includes('/')) {
+    return mimeType.split('/').pop()
+  }
+
+  if (fileName && fileName.includes('.')) {
+    return fileName.split('.').pop().toLowerCase()
+  }
+
+  return 'unknown'
+}
+
+const rehydrateBuffer = (value) => {
+  if (!value) {
+    return null
+  }
+
+  if (Buffer.isBuffer(value)) {
+    return value
+  }
+
+  if (value instanceof ArrayBuffer) {
+    return Buffer.from(value)
+  }
+
+  if (ArrayBuffer.isView(value)) {
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength)
+  }
+
+  if (Array.isArray(value)) {
+    return Buffer.from(value)
+  }
+
+  if (typeof value === 'object') {
+    if (value.type === 'Buffer' && Array.isArray(value.data)) {
+      return Buffer.from(value.data)
+    }
+
+    if (Array.isArray(value.data)) {
+      return Buffer.from(value.data)
+    }
+  }
+
+  if (typeof value === 'string') {
+    try {
+      return Buffer.from(value, 'base64')
+    } catch (error) {
+      return null
+    }
+  }
+
+  return null
+}
+
 export default async function handler(req, res) {
   // Only accept POST requests
   if (req.method !== 'POST') {
@@ -38,8 +92,9 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: 'Upload not found' })
     }
 
-    workflowId = upload.workflowId
-    console.log(`📄 Processing file: ${upload.fileName} (${upload.fileType})`)
+  workflowId = upload.workflowId
+  const fileType = deriveFileType(upload.mimeType, upload.fileName)
+  console.log(`📄 Processing file: ${upload.fileName} (${fileType})`)
 
     // Update workflow status to processing
     if (workflowId) {
@@ -55,11 +110,12 @@ export default async function handler(req, res) {
 
     // Download file from Supabase Storage
     console.log(`⬇️ Downloading file from: ${upload.fileUrl}`)
-    const fileBuffer = await storageService.downloadFile(upload.fileUrl)
-    
-    if (!fileBuffer) {
-      throw new Error('Failed to download file from storage')
+    const downloadResult = await storageService.downloadFile(upload.fileUrl)
+    if (!downloadResult.success || !downloadResult.buffer) {
+      throw new Error(`Failed to download file from storage: ${downloadResult.error || 'unknown error'}`)
     }
+
+    const fileBuffer = rehydrateBuffer(downloadResult.buffer) || Buffer.from(downloadResult.buffer)
 
     console.log(`✅ File downloaded successfully: ${fileBuffer.length} bytes`)
 
@@ -98,14 +154,20 @@ export default async function handler(req, res) {
 
     // Process the file through workflow integration
     console.log(`🔄 Starting file processing...`)
-    const result = await workflowIntegration.processUploadedFile(
-      upload.id,
-      upload.fileName,
-      upload.fileType,
+    const result = await workflowIntegration.processUploadedFile({
+      uploadId: upload.id,
+      fileName: upload.fileName,
+      originalFileName: upload.originalFileName,
+      fileSize: upload.fileSize,
+      mimeType: upload.mimeType,
+      fileType,
+      merchantId: upload.merchantId,
+      merchant: upload.merchant,
+      supplierId: upload.supplierId,
+      buffer: fileBuffer,
       fileBuffer,
-      upload.merchant,
       aiSettings
-    )
+    })
 
     console.log(`✅ File processing completed successfully`)
 

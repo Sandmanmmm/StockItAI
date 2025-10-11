@@ -11,6 +11,60 @@ import { db } from '../src/lib/db.js'
 import { storageService } from '../src/lib/storageService.js'
 import { workflowIntegration } from '../src/lib/workflowIntegration.js'
 
+const deriveFileType = (mimeType, fileName) => {
+  if (mimeType && mimeType.includes('/')) {
+    return mimeType.split('/').pop()
+  }
+
+  if (fileName && fileName.includes('.')) {
+    return fileName.split('.').pop().toLowerCase()
+  }
+
+  return 'unknown'
+}
+
+const rehydrateBuffer = (value) => {
+  if (!value) {
+    return null
+  }
+
+  if (Buffer.isBuffer(value)) {
+    return value
+  }
+
+  if (value instanceof ArrayBuffer) {
+    return Buffer.from(value)
+  }
+
+  if (ArrayBuffer.isView(value)) {
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength)
+  }
+
+  if (Array.isArray(value)) {
+    return Buffer.from(value)
+  }
+
+  if (typeof value === 'object') {
+    if (value.type === 'Buffer' && Array.isArray(value.data)) {
+      return Buffer.from(value.data)
+    }
+
+    if (Array.isArray(value.data)) {
+      return Buffer.from(value.data)
+    }
+  }
+
+  if (typeof value === 'string') {
+    try {
+      return Buffer.from(value, 'base64')
+    } catch (error) {
+      return null
+    }
+  }
+
+  return null
+}
+
 /**
  * Process a single workflow execution
  */
@@ -51,12 +105,18 @@ async function processWorkflow(workflow) {
       throw new Error(`Upload not found: ${workflow.uploadId}`)
     }
 
-    console.log(`� Processing file: ${upload.fileName} (${upload.fileType || 'unknown'})`)
+    const fileType = deriveFileType(upload.mimeType, upload.fileName)
+    console.log(`� Processing file: ${upload.fileName} (${fileType})`)
     console.log(`�📥 Downloading file from: ${upload.fileUrl}`)
 
     // Download the file from Supabase Storage
-    const fileBuffer = await storageService.downloadFile(upload.fileUrl)
-    
+    const downloadResult = await storageService.downloadFile(upload.fileUrl)
+    if (!downloadResult.success || !downloadResult.buffer) {
+      throw new Error(`Failed to download file: ${downloadResult.error || 'Unknown error'}`)
+    }
+
+    const fileBuffer = rehydrateBuffer(downloadResult.buffer) || Buffer.from(downloadResult.buffer)
+
     console.log(`✅ File downloaded successfully (${fileBuffer.length} bytes)`)
 
     // Update progress
@@ -83,7 +143,7 @@ async function processWorkflow(workflow) {
       fileName: upload.fileName,
       fileSize: upload.fileSize || fileBuffer.length,
       mimeType: upload.mimeType || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      fileType: upload.fileType || 'excel',
+  fileType,
       originalFileName: upload.fileName,
       supplierId: upload.supplierId,
       purchaseOrderId: workflow.purchaseOrderId,

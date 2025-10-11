@@ -53,6 +53,61 @@ function sanitizeBigInt(obj) {
   return obj
 }
 
+const BASE64_REGEX = /^[A-Za-z\d+/=]+$/
+
+function rehydrateBuffer(value) {
+  if (!value) {
+    return null
+  }
+
+  if (Buffer.isBuffer(value)) {
+    return value
+  }
+
+  if (value instanceof ArrayBuffer) {
+    return Buffer.from(value)
+  }
+
+  if (ArrayBuffer.isView(value)) {
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength)
+  }
+
+  if (Array.isArray(value)) {
+    return Buffer.from(value)
+  }
+
+  if (typeof value === 'object') {
+    if (value.type === 'Buffer' && Array.isArray(value.data)) {
+      return Buffer.from(value.data)
+    }
+
+    if (Array.isArray(value.data)) {
+      return Buffer.from(value.data)
+    }
+
+    if (value.base64 && typeof value.base64 === 'string') {
+      try {
+        return Buffer.from(value.base64, 'base64')
+      } catch (error) {
+        console.warn('⚠️ Failed to decode base64 buffer payload:', error.message)
+      }
+    }
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim()
+    if (normalized && normalized.length % 4 === 0 && BASE64_REGEX.test(normalized)) {
+      try {
+        return Buffer.from(normalized, 'base64')
+      } catch (error) {
+        console.warn('⚠️ Failed to convert base64 string to buffer:', error.message)
+      }
+    }
+  }
+
+  return null
+}
+
 // Workflow Stage Definitions
 export const WORKFLOW_STAGES = {
   FILE_UPLOAD: 'file_upload',
@@ -731,8 +786,8 @@ export class WorkflowOrchestrator {
     console.log('🤖 processAIParsing - Full job.data:', JSON.stringify(job.data, null, 2))
     
     // Extract data from job
-    const { workflowId, data } = job.data
-    const { fileName, fileBuffer: inputFileBuffer, parsedContent, uploadId, mimeType, options } = data
+  const { workflowId, data } = job.data
+  const { fileName, fileBuffer: inputFileBuffer, parsedContent, uploadId, mimeType, options } = data
     
     console.log('🤖 Extracted data:', { 
       workflowId, 
@@ -753,14 +808,17 @@ export class WorkflowOrchestrator {
 
     // Get file content for processing
     let contentForProcessing
-    let fileBuffer // Keep reference to original buffer for binary files
-    
+    let fileBuffer = rehydrateBuffer(inputFileBuffer) // Keep reference to original buffer for binary files
+
+    if (!fileBuffer && inputFileBuffer) {
+      console.warn('⚠️ Received fileBuffer in unexpected format; attempting to recover via download')
+    }
+
     if (parsedContent) {
       console.log('📋 Using parsedContent from job data')
       contentForProcessing = parsedContent
-    } else if (inputFileBuffer) {
+    } else if (fileBuffer) {
       console.log('📋 Using fileBuffer from job data')
-      fileBuffer = Buffer.from(inputFileBuffer)
     } else if (uploadId) {
       console.log('📥 Downloading file content from storage...')
       try {
@@ -784,8 +842,26 @@ export class WorkflowOrchestrator {
         if (!fileResult.success) {
           throw new Error(`Failed to download file: ${fileResult.error}`)
         }
-        
-        fileBuffer = fileResult.buffer
+
+        let downloadedBuffer = rehydrateBuffer(fileResult.buffer)
+
+        if (!downloadedBuffer && fileResult.buffer && typeof fileResult.buffer === 'object' && Array.isArray(fileResult.buffer.data)) {
+          downloadedBuffer = Buffer.from(fileResult.buffer.data)
+        }
+
+        if (!downloadedBuffer && fileResult.buffer !== undefined && fileResult.buffer !== null) {
+          try {
+            downloadedBuffer = Buffer.from(fileResult.buffer)
+          } catch (bufferError) {
+            console.warn('⚠️ Failed to coerce downloaded payload into buffer:', bufferError.message)
+          }
+        }
+
+        if (!downloadedBuffer) {
+          throw new Error('Downloaded file did not return a usable buffer')
+        }
+
+        fileBuffer = downloadedBuffer
         console.log('📄 Downloaded file buffer, size:', fileBuffer.length)
         
       } catch (error) {

@@ -9,6 +9,18 @@ import { db } from '../lib/db.js'
 import { storageService } from '../lib/storageService.js'
 import { workflowIntegration } from '../lib/workflowIntegration.js'
 
+const deriveFileType = (mimeType, fileName) => {
+  if (mimeType && mimeType.includes('/')) {
+    return mimeType.split('/').pop()
+  }
+
+  if (fileName && fileName.includes('.')) {
+    return fileName.split('.').pop().toLowerCase()
+  }
+
+  return 'unknown'
+}
+
 export default async function handler(req, res) {
   // This is a queue handler - extract job data from request body
   const { uploadId, merchantId } = req.body || {}
@@ -33,8 +45,9 @@ export default async function handler(req, res) {
       throw new Error(`Upload not found: ${uploadId}`)
     }
 
-    workflowId = upload.workflowId
-    console.log(`📄 Processing file: ${upload.fileName} (${upload.fileType})`)
+  workflowId = upload.workflowId
+  const fileType = deriveFileType(upload.mimeType, upload.fileName)
+  console.log(`📄 Processing file: ${upload.fileName} (${fileType})`)
 
     // Update workflow status to processing
     if (workflowId) {
@@ -75,9 +88,11 @@ export default async function handler(req, res) {
     const workflowData = {
       uploadId: upload.id,
       merchantId,
-      fileBuffer,
+  fileBuffer,
+  buffer: fileBuffer,
       fileName: upload.fileName,
-      fileType: upload.fileType,
+      fileType,
+      mimeType: upload.mimeType,
       settings: aiSettings || {},
       metadata: {
         uploadedBy: 'user',
