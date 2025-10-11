@@ -805,3 +805,25 @@ enum DuplicateAction {
   CREATE_ANYWAY
   QUEUE_FOR_REVIEW
 }
+
+// Performance Metrics for monitoring and optimization
+// Tracks execution time and success rates of operations
+model PerformanceMetric {
+  id          String   @id @default(cuid())
+  merchantId  String
+  operation   String   // e.g., 'findMatchingSuppliers', 'autoMatchSupplier'
+  engine      String   // 'pg_trgm' | 'javascript'
+  durationMs  Int      // Execution time in milliseconds
+  resultCount Int?     // Number of results returned (if applicable)
+  success     Boolean  @default(true)
+  error       String?  // Error message if failed
+  metadata    Json?    // Additional context (e.g., minScore, maxResults)
+  createdAt   DateTime @default(now())
+  
+  // Indexes for efficient queries
+  @@index([merchantId, operation, createdAt])
+  @@index([engine, operation])
+  @@index([operation, createdAt])
+  @@index([createdAt])
+  @@map("performance_metrics")
+}

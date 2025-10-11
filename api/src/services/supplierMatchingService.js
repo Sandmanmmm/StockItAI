@@ -2,9 +2,18 @@
  * Supplier Matching Service
  * Implements fuzzy matching algorithm to find and suggest suppliers
  * based on various data points from AI-parsed purchase orders.
+ * 
+ * HYBRID IMPLEMENTATION:
+ * - Supports both JavaScript (Levenshtein) and PostgreSQL (pg_trgm) engines
+ * - Routes based on feature flags with automatic fallback
+ * - JavaScript: Proven, slower (67s for 100 suppliers)
+ * - pg_trgm: New, faster (<100ms for 100 suppliers)
  */
 
 import { db } from '../lib/db.js'
+import { featureFlags } from '../config/featureFlags.js'
+import supplierMatchingServicePgTrgm from './supplierMatchingServicePgTrgm.js'
+import { logPerformanceMetric } from '../lib/performanceMonitoring.js'
 
 /**
  * Calculate Levenshtein distance between two strings
@@ -218,20 +227,22 @@ function calculateMatchScore(parsedSupplier, existingSupplier) {
 }
 
 /**
- * Find matching suppliers for parsed supplier data
+ * Find matching suppliers for parsed supplier data (JAVASCRIPT IMPLEMENTATION)
+ * Uses Levenshtein distance algorithm - slower but proven reliable
+ * 
  * @param {Object} parsedSupplier - Supplier data from AI parsing
  * @param {string} merchantId - Merchant ID to search within
  * @param {Object} options - Matching options
  * @returns {Promise<Array>} - Array of matched suppliers with scores
  */
-export async function findMatchingSuppliers(parsedSupplier, merchantId, options = {}) {
+async function findMatchingSuppliersViaJavaScript(parsedSupplier, merchantId, options = {}) {
   const {
     minScore = 0.7,        // Minimum score threshold (0-1)
     maxResults = 5,        // Maximum number of results
     includeInactive = false // Include inactive suppliers
   } = options
   
-  console.log('🔍 Finding matching suppliers for:', {
+  console.log('🔍 [JavaScript Engine] Finding matching suppliers for:', {
     name: parsedSupplier.name,
     email: parsedSupplier.email,
     phone: parsedSupplier.phone,
@@ -240,6 +251,8 @@ export async function findMatchingSuppliers(parsedSupplier, merchantId, options 
     merchantId,
     options
   })
+  
+  const startTime = Date.now()
   
   try {
     const client = await db.getClient()
@@ -256,7 +269,7 @@ export async function findMatchingSuppliers(parsedSupplier, merchantId, options 
       }
     })
     
-    console.log(`📊 Found ${suppliers.length} suppliers to compare against`)
+    console.log(`📊 [JavaScript] Found ${suppliers.length} suppliers to compare against`)
     
     // Calculate match scores for all suppliers
     const matches = suppliers.map(supplier => {
@@ -277,7 +290,11 @@ export async function findMatchingSuppliers(parsedSupplier, merchantId, options 
         matchScore: matchResult.score,
         confidence: matchResult.confidence,
         breakdown: matchResult.breakdown,
-        availableFields: matchResult.availableFields
+        availableFields: matchResult.availableFields,
+        metadata: {
+          engine: 'javascript',
+          executionTime: Date.now() - startTime
+        }
       }
     })
     
@@ -287,12 +304,230 @@ export async function findMatchingSuppliers(parsedSupplier, merchantId, options 
       .sort((a, b) => b.matchScore - a.matchScore)
       .slice(0, maxResults)
     
-    console.log(`✅ Found ${filteredMatches.length} matches above threshold ${minScore}`)
+    const elapsedTime = Date.now() - startTime
+    console.log(`✅ [JavaScript] Found ${filteredMatches.length} matches above threshold ${minScore} in ${elapsedTime}ms`)
     
     return filteredMatches
     
   } catch (error) {
-    console.error('❌ Error finding matching suppliers:', error)
+    console.error('❌ [JavaScript] Error finding matching suppliers:', error)
+    throw new Error(`Failed to find matching suppliers: ${error.message}`)
+  }
+}
+
+/**
+ * Find matching suppliers for parsed supplier data (HYBRID ROUTER)
+ * Routes to appropriate engine based on feature flags
+ * Automatically falls back to JavaScript on error
+ * 
+ * @param {Object} parsedSupplier - Supplier data from AI parsing
+ * @param {string} merchantId - Merchant ID to search within
+ * @param {Object} options - Matching options
+ * @returns {Promise<Array>} - Array of matched suppliers with scores
+ */
+export async function findMatchingSuppliers(parsedSupplier, merchantId, options = {}) {
+  const startTime = Date.now()
+  
+  // Check which engine to use via feature flags
+  const usePgTrgm = await featureFlags.usePgTrgmMatching(
+    merchantId,
+    options.engine  // Optional override for testing
+  )
+  
+  const engineName = usePgTrgm ? 'pg_trgm' : 'javascript'
+  console.log(`🚦 [Hybrid Router] Using ${engineName} engine for supplier matching`)
+  
+  try {
+    let results
+    
+    if (usePgTrgm) {
+      // Try pg_trgm engine (fast, PostgreSQL-based)
+      try {
+        results = await supplierMatchingServicePgTrgm.findMatchingSuppliersViaPgTrgm(
+          parsedSupplier,
+          merchantId,
+          options
+        )
+        
+        const elapsedTime = Date.now() - startTime
+        console.log(`✅ [pg_trgm] Completed in ${elapsedTime}ms`)
+        
+        // Log performance metric to database
+        await logPerformanceMetric({
+          merchantId,
+          engine: 'pg_trgm',
+          operation: 'findMatchingSuppliers',
+          durationMs: elapsedTime,
+          resultCount: results.length,
+          success: true,
+          metadata: {
+            minScore: options.minScore,
+            maxResults: options.maxResults,
+            supplierName: parsedSupplier.name
+          }
+        })
+        
+        return results
+        
+      } catch (pgTrgmError) {
+        // Automatic fallback to JavaScript on error
+        console.error('❌ [pg_trgm] Error, falling back to JavaScript:', pgTrgmError.message)
+        
+        // Log failure to database
+        await logPerformanceMetric({
+          merchantId,
+          engine: 'pg_trgm',
+          operation: 'findMatchingSuppliers',
+          durationMs: Date.now() - startTime,
+          resultCount: 0,
+          success: false,
+          error: pgTrgmError.message,
+          metadata: {
+            minScore: options.minScore,
+            maxResults: options.maxResults,
+            supplierName: parsedSupplier.name
+          }
+        })
+        
+        // Fall through to JavaScript implementation
+      }
+    }
+    
+    // Use JavaScript engine (proven fallback)
+    results = await findMatchingSuppliersViaJavaScript(
+      parsedSupplier,
+      merchantId,
+      options
+    )
+    
+    const elapsedTime = Date.now() - startTime
+    
+    // Log performance metric to database
+    await logPerformanceMetric({
+      merchantId,
+      engine: 'javascript',
+      operation: 'findMatchingSuppliers',
+      durationMs: elapsedTime,
+      resultCount: results.length,
+      success: true,
+      metadata: {
+        minScore: options.minScore,
+        maxResults: options.maxResults,
+        supplierName: parsedSupplier.name,
+        wasFallback: usePgTrgm // Indicates this was a fallback
+      }
+    })
+    
+    return results
+    
+  } catch (error) {
+    console.error('❌ [Hybrid Router] Error in supplier matching:', error)
+    
+    // Log failure to database
+    await logPerformanceMetric({
+      merchantId,
+      engine: engineName,
+      operation: 'findMatchingSuppliers',
+      durationMs: Date.now() - startTime,
+      resultCount: 0,
+      success: false,
+      error: error.message,
+      metadata: {
+        minScore: options.minScore,
+        maxResults: options.maxResults,
+        supplierName: parsedSupplier.name
+      }
+    })
+    
+    throw new Error(`Failed to find matching suppliers: ${error.message}`)
+  }
+}
+
+/**
+ * Find matching suppliers for parsed supplier data (JAVASCRIPT IMPLEMENTATION)
+ * Uses Levenshtein distance algorithm - slower but proven reliable
+ * 
+ * @param {Object} parsedSupplier - Supplier data from AI parsing
+ * @param {string} merchantId - Merchant ID to search within
+ * @param {Object} options - Matching options
+ * @returns {Promise<Array>} - Array of matched suppliers with scores
+ */
+async function findMatchingSuppliersViaJavaScript(parsedSupplier, merchantId, options = {}) {
+  const {
+    minScore = 0.7,        // Minimum score threshold (0-1)
+    maxResults = 5,        // Maximum number of results
+    includeInactive = false // Include inactive suppliers
+  } = options
+  
+  console.log('🔍 [JavaScript Engine] Finding matching suppliers for:', {
+    name: parsedSupplier.name,
+    email: parsedSupplier.email,
+    phone: parsedSupplier.phone,
+    website: parsedSupplier.website,
+    address: parsedSupplier.address,
+    merchantId,
+    options
+  })
+  
+  const startTime = Date.now()
+  
+  try {
+    const client = await db.getClient()
+    // Get all suppliers for merchant
+    const suppliers = await client.supplier.findMany({
+      where: {
+        merchantId,
+        ...(includeInactive ? {} : { status: 'active' })
+      },
+      include: {
+        _count: {
+          select: { purchaseOrders: true }
+        }
+      }
+    })
+    
+    console.log(`📊 [JavaScript] Found ${suppliers.length} suppliers to compare against`)
+    
+    // Calculate match scores for all suppliers
+    const matches = suppliers.map(supplier => {
+      const matchResult = calculateMatchScore(parsedSupplier, supplier)
+      
+      return {
+        supplier: {
+          id: supplier.id,
+          name: supplier.name,
+          contactEmail: supplier.contactEmail,
+          contactPhone: supplier.contactPhone,
+          address: supplier.address,
+          website: supplier.website,
+          status: supplier.status,
+          totalPOs: supplier._count.purchaseOrders,
+          createdAt: supplier.createdAt
+        },
+        matchScore: matchResult.score,
+        confidence: matchResult.confidence,
+        breakdown: matchResult.breakdown,
+        availableFields: matchResult.availableFields,
+        metadata: {
+          engine: 'javascript',
+          executionTime: Date.now() - startTime
+        }
+      }
+    })
+    
+    // Filter by minimum score and sort by score descending
+    const filteredMatches = matches
+      .filter(match => match.matchScore >= minScore)
+      .sort((a, b) => b.matchScore - a.matchScore)
+      .slice(0, maxResults)
+    
+    const elapsedTime = Date.now() - startTime
+    console.log(`✅ [JavaScript] Found ${filteredMatches.length} matches above threshold ${minScore} in ${elapsedTime}ms`)
+    
+    return filteredMatches
+    
+  } catch (error) {
+    console.error('❌ [JavaScript] Error finding matching suppliers:', error)
     throw new Error(`Failed to find matching suppliers: ${error.message}`)
   }
 }
@@ -447,6 +682,7 @@ export async function suggestSuppliers(parsedSupplier, merchantId) {
 
 export default {
   findMatchingSuppliers,
+  findMatchingSuppliersViaJavaScript,  // Export for testing
   getBestMatch,
   autoMatchSupplier,
   suggestSuppliers,
