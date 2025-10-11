@@ -1,5 +1,6 @@
 /**
  * Database connection using existing Prisma client from orderflow-ai
+ * BUILD VERSION: 2025-10-10-20:05:00 - Two-Phase Warmup + Transaction Logging
  */
 
 // Since we can't import the Prisma client directly from the other directory,
@@ -9,6 +10,10 @@
 import { PrismaClient } from '@prisma/client'
 // Phase 2: Import withPrismaRetry for utility functions (backwards compatibility)
 import { withPrismaRetry } from './prismaRetryWrapper.js'
+
+// BUILD VERIFICATION MARKER - Forces Vercel to rebuild this function
+const BUILD_VERSION = '2025-10-10-20:05:00'
+console.log(`🏗️ [DB MODULE] Build version: ${BUILD_VERSION} - Two-Phase Warmup Enabled`)
 
 // Prisma client singleton
 let prisma
@@ -278,9 +283,10 @@ async function initializePrisma() {
           
           // Increased warmup time for serverless cold starts with concurrent requests
           const warmupDelayMs = parseInt(process.env.PRISMA_WARMUP_MS || '2500', 10)
-          console.log(`⏳ Waiting ${warmupDelayMs}ms for engine warmup...`)
+          console.log(`⏳ [BUILD:20051001] Waiting ${warmupDelayMs}ms for engine warmup...`)
+          console.log(`🔧 [DEPLOYMENT CHECK] Two-phase warmup enabled - will verify both engines`)
           
-          // Force rebuild: 2025-10-10-19:35 - Ensure two-phase warmup deploys
+          // Force rebuild: 2025-10-10-20:05 - AGGRESSIVE cache bust
           // Phase 3: Track warmup duration for metrics
           const warmupStartTime = Date.now()
           
