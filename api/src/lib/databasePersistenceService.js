@@ -228,8 +228,8 @@ export class DatabasePersistenceService {
           processingTime: Date.now() - startTime
         }
       }, {
-        maxWait: 5000, // Maximum time to wait to start transaction (5s for serverless)
-        timeout: 8000, // Maximum transaction time (8s, leaving 2s buffer for 10s function timeout)
+        maxWait: 10000, // Maximum time to wait to start transaction (10s - increased for connection pool contention)
+        timeout: 45000, // Maximum transaction time (45s - DATABASE_SAVE is complex, needs more time)
         isolationLevel: 'ReadCommitted' // Reduce lock contention
       })
       
