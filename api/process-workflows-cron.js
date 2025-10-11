@@ -270,13 +270,7 @@ async function autoFixStuckPOs(prisma) {
           }
         },
         include: {
-          lineItems: true,
-          workflows: {
-            orderBy: {
-              createdAt: 'desc'
-            },
-            take: 1
-          }
+          lineItems: true
         },
         take: 10 // Limit to 10 POs per run
       }),
@@ -321,8 +315,15 @@ async function autoFixStuckPOs(prisma) {
           )
           
           // Update workflow if it exists
-          if (po.workflows && po.workflows.length > 0) {
-            const workflow = po.workflows[0]
+          const workflow = await prismaOperation(
+            (client) => client.workflowExecution.findFirst({
+              where: { purchaseOrderId: po.id },
+              orderBy: { createdAt: 'desc' }
+            }),
+            `Find workflow for PO ${po.id}`
+          )
+          
+          if (workflow) {
             await prismaOperation(
               (client) => client.workflowExecution.update({
                 where: { id: workflow.id },
