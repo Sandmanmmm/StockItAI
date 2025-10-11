@@ -1884,6 +1884,21 @@ export class WorkflowOrchestrator {
       // Process each draft (this is the slow part that was blocking workflows)
       for (const [index, draft] of draftsToProcess.entries()) {
         try {
+          // Double-check draft still exists before processing (defense against race conditions)
+          const draftExists = await prismaOperation(
+            (prisma) => prisma.productDraft.findUnique({
+              where: { id: draft.id },
+              select: { id: true }
+            }),
+            `Check if draft ${draft.id} exists`
+          )
+          
+          if (!draftExists) {
+            console.log(`⚠️ [${index + 1}/${draftsToProcess.length}] Draft ${draft.id} no longer exists - skipping`)
+            processedCount++
+            continue
+          }
+          
           console.log(`🔍 [${index + 1}/${draftsToProcess.length}] Searching images for: ${draft.originalTitle}`)
           
           const itemForSearch = {
@@ -1935,6 +1950,11 @@ export class WorkflowOrchestrator {
                   `Create product image for draft ${draft.id}`
                 )
               } catch (error) {
+                // Handle foreign key errors gracefully (draft may have been deleted)
+                if (error.message?.includes('Foreign key constraint') || error.message?.includes('productDraftId_fkey')) {
+                  console.warn(`⚠️ Draft ${draft.id} no longer exists (may have been deleted) - skipping images`)
+                  break // Skip remaining images for this draft
+                }
                 console.warn(`⚠️ Failed to save image ${imgIndex + 1}:`, error.message)
               }
             }
