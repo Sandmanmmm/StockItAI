@@ -1078,7 +1078,11 @@ export class WorkflowOrchestrator {
         purchaseOrderId: enrichedNextStageData.purchaseOrderId
       })
       
-      await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.DATA_NORMALIZATION, enrichedNextStageData)
+      // SIMPLIFIED WORKFLOW: Skip intermediate normalization stages and go directly to product drafts
+      // The intermediate stages (data_normalization, merchant_config, etc.) were causing workflows to get stuck
+      // Product draft creation has all the logic needed for pricing, refinement, etc.
+      console.log('🎯 Skipping intermediate stages - proceeding directly to Product Draft Creation')
+      await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION, enrichedNextStageData)
       
       job.progress(100)
       
@@ -1086,7 +1090,7 @@ export class WorkflowOrchestrator {
         success: true,
         stage: WORKFLOW_STAGES.DATABASE_SAVE,
         dbResult,
-        nextStage: WORKFLOW_STAGES.DATA_NORMALIZATION
+        nextStage: WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION // Changed from DATA_NORMALIZATION
       }
       
     } catch (error) {

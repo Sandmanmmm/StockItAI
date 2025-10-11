@@ -248,6 +248,120 @@ async function processWorkflow(workflow) {
 
 
 /**
+ * Automatically fix stuck POs that have data but are stuck in "processing" status
+ * This handles cases where the workflow completed database save but failed before status_update
+ */
+async function autoFixStuckPOs(prisma) {
+  try {
+    console.log('🔍 Checking for stuck POs with data...')
+    
+    // Find POs that are:
+    // 1. Still in "processing" status
+    // 2. Have line items (data was saved successfully)
+    // 3. Last updated >5 minutes ago
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000)
+    
+    const stuckPOs = await prismaOperation(
+      (client) => client.purchaseOrder.findMany({
+        where: {
+          status: 'processing',
+          updatedAt: {
+            lt: fiveMinutesAgo
+          }
+        },
+        include: {
+          lineItems: true,
+          workflows: {
+            orderBy: {
+              createdAt: 'desc'
+            },
+            take: 1
+          }
+        },
+        take: 10 // Limit to 10 POs per run
+      }),
+      'Find stuck POs with data'
+    )
+    
+    if (stuckPOs.length === 0) {
+      console.log('✅ No stuck POs found')
+      return { fixed: 0 }
+    }
+    
+    console.log(`📋 Found ${stuckPOs.length} potentially stuck POs`)
+    
+    let fixedCount = 0
+    
+    for (const po of stuckPOs) {
+      // Only fix if it has line items (data was saved)
+      if (po.lineItems && po.lineItems.length > 0) {
+        console.log(`🔧 Fixing stuck PO ${po.id}:`)
+        console.log(`   Number: ${po.number || 'N/A'}`)
+        console.log(`   Line Items: ${po.lineItems.length}`)
+        console.log(`   Confidence: ${po.confidence}`)
+        console.log(`   Age: ${Math.round((Date.now() - po.updatedAt.getTime()) / 1000)}s`)
+        
+        try {
+          // Determine final status based on confidence
+          const finalStatus = (po.confidence && po.confidence >= 0.8) ? 'completed' : 'review_needed'
+          
+          // Update PO status
+          await prismaOperation(
+            (client) => client.purchaseOrder.update({
+              where: { id: po.id },
+              data: {
+                status: finalStatus,
+                jobStatus: 'completed',
+                jobCompletedAt: new Date(),
+                processingNotes: `Auto-recovered from stuck state. ${po.lineItems.length} line items processed. Confidence: ${Math.round((po.confidence || 0) * 100)}%`,
+                updatedAt: new Date()
+              }
+            }),
+            `Auto-fix stuck PO ${po.id}`
+          )
+          
+          // Update workflow if it exists
+          if (po.workflows && po.workflows.length > 0) {
+            const workflow = po.workflows[0]
+            await prismaOperation(
+              (client) => client.workflowExecution.update({
+                where: { id: workflow.id },
+                data: {
+                  status: 'completed',
+                  currentStage: 'status_update',
+                  progressPercent: 100,
+                  completedAt: new Date(),
+                  updatedAt: new Date()
+                }
+              }),
+              `Auto-fix workflow ${workflow.id}`
+            )
+          }
+          
+          console.log(`✅ Fixed PO ${po.id} - new status: ${finalStatus}`)
+          fixedCount++
+          
+        } catch (fixError) {
+          console.error(`❌ Failed to fix PO ${po.id}:`, fixError.message)
+        }
+      } else {
+        console.log(`⏭️ Skipping PO ${po.id} - no line items (workflow may have failed earlier)`)
+      }
+    }
+    
+    if (fixedCount > 0) {
+      console.log(`🎉 Auto-fixed ${fixedCount} stuck PO(s)`)
+    }
+    
+    return { checked: stuckPOs.length, fixed: fixedCount }
+    
+  } catch (error) {
+    console.error('❌ Error in autoFixStuckPOs:', error)
+    return { checked: 0, fixed: 0, error: error.message }
+  }
+}
+
+/**
  * Cron handler - processes all pending workflows
  */
 export default async function handler(req, res) {
@@ -282,6 +396,13 @@ export default async function handler(req, res) {
     console.log(`� Initializing database connection...`)
     prisma = await db.getClient()
     console.log(`✅ Database connected successfully`)
+
+    // CRITICAL: Auto-fix stuck POs before processing new workflows
+    // This handles POs that completed database save but got stuck before status_update
+    const autoFixResult = await autoFixStuckPOs(prisma)
+    if (autoFixResult.fixed > 0) {
+      console.log(`🎯 Auto-fixed ${autoFixResult.fixed} stuck PO(s) in this run`)
+    }
 
     // Find all pending workflows
     const pendingWorkflows = await prismaOperation(
@@ -329,6 +450,7 @@ export default async function handler(req, res) {
         success: true, 
         message: 'No pending workflows',
         processed: 0,
+        autoFixed: autoFixResult.fixed || 0,
         timestamp: new Date().toISOString()
       })
     }
@@ -352,6 +474,9 @@ export default async function handler(req, res) {
     console.log(`📊 Total processed: ${results.length} workflows`)
     console.log(`✅ Successful: ${successCount}`)
     console.log(`❌ Failed: ${failureCount}`)
+    if (autoFixResult.fixed > 0) {
+      console.log(`🔧 Auto-fixed: ${autoFixResult.fixed} stuck POs`)
+    }
     console.log(`⏱️ Total cron execution time: ${cronExecutionTime}ms`)
 
     res.status(200).json({
@@ -359,6 +484,7 @@ export default async function handler(req, res) {
       processed: results.length,
       successful: successCount,
       failed: failureCount,
+      autoFixed: autoFixResult.fixed || 0,
       results,
       executionTime: cronExecutionTime,
       timestamp: new Date().toISOString()
