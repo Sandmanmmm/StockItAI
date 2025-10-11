@@ -1429,10 +1429,13 @@ export class WorkflowOrchestrator {
       console.log('⚡ ASYNC MODE: Queueing image processing in background, continuing workflow immediately')
       
       // Queue the background image processing job
+      // NOTE: We don't pass productDrafts here - background job will fetch fresh from DB
+      // This prevents race conditions where drafts might be modified/deleted between
+      // queuing and processing (5+ min delay)
       try {
         await processorRegistrationService.addJob('background-image-processing', {
           purchaseOrderId,
-          productDrafts,
+          // productDrafts: NOT passed - will be fetched fresh from DB
           merchantId: data.merchantId,
           workflowId // For logging/tracking only
         })
