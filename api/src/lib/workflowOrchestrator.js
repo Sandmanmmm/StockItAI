@@ -1082,6 +1082,15 @@ export class WorkflowOrchestrator {
       // The intermediate stages (data_normalization, merchant_config, etc.) were causing workflows to get stuck
       // Product draft creation has all the logic needed for pricing, refinement, etc.
       console.log('🎯 Skipping intermediate stages - proceeding directly to Product Draft Creation')
+      
+      // Update PO progress to show we're moving to next stage
+      await this.updatePurchaseOrderProgress(
+        dbResult.purchaseOrder.id, 
+        'Creating product drafts for refinement...', 
+        40,
+        'Product draft creation starting...'
+      )
+      
       await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION, enrichedNextStageData)
       
       job.progress(100)
@@ -1363,6 +1372,14 @@ export class WorkflowOrchestrator {
       // Continue to image search and attachment stage
       console.log('🎯 Product Draft Creation completed - Proceeding to image search...')
       
+      // Update PO progress to show transition to next stage
+      await this.updatePurchaseOrderProgress(
+        purchaseOrder.id,
+        'Searching and attaching product images...',
+        60,
+        `Found ${productDrafts.length} products, now searching for images...`
+      )
+      
       // Schedule image search stage to find and attach product images
       await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.IMAGE_ATTACHMENT, enrichedNextStageData)
 
@@ -1373,7 +1390,7 @@ export class WorkflowOrchestrator {
         stage: WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION,
         productDrafts,
         productDraftCount: productDrafts.length,
-        nextStage: WORKFLOW_STAGES.STATUS_UPDATE
+        nextStage: WORKFLOW_STAGES.IMAGE_ATTACHMENT // Fixed: was STATUS_UPDATE
       }
 
     } catch (error) {
@@ -1499,8 +1516,19 @@ export class WorkflowOrchestrator {
             unitCost: draft.originalPrice || 0
           }
 
-          // Search for images using web scraping
-          const images = await imageService.searchGoogleProductImages(itemForSearch)
+          // PRODUCTION FIX: Add timeout protection (30 seconds max per image search)
+          const imageSearchPromise = imageService.searchGoogleProductImages(itemForSearch)
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Image search timeout (30s)')), 30000)
+          )
+          
+          let images
+          try {
+            images = await Promise.race([imageSearchPromise, timeoutPromise])
+          } catch (timeoutError) {
+            console.warn(`   ⏱️ Image search timed out for: ${draft.originalTitle}`)
+            images = [] // Continue with no images
+          }
           
           if (images && images.length > 0) {
             console.log(`   ✅ Found ${images.length} images via scraping`)
@@ -1672,6 +1700,15 @@ export class WorkflowOrchestrator {
 
       // Continue to status update
       console.log('🎯 Image Attachment completed - Proceeding to status update...')
+      
+      // Update PO progress to show finalizing
+      await this.updatePurchaseOrderProgress(
+        purchaseOrderId,
+        'Finalizing purchase order...',
+        90,
+        `Images attached. Processing final status update...`
+      )
+      
       await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.STATUS_UPDATE, enrichedNextStageData)
 
       job.progress(100)
@@ -1685,8 +1722,44 @@ export class WorkflowOrchestrator {
 
     } catch (error) {
       console.error('❌ Image Attachment failed:', error)
-      await this.failWorkflow(workflowId, WORKFLOW_STAGES.IMAGE_ATTACHMENT, error)
-      throw error
+      console.warn('⚠️ Proceeding to STATUS_UPDATE despite image attachment failure')
+      
+      // PRODUCTION FIX: Always schedule STATUS_UPDATE even if image search fails
+      // This ensures the PO status gets updated properly
+      try {
+        const enrichedNextStageData = await this.saveAndAccumulateStageData(
+          workflowId,
+          WORKFLOW_STAGES.IMAGE_ATTACHMENT,
+          { 
+            success: false, 
+            error: error.message,
+            timestamp: new Date().toISOString() 
+          },
+          data
+        )
+        
+        // Update workflow metadata to show stage completed (with error)
+        await this.updateWorkflowStage(workflowId, WORKFLOW_STAGES.IMAGE_ATTACHMENT, 'completed')
+        
+        // CRITICAL: Always schedule STATUS_UPDATE to prevent stuck workflows
+        console.log('🎯 Scheduling STATUS_UPDATE despite image attachment error...')
+        await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.STATUS_UPDATE, enrichedNextStageData)
+        
+        job.progress(100)
+        
+        return {
+          success: false,
+          stage: WORKFLOW_STAGES.IMAGE_ATTACHMENT,
+          error: error.message,
+          nextStage: WORKFLOW_STAGES.STATUS_UPDATE,
+          message: 'Image attachment failed but workflow will continue'
+        }
+      } catch (recoveryError) {
+        console.error('❌ Failed to schedule STATUS_UPDATE after image error:', recoveryError)
+        // Only fail workflow if we can't even schedule the next stage
+        await this.failWorkflow(workflowId, WORKFLOW_STAGES.IMAGE_ATTACHMENT, error)
+        throw error
+      }
     }
   }
 
@@ -1951,7 +2024,27 @@ export class WorkflowOrchestrator {
         } catch (dbError) {
           console.error('❌ Failed to update purchase order status:', dbError)
           console.error('   Error details:', dbError.message)
-          // Don't throw error here - workflow should still complete
+          
+          // PRODUCTION FIX: Fallback - ALWAYS update status even if enhanced update fails
+          console.warn('⚠️ Attempting minimal status update as fallback...')
+          try {
+            await prismaOperation(
+              (prisma) => prisma.purchaseOrder.update({
+                where: { id: purchaseOrderId },
+                data: {
+                  status: isReviewNeeded ? 'review_needed' : 'completed',
+                  jobStatus: 'completed',
+                  jobCompletedAt: new Date(),
+                  updatedAt: new Date()
+                }
+              }),
+              `Status update (fallback) for PO ${purchaseOrderId}`
+            )
+            console.log('✅ Fallback status update succeeded')
+          } catch (fallbackError) {
+            console.error('❌ Even fallback status update failed:', fallbackError.message)
+            // Continue anyway - auto-recovery will catch this
+          }
         }
       } else {
         console.log('⚠️ No purchaseOrderId available in accumulated data for status update stage')
