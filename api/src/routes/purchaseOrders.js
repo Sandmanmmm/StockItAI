@@ -16,6 +16,14 @@ router.get('/test', (req, res) => {
 // GET /api/purchase-orders - Get purchase orders with filtering and pagination
 router.get('/', async (req, res) => {
   try {
+    // PRODUCTION FIX: Prevent browser caching of PO list to ensure fresh status updates
+    res.set({
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      'Surrogate-Control': 'no-store'
+    })
+    
     // Get merchant from authenticated request (set by verifyShopifyRequest middleware)
     const merchant = req.merchant
     
@@ -164,6 +172,14 @@ router.get('/', async (req, res) => {
 // GET /api/purchase-orders/:id - Get single purchase order with full details
 router.get('/:id', async (req, res) => {
   try {
+    // PRODUCTION FIX: Prevent browser caching of individual PO to ensure fresh status
+    res.set({
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      'Surrogate-Control': 'no-store'
+    })
+    
     const merchant = req.merchant
     if (!merchant || !merchant.id) {
       return res.status(401).json({

@@ -16,6 +16,14 @@ const router = express.Router()
  */
 router.get('/upload/:uploadId/status', async (req, res) => {
   try {
+    // PRODUCTION FIX: Prevent caching to show real-time status updates
+    res.set({
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      'Surrogate-Control': 'no-store'
+    })
+    
     const { uploadId } = req.params
     
     const status = await workflowIntegration.getUploadWorkflowStatus(uploadId)
@@ -188,6 +196,14 @@ router.post('/trigger/:uploadId', async (req, res) => {
  */
 router.get('/:workflowId/progress', async (req, res) => {
   try {
+    // PRODUCTION FIX: Prevent caching to show real-time progress updates
+    res.set({
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      'Surrogate-Control': 'no-store'
+    })
+    
     const { workflowId} = req.params
     
     const progress = await workflowIntegration.getWorkflowProgress(workflowId)
@@ -219,6 +235,14 @@ router.get('/:workflowId/progress', async (req, res) => {
  */
 router.get('/:workflowId/status', async (req, res) => {
   try {
+    // PRODUCTION FIX: Prevent caching to show real-time status updates
+    res.set({
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      'Surrogate-Control': 'no-store'
+    })
+    
     const { workflowId } = req.params
     
     const status = await workflowOrchestrator.getWorkflowStatus(workflowId)
