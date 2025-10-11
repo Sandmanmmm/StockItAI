@@ -389,7 +389,20 @@ async function initializePrisma() {
                     if (isConnecting && connectionPromise) {
                       console.log(`⏳ [EXTENSION] Reconnection in progress, waiting for new client before ${model}.${operation}...`)
                       await connectionPromise
-                      console.log(`✅ [EXTENSION] Reconnection complete, proceeding with ${model}.${operation}`)
+                      console.log(`✅ [EXTENSION] New client connected, now waiting for its warmup...`)
+                      
+                      // CRITICAL: After reconnection, wait for NEW client's warmup
+                      // The new client needs time to complete its own two-phase warmup
+                      if (warmupPromise) {
+                        await warmupPromise
+                      } else {
+                        // If no warmup promise yet, wait for warmupComplete flag
+                        for (let i = 0; i < 30; i++) {
+                          if (warmupComplete) break
+                          await new Promise(resolve => setTimeout(resolve, 100))
+                        }
+                      }
+                      console.log(`✅ [EXTENSION] New client warmup complete, proceeding with ${model}.${operation}`)
                     } else if (warmupPromise) {
                       console.log(`⏳ [EXTENSION] Waiting for warmup before ${model}.${operation}...`)
                       await warmupPromise
