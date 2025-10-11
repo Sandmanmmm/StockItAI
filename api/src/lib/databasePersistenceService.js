@@ -228,8 +228,8 @@ export class DatabasePersistenceService {
           processingTime: Date.now() - startTime
         }
       }, {
-        maxWait: 10000, // Maximum time to wait to start transaction (10s - increased for connection pool contention)
-        timeout: 45000, // Maximum transaction time (45s - DATABASE_SAVE is complex, needs more time)
+        maxWait: 15000, // Maximum time to wait to start transaction (15s - handle slow connection acquisition)
+        timeout: 120000, // Maximum transaction time (120s / 2 minutes - handle complex operations safely)
         isolationLevel: 'ReadCommitted' // Reduce lock contention
       })
       
@@ -262,11 +262,14 @@ export class DatabasePersistenceService {
         
         console.error(`❌ Database persistence failed (attempt ${attempt}/${maxRetries}):`, error.message)
         
-        // Check if error is retryable (connection/engine errors)
+        // Check if error is retryable (connection/engine errors/transaction errors)
         const isRetryable = error.message?.includes('Engine') || 
                            error.message?.includes('empty') ||
                            error.message?.includes('not yet connected') ||
                            error.message?.includes('timeout') ||
+                           error.message?.includes('Transaction') || // Transaction errors are retryable
+                           error.message?.includes('expired') ||
+                           error.message?.includes('closed') ||
                            error.code === 'P1001' || // Can't reach database
                            error.code === 'P2024'    // Timed out fetching
         
@@ -275,8 +278,18 @@ export class DatabasePersistenceService {
           throw new Error(`Database persistence failed after ${attempt} attempts: ${error.message}`)
         }
         
+        // Transaction expired/closed - force reconnect before retry
+        if (error.message?.includes('Transaction') || error.message?.includes('expired') || error.message?.includes('closed')) {
+          console.log(`🔄 Transaction error detected, forcing fresh connection before retry...`)
+          try {
+            await db.forceReconnect()
+          } catch (reconnectError) {
+            console.warn(`⚠️ Force reconnect failed (will retry anyway):`, reconnectError.message)
+          }
+        }
+        
         // Will retry on next loop iteration
-        console.log(`⏳ Will retry due to transient connection error...`)
+        console.log(`⏳ Will retry due to transient connection/transaction error...`)
       }
     }
     
