@@ -1434,10 +1434,13 @@ export class WorkflowOrchestrator {
       // queuing and processing (5+ min delay)
       try {
         await processorRegistrationService.addJob('background-image-processing', {
-          purchaseOrderId,
-          // productDrafts: NOT passed - will be fetched fresh from DB
-          merchantId: data.merchantId,
-          workflowId // For logging/tracking only
+          stage: 'background_image_processing', // REQUIRED for job routing
+          workflowId, // For logging/tracking only
+          data: {
+            purchaseOrderId,
+            // productDrafts: NOT passed - will be fetched fresh from DB
+            merchantId: data.merchantId
+          }
         })
         console.log('✅ Background image processing job queued successfully')
       } catch (queueError) {
@@ -1831,7 +1834,9 @@ export class WorkflowOrchestrator {
   async processBackgroundImageProcessing(job) {
     console.log('🖼️🔄 processBackgroundImageProcessing - Starting async image processing...')
     
-    const { purchaseOrderId, productDrafts, merchantId, workflowId } = job.data
+    // Extract from nested data structure (matches other workflow stages)
+    const { workflowId, data } = job.data
+    const { purchaseOrderId, productDrafts, merchantId } = data || {}
     const prisma = await db.getClient()
     
     console.log(`🖼️🔄 Background image processing:`, {
