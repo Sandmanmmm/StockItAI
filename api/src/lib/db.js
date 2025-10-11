@@ -383,22 +383,48 @@ async function initializePrisma() {
                   }
                   
                   // For non-transaction operations: Ensure engine is warmed up
+                  // CRITICAL: Always wait if warmup not complete, even during reconnection
                   if (!warmupComplete) {
-                    if (warmupPromise) {
+                    // If reconnection is in progress, wait for it to complete
+                    if (isConnecting && connectionPromise) {
+                      console.log(`⏳ [EXTENSION] Reconnection in progress, waiting for new client before ${model}.${operation}...`)
+                      await connectionPromise
+                      console.log(`✅ [EXTENSION] Reconnection complete, proceeding with ${model}.${operation}`)
+                    } else if (warmupPromise) {
                       console.log(`⏳ [EXTENSION] Waiting for warmup before ${model}.${operation}...`)
                       await warmupPromise
                     } else {
                       // Warmup not complete but no promise - likely mid-reconnect
-                      // Wait a bit and check again (reconnection in progress)
+                      // Wait longer for reconnection to set up new warmup promise
                       console.warn(`⚠️ [EXTENSION] Warmup not complete and no promise - waiting for reconnect to finish...`)
-                      await new Promise(resolve => setTimeout(resolve, 100))
                       
-                      // Check again after waiting
-                      if (!warmupComplete && warmupPromise) {
-                        console.log(`⏳ [EXTENSION] Reconnect detected, waiting for new warmup before ${model}.${operation}...`)
-                        await warmupPromise
-                      } else if (!warmupComplete) {
-                        console.warn(`⚠️ [EXTENSION] Still no warmup promise after wait - proceeding with caution for ${model}.${operation}`)
+                      // Wait up to 3 seconds for reconnection (in 100ms increments)
+                      for (let i = 0; i < 30; i++) {
+                        await new Promise(resolve => setTimeout(resolve, 100))
+                        
+                        // Check if reconnection started
+                        if (isConnecting && connectionPromise) {
+                          console.log(`⏳ [EXTENSION] Reconnect detected (attempt ${i + 1}), waiting for it to complete...`)
+                          await connectionPromise
+                          break
+                        }
+                        
+                        // Check if warmup promise now available
+                        if (warmupComplete) {
+                          console.log(`✅ [EXTENSION] Warmup completed during wait (attempt ${i + 1})`)
+                          break
+                        }
+                        
+                        if (warmupPromise) {
+                          console.log(`⏳ [EXTENSION] Warmup promise available (attempt ${i + 1}), waiting...`)
+                          await warmupPromise
+                          break
+                        }
+                      }
+                      
+                      // Final check after waiting
+                      if (!warmupComplete) {
+                        console.error(`❌ [EXTENSION] Warmup still not complete after 3s wait - ${model}.${operation} may fail`)
                       }
                     }
                   }
