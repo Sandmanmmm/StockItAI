@@ -144,6 +144,7 @@ export class ProcessorRegistrationService {
       { queueName: 'database-save', jobType: 'database_save', concurrency: 5 },
       { queueName: 'product-draft-creation', jobType: 'product_draft_creation', concurrency: 3 },
       { queueName: 'image-attachment', jobType: 'image_attachment', concurrency: 2 },
+      { queueName: 'background-image-processing', jobType: 'background_image_processing', concurrency: 1 }, // New: Async image processing
       { queueName: 'shopify-sync', jobType: 'shopify_sync', concurrency: 3 },
       { queueName: 'status-update', jobType: 'status_update', concurrency: 10 },
       
