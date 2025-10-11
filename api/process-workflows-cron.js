@@ -156,53 +156,47 @@ async function processWorkflow(workflow) {
       }
     }
 
-    // Update progress
+    // Update progress to indicate we're kicking off the async workflow
     await prisma.workflowExecution.update({
       where: { workflowId },
       data: {
-        currentStage: 'parsing_file',
-        progressPercent: 30
+        currentStage: 'ai_parsing',
+        progressPercent: 30,
+        status: 'processing' // Mark as processing (will be handled by queue system)
       }
     })
 
-    // Process the uploaded file through the FULL workflow integration
-    console.log(`🚀 Starting complete workflow processing via workflowIntegration...`)
-    const result = await workflowIntegration.processUploadedFile(workflowData)
+    // CRITICAL FIX: Use startWorkflow() to kick off async workflow, NOT processUploadedFile()
+    // startWorkflow() schedules the first job in the queue system and returns immediately
+    // The workflow will then progress through all stages asynchronously via Bull queues
+    console.log(`🚀 Kicking off async workflow via workflowIntegration.orchestrator.startWorkflow()...`)
+    console.log(`⚡ This will schedule the AI parsing job and return immediately (no timeout)`)
     
-    console.log(`✅ Workflow processing completed successfully`)
-    console.log(`📊 Result:`, JSON.stringify(result, null, 2))
-
-    // Double-check workflow status (processUploadedFile should handle this)
-    const finalWorkflow = await prisma.workflowExecution.findUnique({
-      where: { workflowId }
-    })
+    // The orchestrator's startWorkflow method will:
+    // 1. Save initial workflow state to Redis
+    // 2. Queue the first job (ai_parsing) in Bull
+    // 3. Return immediately (no blocking)
+    // 4. Workflow progresses asynchronously through all stages
+    await workflowIntegration.orchestrator.startWorkflow(workflowData)
     
-    if (finalWorkflow && finalWorkflow.status !== 'completed') {
-      console.log(`⚠️ Workflow not marked complete, updating status...`)
-      await prisma.workflowExecution.update({
-        where: { workflowId },
-        data: {
-          status: 'completed',
-          progressPercent: 100,
-          completedAt: new Date()
-        }
-      })
-    }
+    console.log(`✅ Workflow queued successfully - will process asynchronously`)
+    console.log(`📋 Workflow ID: ${workflowId} is now in the queue system`)
+    console.log(`⏰ Estimated completion: 30-60 seconds (processed in background)`)
 
-    // Update upload status
+    // Update upload status to "processing" (will be updated to "processed" by status_update stage)
     await prisma.upload.update({
       where: { id: workflow.uploadId },
       data: {
-        status: 'processed'
-        // updatedAt will be automatically updated by Prisma
+        status: 'processing' // Will be updated to 'processed' when workflow completes
       }
     })
 
     const executionTime = Date.now() - startTime
-    console.log(`✅ ========== WORKFLOW COMPLETE ==========`)
-    console.log(`⏱️ Total execution time: ${executionTime}ms`)
+    console.log(`✅ ========== WORKFLOW QUEUED SUCCESSFULLY ==========`)
+    console.log(`⏱️ Cron job execution time: ${executionTime}ms`)
+    console.log(`⏰ Workflow will complete asynchronously in ~30-60 seconds`)
 
-    return { success: true, workflowId: workflow.workflowId, executionTime }
+    return { success: true, workflowId: workflow.workflowId, executionTime, queued: true }
 
   } catch (error) {
     console.error(`❌ ========== WORKFLOW PROCESSING ERROR ==========`)
