@@ -8,8 +8,6 @@
  */
 
 import { db, prismaOperation } from './src/lib/db.js'
-import { storageService } from './src/lib/storageService.js'
-import { workflowIntegration } from './src/lib/workflowIntegration.js'
 import { processorRegistrationService } from './src/lib/processorRegistrationService.js'
 
 // Track processor initialization state across cron invocations
@@ -23,14 +21,6 @@ async function ensureProcessorsInitialized() {
 
   if (!processorInitializationPromise) {
     processorInitializationPromise = (async () => {
-      console.log(`🚀 Ensuring workflow orchestrator is initialized...`)
-      try {
-        await workflowIntegration.initialize()
-        console.log(`✅ Workflow orchestrator initialized`)
-      } catch (orchestratorError) {
-        console.error(`⚠️ Failed to initialize orchestrator (continuing anyway):`, orchestratorError.message)
-      }
-
       console.log(`🚀 Ensuring queue processors are initialized...`)
       await processorRegistrationService.initializeAllProcessors()
       processorsInitialized = true
@@ -82,21 +72,28 @@ async function processWorkflow(workflow) {
     console.log(`🔍 Prisma has $connect:`, typeof prisma.$connect)
     console.log(`🔍 Prisma has workflowExecution:`, typeof prisma.workflowExecution)
 
-    // Update workflow status to 'processing'
+    // Mark workflow as processing
     await prisma.workflowExecution.update({
       where: { workflowId },
       data: { 
         status: 'processing',
-        currentStage: 'downloading_file',
+        currentStage: 'ai_parsing',
         progressPercent: 10
       }
     })
 
-    // Get the upload record
+    // Get the upload record (minimal data only - don't download file)
     const upload = await prisma.upload.findUnique({
       where: { id: workflow.uploadId },
-      include: {
-        merchant: true
+      select: {
+        id: true,
+        fileUrl: true,
+        fileName: true,
+        fileSize: true,
+        mimeType: true,
+        fileType: true,
+        merchantId: true,
+        supplierId: true
       }
     })
 
@@ -104,90 +101,41 @@ async function processWorkflow(workflow) {
       throw new Error(`Upload not found: ${workflow.uploadId}`)
     }
 
-    console.log(`📦 Processing file: ${upload.fileName} (${upload.fileType || 'unknown'})`)
-    console.log(`📥 Downloading file from: ${upload.fileUrl}`)
+    console.log(`📦 Queueing file: ${upload.fileName} (${upload.fileType || 'unknown'})`)
+    console.log(`📥 File URL: ${upload.fileUrl}`)
 
-    // Download the file from Supabase Storage
-    const downloadResult = await storageService.downloadFile(upload.fileUrl)
+    // CRITICAL: Don't download/parse file in cron job - takes 40-100+ seconds!
+    // Instead, queue the AI parsing job which will download and process the file asynchronously
+    console.log(`🚀 Scheduling AI parsing job (file will be downloaded in queue worker)...`)
     
-    if (!downloadResult.success) {
-      throw new Error(`Failed to download file: ${downloadResult.error}`)
-    }
-    
-    const fileBuffer = downloadResult.buffer
-    console.log(`✅ File downloaded successfully (${fileBuffer.length} bytes)`)
-
-    // Update progress
-    await prisma.workflowExecution.update({
-      where: { workflowId },
+    // Queue the AI parsing job - it will handle file download and parsing
+    await processorRegistrationService.addJob('ai-parsing', {
+      stage: 'ai_parsing',
+      workflowId: workflowId,
       data: {
-        currentStage: 'preparing_workflow',
-        progressPercent: 20
-      }
-    })
-
-    // Get merchant AI settings
-    const aiSettings = await prisma.aISettings.findUnique({
-      where: { merchantId: workflow.merchantId }
-    })
-
-    console.log(`⚙️ AI Settings loaded for merchant: ${workflow.merchantId}`)
-
-    // Prepare workflow data matching the expected structure
-    const workflowData = {
-      uploadId: upload.id,
-      merchantId: workflow.merchantId,
-      fileBuffer,
-      fileName: upload.fileName,
-      fileSize: upload.fileSize || fileBuffer.length,
-      mimeType: upload.mimeType || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      fileType: upload.fileType || 'excel',
-      originalFileName: upload.fileName,
-      supplierId: upload.supplierId,
-      purchaseOrderId: workflow.purchaseOrderId,
-      aiSettings: aiSettings || {},
-      buffer: fileBuffer, // Some methods expect 'buffer' instead of 'fileBuffer'
-      existingWorkflowId: workflowId, // Pass existing workflow ID to prevent duplicate creation
-      metadata: {
-        uploadedBy: 'user',
+        uploadId: upload.id,
+        merchantId: upload.merchantId,
+        fileUrl: upload.fileUrl,
+        fileName: upload.fileName,
+        fileSize: upload.fileSize,
+        mimeType: upload.mimeType,
+        fileType: upload.fileType,
+        supplierId: upload.supplierId,
+        purchaseOrderId: workflow.purchaseOrderId,
         source: 'cron-processing',
-        queuedAt: workflow.createdAt?.toISOString(),
-        processedAt: new Date().toISOString()
-      }
-    }
-
-    // Update progress to indicate we're kicking off the async workflow
-    await prisma.workflowExecution.update({
-      where: { workflowId },
-      data: {
-        currentStage: 'ai_parsing',
-        progressPercent: 30,
-        status: 'processing' // Mark as processing (will be handled by queue system)
+        queuedAt: workflow.createdAt?.toISOString()
       }
     })
-
-    // CRITICAL FIX: Use startWorkflow() to kick off async workflow, NOT processUploadedFile()
-    // startWorkflow() schedules the first job in the queue system and returns immediately
-    // The workflow will then progress through all stages asynchronously via Bull queues
-    console.log(`🚀 Kicking off async workflow via workflowIntegration.orchestrator.startWorkflow()...`)
-    console.log(`⚡ This will schedule the AI parsing job and return immediately (no timeout)`)
     
-    // The orchestrator's startWorkflow method will:
-    // 1. Save initial workflow state to Redis
-    // 2. Queue the first job (ai_parsing) in Bull
-    // 3. Return immediately (no blocking)
-    // 4. Workflow progresses asynchronously through all stages
-    await workflowIntegration.orchestrator.startWorkflow(workflowData)
-    
-    console.log(`✅ Workflow queued successfully - will process asynchronously`)
-    console.log(`📋 Workflow ID: ${workflowId} is now in the queue system`)
-    console.log(`⏰ Estimated completion: 30-60 seconds (processed in background)`)
+    console.log(`✅ AI parsing job queued - will download and process file asynchronously`)
+    console.log(`� Workflow ID: ${workflowId}`)
+    console.log(`⏰ File download and processing will happen in background (~30-60 seconds)`)
 
-    // Update upload status to "processing" (will be updated to "processed" by status_update stage)
+    // Update upload status to "processing"
     await prisma.upload.update({
       where: { id: workflow.uploadId },
       data: {
-        status: 'processing' // Will be updated to 'processed' when workflow completes
+        status: 'processing'
       }
     })
 
