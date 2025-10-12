@@ -25,7 +25,20 @@ let healthCheckPromise = null // Lock for concurrent health checks
 let warmupComplete = false // Track if engine warmup is complete
 let warmupPromise = null // Promise for warmup completion
 let clientDeprecationWarned = false
+let connectionCreatedAt = null // Track connection creation time for age-based refresh
 const PRISMA_CLIENT_VERSION = 'v5_transaction_recovery' // Increment to force recreation
+const CONNECTION_MAX_AGE_MS = parseInt(process.env.PRISMA_CONNECTION_MAX_AGE_MS || '300000', 10) // 5 minutes default
+
+// Connection metrics for monitoring
+const connectionMetrics = {
+  attempts: 0,
+  successes: 0,
+  failures: 0,
+  maxConnectionErrors: 0,
+  ageRefreshes: 0,
+  lastSuccessAt: null,
+  lastFailureAt: null
+}
 
 // Validate DATABASE_URL includes a generous statement_timeout to prevent Postgres from
 // cancelling long-running writes (e.g. PO persistence transactions) before Prisma's
@@ -146,6 +159,7 @@ async function forceDisconnect() {
     healthCheckPromise = null // Clear health check lock
     warmupComplete = false // Reset warmup state
     warmupPromise = null
+    connectionCreatedAt = null // Reset connection age tracking
     console.log(`✅ Client cleared, next request will create fresh connection`)
   }
 }
@@ -188,6 +202,18 @@ async function initializePrisma() {
     
     // Reuse existing client if version matches AND it's fully connected AND warmed up
     if (prisma && prismaVersion === PRISMA_CLIENT_VERSION && warmupComplete) {
+      // CRITICAL FIX 2025-10-12: Check connection age before reuse
+      if (connectionCreatedAt && Date.now() - connectionCreatedAt > CONNECTION_MAX_AGE_MS) {
+        const ageMinutes = Math.floor((Date.now() - connectionCreatedAt) / 60000)
+        const maxAgeMinutes = Math.floor(CONNECTION_MAX_AGE_MS / 60000)
+        console.log(`🔄 Connection age (${ageMinutes} min) exceeded max (${maxAgeMinutes} min)`)
+        console.log(`🔄 Forcing refresh to prevent stale connections and release pool...`)
+        connectionMetrics.ageRefreshes++
+        await forceDisconnect()
+        // Fall through to create new connection
+        return await initializePrisma()
+      }
+      
       // If another request is already health-checking, wait for its result
       if (healthCheckPromise) {
         console.log(`⏳ Another request is health-checking, waiting...`)
@@ -284,8 +310,9 @@ async function initializePrisma() {
           // Limit connection pool size for serverless (prevent pool exhaustion)
           // Supabase free tier: 60 max connections
           // With many serverless instances, keep pool small per instance
-          // Increased from 3 to 5 to reduce contention while staying safe
-          const connectionLimit = parseInt(process.env.PRISMA_CONNECTION_LIMIT || '5', 10)
+          // CRITICAL FIX 2025-10-12: Reduced from 5 to 2 to support more instances
+          // Math: 60 max connections ÷ 2 per instance = 30 instances supported
+          const connectionLimit = parseInt(process.env.PRISMA_CONNECTION_LIMIT || '2', 10)
           const connectionTimeout = parseInt(process.env.PRISMA_CONNECTION_TIMEOUT || '10', 10)
           console.log(`   Connection pool limit: ${connectionLimit}`)
           console.log(`   Connection timeout: ${connectionTimeout}s`)
@@ -308,11 +335,24 @@ async function initializePrisma() {
             }
           })
           prismaVersion = PRISMA_CLIENT_VERSION
+          connectionCreatedAt = Date.now() // Track creation time for age-based refresh
+          connectionMetrics.attempts++
           console.log(`✅ PrismaClient created - using schema datasource config (pooler: port 6543)`)
+          console.log(`📊 Connection created at: ${new Date(connectionCreatedAt).toISOString()}`)
           
           // Connect immediately after creation
           await rawPrisma.$connect()
+          connectionMetrics.successes++
+          connectionMetrics.lastSuccessAt = Date.now()
           console.log(`✅ Prisma $connect() succeeded`)
+          console.log(`📊 Connection metrics:`, {
+            attempts: connectionMetrics.attempts,
+            successes: connectionMetrics.successes,
+            failures: connectionMetrics.failures,
+            maxConnectionErrors: connectionMetrics.maxConnectionErrors,
+            ageRefreshes: connectionMetrics.ageRefreshes,
+            successRate: `${Math.round((connectionMetrics.successes / connectionMetrics.attempts) * 100)}%`
+          })
 
           // Ensure statement_timeout is explicitly applied for this session. Some hosts
           // ignore URL parameters (especially with PgBouncer transaction pooling), so
@@ -604,8 +644,44 @@ async function initializePrisma() {
     console.log(`✅ Returning prisma client, type:`, typeof prisma)
     return prisma
   } catch (error) {
+    connectionMetrics.failures++
+    connectionMetrics.lastFailureAt = Date.now()
     console.error(`❌ FATAL ERROR in initializePrisma:`, error)
     console.error(`❌ Error stack:`, error.stack)
+    
+    // CRITICAL FIX 2025-10-12: Handle "Max client connections" error
+    const errorMessage = error?.message || ''
+    if (errorMessage.includes('Max client connections') || 
+        errorMessage.includes('sorry, too many clients')) {
+      connectionMetrics.maxConnectionErrors++
+      console.error(`🚨 DATABASE CONNECTION POOL EXHAUSTED!`)
+      console.error(`🚨 PostgreSQL has reached max connection limit`)
+      console.error(`� Max connection errors: ${connectionMetrics.maxConnectionErrors}`)
+      console.error(`�🔄 Attempting recovery: force disconnect + retry with backoff...`)
+      
+      try {
+        // Force disconnect to release any held connections
+        await forceDisconnect()
+        console.log(`✅ Forced disconnect completed`)
+        
+        // Add jittered backoff to prevent thundering herd
+        const backoffMs = 2000 + Math.floor(Math.random() * 3000) // 2-5 seconds
+        console.log(`⏳ Waiting ${backoffMs}ms before retry (connection pool recovery)...`)
+        await new Promise(resolve => setTimeout(resolve, backoffMs))
+        
+        // Retry initialization ONCE
+        console.log(`🔄 Retrying connection after pool exhaustion...`)
+        return await initializePrisma()
+        
+      } catch (retryError) {
+        console.error(`❌ Connection retry failed after pool exhaustion:`, retryError.message)
+        console.error(`🚨 CRITICAL: Database connection pool cannot be recovered`)
+        console.error(`📊 Final metrics:`, connectionMetrics)
+        console.error(`📊 Recommendation: Reduce serverless concurrency or upgrade database plan`)
+        throw new Error(`Database connection pool exhausted and retry failed: ${retryError.message}`)
+      }
+    }
+    
     throw error
   }
 }
