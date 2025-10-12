@@ -27,6 +27,39 @@ let warmupPromise = null // Promise for warmup completion
 let clientDeprecationWarned = false
 const PRISMA_CLIENT_VERSION = 'v5_transaction_recovery' // Increment to force recreation
 
+// Validate DATABASE_URL includes a generous statement_timeout to prevent Postgres from
+// cancelling long-running writes (e.g. PO persistence transactions) before Prisma's
+// own timeout logic can handle them gracefully.
+const DATABASE_URL = process.env.DATABASE_URL
+if (DATABASE_URL) {
+  try {
+    const connectionUrl = new URL(DATABASE_URL)
+    const params = connectionUrl.searchParams
+    const statementTimeout = params.get('statement_timeout')
+    const parsedTimeout = statementTimeout ? parseInt(statementTimeout, 10) : NaN
+
+    if (!statementTimeout || Number.isNaN(parsedTimeout)) {
+      console.warn(
+        '⚠️  DATABASE_URL is missing statement_timeout. Add &statement_timeout=180000 to prevent Postgres from cancelling long queries early.'
+      )
+    } else if (parsedTimeout < 180000) {
+      console.warn(
+        `⚠️  DATABASE_URL statement_timeout is ${parsedTimeout}ms. Increase to at least 180000ms so Prisma timeouts fire before Postgres cancels queries.`
+      )
+    } else {
+      console.log(
+        `✅ DATABASE_URL statement_timeout detected at ${parsedTimeout}ms`
+      )
+    }
+  } catch (error) {
+    console.warn(
+      `⚠️  Unable to parse DATABASE_URL for statement_timeout validation: ${error.message}`
+    )
+  }
+} else {
+  console.warn('⚠️  DATABASE_URL is not defined; Prisma connections may fail at runtime.')
+}
+
 // Increase process listener limit for Prisma reconnections
 process.setMaxListeners(20)
 
