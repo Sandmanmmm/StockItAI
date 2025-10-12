@@ -837,21 +837,21 @@ export class WorkflowOrchestrator {
         errorMessage.includes('expired transaction')
 
       if (isLockOrTimeout) {
-        console.warn(
-          `⚠️ Skipped PO progress update for ${purchaseOrderId} (stage ${stage}) due to row lock/timeout (${errorCode || 'timeout'}). This is non-fatal - PO is being updated by another workflow.`
+        console.log(
+          `✓ Skipped PO progress update for ${purchaseOrderId} (stage ${stage}) - row locked by another workflow (${errorCode || 'timeout'}). Expected and non-fatal.`
         )
         return
       }
       
       if (isTransactionTimeout) {
-        console.warn(
-          `⚠️ Skipped PO progress update for ${purchaseOrderId} (stage ${stage}) - transaction timeout (likely waiting for database lock). This is non-fatal.`
+        console.log(
+          `✓ Skipped PO progress update for ${purchaseOrderId} (stage ${stage}) - row locked by another workflow. This is expected and non-fatal.`
         )
         return
       }
 
       // Don't fail the workflow if progress update fails for other reasons
-      console.error(`⚠️ Failed to update PO progress:`, error.message)
+      console.warn(`⚠️ Failed to update PO progress (non-fatal):`, error.message)
     }
   }
 

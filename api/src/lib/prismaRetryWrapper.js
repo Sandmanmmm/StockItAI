@@ -78,8 +78,9 @@ export async function withPrismaRetry(operation, options = {}) {
       
       // Check if this is a retryable error
       if (!isRetryableError(error)) {
-        // Not a retryable error - fail immediately
-        console.error(`❌ [RETRY] ${operationName} failed with non-retryable error:`, error.message)
+        // Not a retryable error - log as debug/info since caller will handle it
+        // (Reduces noise for expected errors like transaction timeouts)
+        console.log(`🔄 [RETRY] ${operationName} encountered non-retryable error (caller will handle):`, error.message)
         throw error
       }
       

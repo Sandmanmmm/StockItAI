@@ -108,11 +108,21 @@ export class ProcessorRegistrationService {
     });
 
     queue.on('failed', (job, err) => {
-      console.error(`💥 [BULL] Job ${job.id} for ${jobType} failed on attempt ${job.attemptsMade}:`, err?.message || err);
+      const errorMessage = err?.message || err
+      const isExpectedError = 
+        errorMessage.includes('job stalled') ||
+        errorMessage.includes('Transaction already closed') ||
+        errorMessage.includes('lock timeout')
+      
+      if (isExpectedError) {
+        console.log(`🔄 [BULL] Job ${job.id} for ${jobType} will retry (stalled/lock timeout on attempt ${job.attemptsMade})`)
+      } else {
+        console.error(`💥 [BULL] Job ${job.id} for ${jobType} failed on attempt ${job.attemptsMade}:`, errorMessage)
+      }
     });
 
     queue.on('stalled', (job) => {
-      console.warn(`⚠️ [BULL] Job ${job.id} for ${jobType} stalled; will be retried`);
+      console.log(`🔄 [BULL] Job ${job.id} for ${jobType} stalled (likely waiting for PO lock); will be retried`);
     });
 
     if (monitorIntervalMs > 0) {
