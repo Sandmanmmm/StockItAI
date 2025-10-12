@@ -594,8 +594,18 @@ async function initializePrisma() {
                       
                       // Check if this is a retryable error
                       if (!isRetryableError(error)) {
-                        // Not a retryable error - fail immediately
-                        console.error(`❌ [EXTENSION] ${model}.${operation} failed with non-retryable error:`, error.message)
+                        // Check if it's a transaction timeout (expected when PO locked by another workflow)
+                        const isTransactionTimeout = error.message?.includes('Transaction already closed') ||
+                                                     error.message?.includes('transaction timeout') ||
+                                                     error.message?.includes('expired transaction')
+                        
+                        if (isTransactionTimeout) {
+                          // Expected error - log as info and rethrow (caller handles gracefully)
+                          console.log(`🔄 [EXTENSION] ${model}.${operation} encountered transaction timeout (caller will handle): ${error.message}`)
+                        } else {
+                          // Unexpected non-retryable error - log as error
+                          console.error(`❌ [EXTENSION] ${model}.${operation} failed with non-retryable error:`, error.message)
+                        }
                         throw error
                       }
                       
