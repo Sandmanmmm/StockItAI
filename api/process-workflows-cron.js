@@ -478,30 +478,54 @@ export default async function handler(req, res) {
     })
 
     // Also find stuck "processing" workflows (processing for more than 5 minutes)
-    // CRITICAL: Exclude workflows whose PO already has completed data (auto-fix should handle those)
+    // CRITICAL: Need to filter out workflows whose PO has completed data
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000)
-    const stuckWorkflows = await prisma.workflowExecution.findMany({
+    const potentiallyStuckWorkflows = await prisma.workflowExecution.findMany({
       where: {
         status: 'processing',
         updatedAt: {
           lt: fiveMinutesAgo
-        },
+        }
+      },
+      include: {
         purchaseOrder: {
-          // Only include workflows for POs that are truly stuck (no line items yet)
-          // If PO has line items, auto-fix should handle it
-          lineItems: {
-            none: {}
+          select: {
+            id: true,
+            status: true,
+            _count: {
+              select: { lineItems: true }
+            }
           }
         }
       },
       orderBy: {
         createdAt: 'asc'
       },
-      take: 5
+      take: 10 // Get more initially since we'll filter
     })
+    
+    // CRITICAL: Filter out workflows whose PO has completed data (auto-fix should handle those)
+    const stuckWorkflows = potentiallyStuckWorkflows.filter(w => {
+      if (!w.purchaseOrder) return true // Keep workflows without PO
+      
+      const po = w.purchaseOrder
+      const hasLineItems = po._count.lineItems > 0
+      
+      // Only keep workflows for POs that are truly stuck (no line items yet)
+      // If PO has line items, auto-fix will handle it
+      if (hasLineItems) {
+        console.log(`⏭️ Skipping workflow ${w.workflowId} - PO ${po.id} has ${po._count.lineItems} line items (auto-fix will handle)`)
+        return false
+      }
+      
+      return true
+    })
+    
+    // Take only first 5 stuck workflows to avoid timeout
+    const limitedStuckWorkflows = stuckWorkflows.slice(0, 5)
 
     // Combine and deduplicate workflows
-    const allWorkflows = [...pendingWorkflows, ...stuckWorkflows]
+    const allWorkflows = [...pendingWorkflows, ...limitedStuckWorkflows]
     const workflowsByPO = new Map()
     const workflowsWithoutPO = []
     const skippedWorkflows = []
