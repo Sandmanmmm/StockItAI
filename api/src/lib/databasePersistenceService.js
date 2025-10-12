@@ -165,7 +165,7 @@ export class DatabasePersistenceService {
         console.log(`   ✓ Verification: ${verifyCount} line items in transaction before commit`)
         console.log(`   Audit ID: ${auditRecord.id}`)
         
-        const txDuration = Date.now() - txStartStart
+        const txDuration = Date.now() - txStartTime
         console.log(`🔒 [${txId}] Transaction body complete (duration: ${txDuration}ms)`)
         console.log(`📊 [${txId}] Transaction Breakdown:`)
         console.log(`   - Step 1 (PO ${options.purchaseOrderId ? 'update' : 'create'}): ${step1Start ? (Date.now() - txStartTime - (Date.now() - step1Start)) : 0}ms`)
