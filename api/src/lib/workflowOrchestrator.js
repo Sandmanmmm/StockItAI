@@ -108,6 +108,8 @@ function rehydrateBuffer(value) {
   return null
 }
 
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+
 // Workflow Stage Definitions
 export const WORKFLOW_STAGES = {
   FILE_UPLOAD: 'file_upload',
@@ -154,6 +156,8 @@ export class WorkflowOrchestrator {
     this.productDraftService = new SimpleProductDraftService(db)
     // Don't initialize refinementConfigService in constructor - it needs async DB client
     this.refinementConfigService = null
+    this.activePurchaseOrders = new Map()
+    this.MAX_PO_LOCK_AGE_MS = 10 * 60 * 1000 // 10 minutes safeguard
   }
 
   /**
@@ -174,6 +178,58 @@ export class WorkflowOrchestrator {
     await stageResultStore.initialize()
     
     console.log('✅ WorkflowOrchestrator initialized successfully')
+  }
+
+  async acquirePurchaseOrderLock(purchaseOrderId, metadata = {}) {
+    if (!purchaseOrderId) {
+      return () => {}
+    }
+
+    while (true) {
+      const existing = this.activePurchaseOrders.get(purchaseOrderId)
+      if (!existing) {
+        break
+      }
+
+      const ageMs = Date.now() - existing.startedAt
+      if (ageMs > this.MAX_PO_LOCK_AGE_MS) {
+        console.warn(
+          `⚠️ [PO LOCK] Stale lock detected for PO ${purchaseOrderId} (age ${ageMs}ms, workflow ${existing.workflowId}, stage ${existing.stage}). Reclaiming.`
+        )
+        this.activePurchaseOrders.delete(purchaseOrderId)
+        break
+      }
+
+      console.log(
+        `⏳ [PO LOCK] Waiting for PO ${purchaseOrderId} to be released by workflow ${existing.workflowId} (stage ${existing.stage})...`
+      )
+      await sleep(300)
+    }
+
+    const token = {
+      workflowId: metadata.workflowId || 'unknown',
+      stage: metadata.stage || 'unknown',
+      jobId: metadata.jobId || 'n/a',
+      startedAt: Date.now()
+    }
+
+    this.activePurchaseOrders.set(purchaseOrderId, token)
+    console.log(
+      `🔒 [PO LOCK] Reserved PO ${purchaseOrderId} for workflow ${token.workflowId} (stage ${token.stage}, job ${token.jobId}).`
+    )
+
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      const current = this.activePurchaseOrders.get(purchaseOrderId)
+      if (current === token) {
+        this.activePurchaseOrders.delete(purchaseOrderId)
+      }
+      console.log(
+        `🔓 [PO LOCK] Released PO ${purchaseOrderId} for workflow ${token.workflowId} (stage ${token.stage}).`
+      )
+    }
   }
 
   /**
@@ -727,25 +783,32 @@ export class WorkflowOrchestrator {
       const PROGRESS_STATEMENT_TIMEOUT_MS = 5000
 
       await prismaOperation(
-        (prisma) => prisma.$transaction(async (tx) => {
-          await tx.$executeRawUnsafe(`SET LOCAL lock_timeout = '${PROGRESS_LOCK_TIMEOUT_MS}ms'`)
-          await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = '${PROGRESS_STATEMENT_TIMEOUT_MS}ms'`)
+        (prisma) => prisma.$transaction(
+          async (tx) => {
+            await tx.$executeRawUnsafe(`SET LOCAL lock_timeout = '${PROGRESS_LOCK_TIMEOUT_MS}ms'`)
+            await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = '${PROGRESS_STATEMENT_TIMEOUT_MS}ms'`)
 
-          await tx.purchaseOrder.update({
-            where: { id: purchaseOrderId },
-            data: {
-              processingNotes: JSON.stringify({
-                currentStep: stageName,
-                progress: progress,
-                itemsProcessed: itemsProcessed,
-                totalItems: totalItems,
-                message: progressNote,
-                updatedAt: new Date().toISOString()
-              }),
-              updatedAt: new Date()
-            }
-          })
-        }),
+            await tx.purchaseOrder.update({
+              where: { id: purchaseOrderId },
+              data: {
+                processingNotes: JSON.stringify({
+                  currentStep: stageName,
+                  progress: progress,
+                  itemsProcessed: itemsProcessed,
+                  totalItems: totalItems,
+                  message: progressNote,
+                  updatedAt: new Date().toISOString()
+                }),
+                updatedAt: new Date()
+              }
+            })
+          },
+          {
+            maxWait: PROGRESS_LOCK_TIMEOUT_MS + 1500,
+            timeout: PROGRESS_LOCK_TIMEOUT_MS + PROGRESS_STATEMENT_TIMEOUT_MS + 2000,
+            isolationLevel: 'ReadCommitted'
+          }
+        ),
         `Update PO progress for ${purchaseOrderId}`
       )
       
@@ -762,7 +825,7 @@ export class WorkflowOrchestrator {
 
       if (isLockOrTimeout) {
         console.warn(
-          `⚠️ Skipped PO progress update for ${purchaseOrderId} due to row lock/timeout (${errorCode || 'unknown'}). This is non-fatal.`
+          `⚠️ Skipped PO progress update for ${purchaseOrderId} (stage ${stage}) due to row lock/timeout (${errorCode || 'unknown'}). This is non-fatal.`
         )
         return
       }
@@ -2859,34 +2922,47 @@ export class WorkflowOrchestrator {
    */
   async processJob(job) {
     const { stage } = job.data
+    const purchaseOrderId = job?.data?.data?.purchaseOrderId || job?.data?.purchaseOrderId
+    const workflowId = job?.data?.workflowId || job?.data?.data?.workflowId || 'unknown'
+    let releaseLock = () => {}
+
+    try {
+      releaseLock = await this.acquirePurchaseOrderLock(purchaseOrderId, {
+        workflowId,
+        stage,
+        jobId: job.id
+      })
     
-    console.log(`🎭 Processing job for stage: ${stage}`)
+      console.log(`🎭 Processing job for stage: ${stage}`)
     
-    switch (stage) {
-      case WORKFLOW_STAGES.AI_PARSING:
-        return await this.processAIParsing(job)
-      case WORKFLOW_STAGES.DATABASE_SAVE:
-        return await this.processDatabaseSave(job)
-      case WORKFLOW_STAGES.DATA_NORMALIZATION:
-        return await this.processDataNormalization(job)
-      case WORKFLOW_STAGES.MERCHANT_CONFIG:
-        return await this.processMerchantConfig(job)
-      case WORKFLOW_STAGES.AI_ENRICHMENT:
-        return await this.processAIEnrichment(job)
-      case WORKFLOW_STAGES.SHOPIFY_PAYLOAD:
-        return await this.processShopifyPayload(job)
-      case WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION:
-        return await this.processProductDraftCreation(job)
-      case WORKFLOW_STAGES.IMAGE_ATTACHMENT:
-        return await this.processImageAttachment(job)
-      case 'background_image_processing':
-        return await this.processBackgroundImageProcessing(job)
-      case WORKFLOW_STAGES.SHOPIFY_SYNC:
-        return await this.processShopifySync(job)
-      case WORKFLOW_STAGES.STATUS_UPDATE:
-        return await this.processStatusUpdate(job)
-      default:
-        throw new Error(`Unknown workflow stage: ${stage}`)
+      switch (stage) {
+        case WORKFLOW_STAGES.AI_PARSING:
+          return await this.processAIParsing(job)
+        case WORKFLOW_STAGES.DATABASE_SAVE:
+          return await this.processDatabaseSave(job)
+        case WORKFLOW_STAGES.DATA_NORMALIZATION:
+          return await this.processDataNormalization(job)
+        case WORKFLOW_STAGES.MERCHANT_CONFIG:
+          return await this.processMerchantConfig(job)
+        case WORKFLOW_STAGES.AI_ENRICHMENT:
+          return await this.processAIEnrichment(job)
+        case WORKFLOW_STAGES.SHOPIFY_PAYLOAD:
+          return await this.processShopifyPayload(job)
+        case WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION:
+          return await this.processProductDraftCreation(job)
+        case WORKFLOW_STAGES.IMAGE_ATTACHMENT:
+          return await this.processImageAttachment(job)
+        case 'background_image_processing':
+          return await this.processBackgroundImageProcessing(job)
+        case WORKFLOW_STAGES.SHOPIFY_SYNC:
+          return await this.processShopifySync(job)
+        case WORKFLOW_STAGES.STATUS_UPDATE:
+          return await this.processStatusUpdate(job)
+        default:
+          throw new Error(`Unknown workflow stage: ${stage}`)
+      }
+    } finally {
+      releaseLock()
     }
   }
 

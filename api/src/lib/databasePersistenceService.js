@@ -70,79 +70,21 @@ export class DatabasePersistenceService {
         )
         console.log(`✅ [PRE-TRANSACTION] Supplier resolved in ${Date.now() - preTransactionStart}ms`)
         
+        await this.preparePurchaseOrderNumberSuggestion(
+          prisma,
+          aiResult,
+          merchantId,
+          Boolean(options.purchaseOrderId)
+        )
+
         // Start database transaction - now only fast writes, no expensive queries
         const txStartTime = Date.now()
         const txId = `tx_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-        console.log(`🔒 [${txId}] Starting transaction...`)
+        console.log(`� [${txId}] Starting transaction...`)
         
         const result = await prisma.$transaction(async (tx) => {
           const txAge = Date.now() - txStartTime
           console.log(`🔒 [${txId}] Inside transaction (age: ${txAge}ms)`)
-        
-        // OPTIMIZATION: Pre-check for available PO number (Solution 3) - INSIDE TRANSACTION
-        // This is inside tx so it benefits from warmup protection and connection stability
-        // Fast query (SELECT with index) so minimal impact on transaction time
-        // If pre-check fails, optimistic locking fallback will handle conflicts
-        const originalPoNumber = aiResult.extractedData?.poNumber || aiResult.extractedData?.number
-        
-        if (originalPoNumber) {
-          try {
-            const preCheckStart = Date.now()
-            
-            // Get ALL existing POs with this base number in ONE query
-            const existingPOs = await tx.purchaseOrder.findMany({
-              where: {
-                merchantId: merchantId,
-                number: {
-                  startsWith: originalPoNumber  // Finds: 3541, 3541-1, 3541-2, etc.
-                }
-              },
-              select: { number: true }
-            })
-            
-            console.log(`🔍 Pre-check completed in ${Date.now() - preCheckStart}ms (found ${existingPOs.length} existing POs)`)
-            
-            if (existingPOs.length > 0) {
-              // Parse all existing suffixes
-              const existingSuffixes = new Set()
-              existingPOs.forEach(po => {
-                if (po.number === originalPoNumber) {
-                  existingSuffixes.add(0)  // Base number exists (no suffix)
-                } else if (po.number.startsWith(`${originalPoNumber}-`)) {
-                  const suffixPart = po.number.substring(originalPoNumber.length + 1)
-                  // Only consider numeric suffixes
-                  if (/^\d+$/.test(suffixPart)) {
-                    existingSuffixes.add(parseInt(suffixPart, 10))
-                  }
-                }
-              })
-              
-              // Find first available suffix (lowest number)
-              let suffix = 1
-              while (existingSuffixes.has(suffix) && suffix <= 100) {
-                suffix++
-              }
-              
-              if (suffix <= 100) {
-                const suggestedPoNumber = `${originalPoNumber}-${suffix}`
-                console.log(`✅ Pre-check suggests available PO number: ${suggestedPoNumber}`)
-                console.log(`   (Existing suffixes: ${Array.from(existingSuffixes).sort((a, b) => a - b).join(', ')})`)
-                
-                // Update AI result with suggested number
-                // Optimistic fallback will handle if this conflicts due to race
-                if (aiResult.extractedData) {
-                  aiResult.extractedData.poNumber = suggestedPoNumber
-                  aiResult.extractedData.number = suggestedPoNumber
-                }
-              }
-            }
-          } catch (preCheckError) {
-            // Pre-check failed - not critical, optimistic locking will handle conflicts
-            console.warn(`⚠️ Pre-check failed (non-critical): ${preCheckError.message}`)
-            console.log(`   Will use original PO number and rely on optimistic locking fallback`)
-          }
-        }
-        
         // Supplier already resolved above - just use the result
         
         // 2. Update existing purchase order or create new one
@@ -295,6 +237,73 @@ export class DatabasePersistenceService {
     
     // Should never reach here (loop always returns or throws)
     throw new Error(`Database persistence failed after ${maxRetries} attempts: ${lastError?.message}`)
+  }
+
+  async preparePurchaseOrderNumberSuggestion(prisma, aiResult, merchantId, isUpdate = false) {
+    const extractedData = aiResult?.extractedData
+    if (!extractedData || isUpdate) {
+      return
+    }
+
+    const originalPoNumber = extractedData.poNumber || extractedData.number
+    if (!originalPoNumber) {
+      return
+    }
+
+    try {
+      const lookupStart = Date.now()
+      const existingPOs = await prisma.purchaseOrder.findMany({
+        where: {
+          merchantId,
+          number: {
+            startsWith: originalPoNumber
+          }
+        },
+        select: { number: true }
+      })
+
+      console.log(
+        `🔍 [PRE-TRANSACTION] PO number scan for ${originalPoNumber} completed in ${Date.now() - lookupStart}ms (found ${existingPOs.length})`
+      )
+
+      if (existingPOs.length === 0) {
+        return
+      }
+
+      const existingSuffixes = new Set()
+      existingPOs.forEach((po) => {
+        if (po.number === originalPoNumber) {
+          existingSuffixes.add(0)
+        } else if (po.number.startsWith(`${originalPoNumber}-`)) {
+          const suffixPart = po.number.substring(originalPoNumber.length + 1)
+          if (/^\d+$/.test(suffixPart)) {
+            existingSuffixes.add(parseInt(suffixPart, 10))
+          }
+        }
+      })
+
+      let suffix = 1
+      while (existingSuffixes.has(suffix) && suffix <= 100) {
+        suffix++
+      }
+
+      if (suffix > 100) {
+        console.warn(
+          `⚠️ [PRE-TRANSACTION] Could not find available suffix for PO number ${originalPoNumber} after 100 attempts`
+        )
+        return
+      }
+
+      const suggestedPoNumber = `${originalPoNumber}-${suffix}`
+      console.log(
+        `✅ [PRE-TRANSACTION] Suggesting unique PO number ${suggestedPoNumber} (existing suffixes: ${Array.from(existingSuffixes).sort((a, b) => a - b).join(', ')})`
+      )
+
+      extractedData.poNumber = suggestedPoNumber
+      extractedData.number = suggestedPoNumber
+    } catch (error) {
+      console.warn(`⚠️ [PRE-TRANSACTION] PO number suggestion failed (non-critical): ${error.message}`)
+    }
   }
 
   /**

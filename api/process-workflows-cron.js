@@ -22,6 +22,27 @@ const deriveFileType = (mimeType, fileName) => {
   return 'unknown'
 }
 
+const selectPreferredWorkflow = (current, candidate) => {
+  if (!current) return candidate
+  if (!candidate) return current
+
+  // Prefer workflows that are still pending over those marked processing
+  if (current.status !== candidate.status) {
+    if (candidate.status === 'pending') return candidate
+    if (current.status === 'pending') return current
+  }
+
+  const getTime = (workflow) => {
+    const value = workflow?.createdAt
+    if (!value) return Number.POSITIVE_INFINITY
+    if (value instanceof Date) return value.getTime()
+    const timestamp = new Date(value).getTime()
+    return Number.isNaN(timestamp) ? Number.POSITIVE_INFINITY : timestamp
+  }
+
+  return getTime(candidate) < getTime(current) ? candidate : current
+}
+
 // Track processor initialization state across cron invocations
 let processorsInitialized = false
 let processorInitializationPromise = null
@@ -393,11 +414,42 @@ export default async function handler(req, res) {
 
     // Combine and deduplicate workflows
     const allWorkflows = [...pendingWorkflows, ...stuckWorkflows]
-    const uniqueWorkflows = allWorkflows.filter((w, index, self) =>
-      index === self.findIndex((t) => t.workflowId === w.workflowId)
-    )
+    const workflowsByPO = new Map()
+    const workflowsWithoutPO = []
+    const skippedWorkflows = []
 
-    console.log(`📋 Found ${pendingWorkflows.length} pending + ${stuckWorkflows.length} stuck = ${uniqueWorkflows.length} total workflows`)
+    for (const workflow of allWorkflows) {
+      const poId = workflow.purchaseOrderId
+
+      if (!poId) {
+        workflowsWithoutPO.push(workflow)
+        continue
+      }
+
+      if (!workflowsByPO.has(poId)) {
+        workflowsByPO.set(poId, workflow)
+        continue
+      }
+
+      const preferred = selectPreferredWorkflow(workflowsByPO.get(poId), workflow)
+      if (preferred === workflowsByPO.get(poId)) {
+        skippedWorkflows.push(workflow)
+      } else {
+        skippedWorkflows.push(workflowsByPO.get(poId))
+        workflowsByPO.set(poId, preferred)
+      }
+    }
+
+    const uniqueWorkflows = [...workflowsWithoutPO, ...workflowsByPO.values()]
+
+    console.log(`📋 Found ${pendingWorkflows.length} pending + ${stuckWorkflows.length} stuck = ${uniqueWorkflows.length} total workflows after PO dedupe`)
+
+    if (skippedWorkflows.length > 0) {
+      console.log(
+        `🚫 Skipping ${skippedWorkflows.length} duplicate workflow(s) for POs already scheduled in this run:`,
+        skippedWorkflows.map(({ workflowId, purchaseOrderId, status }) => ({ workflowId, purchaseOrderId, status }))
+      )
+    }
 
     if (uniqueWorkflows.length === 0) {
       console.log(`✅ No pending workflows to process`)
