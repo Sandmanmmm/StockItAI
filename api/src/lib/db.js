@@ -116,7 +116,10 @@ async function prismaOperationInternal(operation, operationName = 'Database oper
   }
 
   let retries = 0
-  const maxRetries = 2
+  // CRITICAL FIX 2025-10-12: Increased from 2 to 4 max retries before forcing reconnect
+  // Previous aggressive reconnects (after just 5 failures) were restarting warmup cycles
+  // Now only reconnect after 10+ consecutive failures to allow engine time to stabilize
+  const maxRetries = 4
   
   while (retries <= maxRetries) {
     try {
@@ -130,9 +133,23 @@ async function prismaOperationInternal(operation, operationName = 'Database oper
         errorMessage.includes('Engine is not yet connected') ||
         errorMessage.includes('Connection is closed')
       
+      // CRITICAL FIX 2025-10-12: Check if we're still connecting before forcing disconnect
+      // Don't interrupt an in-progress warmup - let it complete instead
       if (isEngineError && retries < maxRetries) {
-        console.warn(`⚠️ Engine failure during ${operationName}, reconnecting... (attempt ${retries + 1}/${maxRetries})`)
-        await forceDisconnect()
+        if (isConnecting) {
+          console.warn(`⚠️ Engine error during ${operationName} but warmup in progress - waiting instead of reconnecting (attempt ${retries + 1}/${maxRetries})`)
+          // Wait for current connection attempt to complete
+          if (connectionPromise) {
+            await connectionPromise
+          }
+          // Wait for warmup if still pending
+          if (warmupPromise && !warmupComplete) {
+            await warmupPromise
+          }
+        } else {
+          console.warn(`⚠️ Engine failure during ${operationName}, reconnecting... (attempt ${retries + 1}/${maxRetries})`)
+          await forceDisconnect()
+        }
         retries++
         continue
       }
@@ -310,9 +327,10 @@ async function initializePrisma() {
           // Limit connection pool size for serverless (prevent pool exhaustion)
           // Supabase free tier: 60 max connections
           // With many serverless instances, keep pool small per instance
-          // CRITICAL FIX 2025-10-12: Reduced from 5 to 2 to support more instances
-          // Math: 60 max connections ÷ 2 per instance = 30 instances supported
-          const connectionLimit = parseInt(process.env.PRISMA_CONNECTION_LIMIT || '2', 10)
+          // CRITICAL FIX 2025-10-12: Increased from 2 to 5 to handle concurrent cron + queue operations
+          // Math: 60 max connections ÷ 5 per instance = 12 instances supported (sufficient for typical load)
+          // Pool of 2 was causing engine churn during simultaneous cron/processor startup
+          const connectionLimit = parseInt(process.env.PRISMA_CONNECTION_LIMIT || '5', 10)
           const connectionTimeout = parseInt(process.env.PRISMA_CONNECTION_TIMEOUT || '10', 10)
           console.log(`   Connection pool limit: ${connectionLimit}`)
           console.log(`   Connection timeout: ${connectionTimeout}s`)
@@ -537,9 +555,10 @@ async function initializePrisma() {
                   
                   // Add comprehensive retry logic at extension level for non-transaction operations
                   // Handles all transient connection errors that were previously in PrismaRetryWrapper
-                  // Reduced to 3 retries with exponential backoff to fit within serverless 10s timeout
-                  // Total retry time: 200ms + 400ms + 800ms = 1.4s max
-                  const maxRetries = 3
+                  // CRITICAL FIX 2025-10-12: Increased retries from 3 to 5 during cold starts
+                  // Warmup takes 2.5-2.7s, queries arriving before completion need more patience
+                  // Total retry time: 200ms + 400ms + 800ms + 1600ms + 3200ms = 6.2s max (fits in 10s serverless timeout)
+                  const maxRetries = 5
                   let lastError
                   
                   // Helper to check if error is retryable

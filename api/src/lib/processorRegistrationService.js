@@ -11,6 +11,7 @@ export class ProcessorRegistrationService {
   constructor() {
     this.registeredProcessors = new Map();
     this.initializationPromise = null;
+    this.monitorIntervals = new Map();
   }
 
   getRedisOptions() {
@@ -61,6 +62,11 @@ export class ProcessorRegistrationService {
       // Use the proven pattern: queue.process(concurrency, processorFunction)
       queue.process(concurrency, processorFunction);
 
+      // Attach optional monitoring hooks for job lifecycle visibility
+      if (!this.monitorIntervals.has(jobType)) {
+        this.attachQueueMonitors(queue, jobType);
+      }
+
       console.log(`✅ [PERMANENT FIX] Processor registered successfully for ${jobType}`);
 
       // Store reference for cleanup
@@ -82,6 +88,44 @@ export class ProcessorRegistrationService {
     } catch (error) {
       console.error(`❌ [PERMANENT FIX] Failed to register processor for ${jobType}:`, error.message);
       throw error;
+    }
+  }
+
+  attachQueueMonitors(queue, jobType) {
+    const removeCompletedImmediately = process.env.BULL_REMOVE_COMPLETED_IMMEDIATE === '1';
+    const monitorIntervalMs = Number(process.env.BULL_MONITOR_INTERVAL_MS || 60000);
+
+    queue.on('completed', async (job) => {
+      try {
+        console.log(`✅ [BULL] Job ${job.id} for ${jobType} completed (attempts: ${job.attemptsMade})`);
+        if (removeCompletedImmediately) {
+          await job.remove();
+          console.log(`🧹 [BULL] Removed completed job ${job.id} for ${jobType}`);
+        }
+      } catch (err) {
+        console.error(`⚠️ [BULL] Failed to handle completed job ${job.id} for ${jobType}:`, err.message || err);
+      }
+    });
+
+    queue.on('failed', (job, err) => {
+      console.error(`💥 [BULL] Job ${job.id} for ${jobType} failed on attempt ${job.attemptsMade}:`, err?.message || err);
+    });
+
+    queue.on('stalled', (job) => {
+      console.warn(`⚠️ [BULL] Job ${job.id} for ${jobType} stalled; will be retried`);
+    });
+
+    if (monitorIntervalMs > 0) {
+      const intervalId = setInterval(async () => {
+        try {
+          const counts = await queue.getJobCounts();
+          console.log(`📊 [BULL] Queue health for ${jobType}:`, counts);
+        } catch (err) {
+          console.error(`⚠️ [BULL] Failed to retrieve job counts for ${jobType}:`, err.message || err);
+        }
+      }, monitorIntervalMs);
+
+      this.monitorIntervals.set(jobType, intervalId);
     }
   }
 
@@ -228,6 +272,12 @@ export class ProcessorRegistrationService {
       }
     }
     this.registeredProcessors.clear();
+
+    for (const [jobType, intervalId] of this.monitorIntervals) {
+      clearInterval(intervalId);
+      console.log(`🛑 [PERMANENT FIX] Stopped monitoring interval for ${jobType}`);
+    }
+    this.monitorIntervals.clear();
   }
 }
 

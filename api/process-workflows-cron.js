@@ -5,10 +5,70 @@
  * It's a reliable alternative to HTTP-triggered background jobs in serverless.
  * 
  * Configured in vercel.json under "crons" section.
+ * 
+ * CRITICAL FIX 2025-10-12: Uses DIRECT_URL (port 5432) instead of pooler (port 6543)
+ * to avoid competing with queue processors during Prisma engine warmup.
  */
 
-import { db, prismaOperation } from './src/lib/db.js'
+import { PrismaClient } from '@prisma/client'
 import { processorRegistrationService } from './src/lib/processorRegistrationService.js'
+
+// CRITICAL FIX 2025-10-12: Cron uses dedicated connection pool via DIRECT_URL
+// This separates cron traffic from queue processor traffic to prevent cold-start churn
+let cronPrisma = null
+let cronPrismaInitializing = false
+
+async function getCronPrismaClient() {
+  if (cronPrisma) {
+    return cronPrisma
+  }
+  
+  if (cronPrismaInitializing) {
+    // Wait for initialization to complete
+    while (cronPrismaInitializing) {
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    return cronPrisma
+  }
+  
+  cronPrismaInitializing = true
+  
+  try {
+    console.log(`🔧 [CRON] Creating dedicated Prisma client using DIRECT_URL (port 5432)...`)
+    
+    // Use DIRECT_URL to bypass pooler and avoid competition with queue processors
+    const directUrl = process.env.DIRECT_URL || process.env.DATABASE_URL
+    
+    if (!directUrl) {
+      throw new Error('Neither DIRECT_URL nor DATABASE_URL is configured')
+    }
+    
+    console.log(`📊 [CRON] Using direct connection: ${directUrl.includes('5432') ? 'port 5432 (direct)' : 'port 6543 (pooler)'}`)
+    
+    cronPrisma = new PrismaClient({
+      datasources: {
+        db: {
+          url: directUrl
+        }
+      },
+      log: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error']
+    })
+    
+    await cronPrisma.$connect()
+    console.log(`✅ [CRON] Dedicated Prisma client connected successfully`)
+    
+    return cronPrisma
+  } finally {
+    cronPrismaInitializing = false
+  }
+}
+
+// Graceful shutdown for cron client
+process.on('beforeExit', async () => {
+  if (cronPrisma) {
+    await cronPrisma.$disconnect()
+  }
+})
 
 const deriveFileType = (mimeType, fileName) => {
   if (mimeType && mimeType.includes('/')) {
@@ -55,6 +115,15 @@ async function ensureProcessorsInitialized() {
   if (!processorInitializationPromise) {
     processorInitializationPromise = (async () => {
       console.log(`🚀 Ensuring queue processors are initialized...`)
+      
+      // CRITICAL FIX 2025-10-12: Defer cron startup to let processors warm up first
+      // When cron and processors start simultaneously, they compete for connections
+      // during Prisma engine warmup (2.5-2.7s), causing "Engine not yet connected" cascade
+      const cronStartupDelayMs = parseInt(process.env.CRON_STARTUP_DELAY_MS || '3000', 10)
+      console.log(`⏳ [CRON FIX] Delaying cron startup by ${cronStartupDelayMs}ms to allow processor warmup...`)
+      await new Promise(resolve => setTimeout(resolve, cronStartupDelayMs))
+      console.log(`✅ [CRON FIX] Warmup delay complete, proceeding with processor initialization`)
+      
       await processorRegistrationService.initializeAllProcessors()
       processorsInitialized = true
       console.log(`✅ Queue processors initialized successfully`)
@@ -90,17 +159,16 @@ async function processWorkflow(workflow) {
   try {
     await ensureProcessorsInitialized()
 
-    // Get a stable reference to the Prisma client (now with proper connection)
-    prisma = await db.getClient()
+    // CRITICAL FIX 2025-10-12: Use dedicated cron client (DIRECT_URL) instead of shared pooler
+    prisma = await getCronPrismaClient()
     
     // Debug: Verify prisma client is available
     if (!prisma) {
-      console.error(`❌ FATAL: Prisma client is undefined!`)
-      console.error(`❌ db object:`, db)
-      throw new Error('Prisma client not initialized - getClient returned undefined')
+      console.error(`❌ FATAL: Cron Prisma client is undefined!`)
+      throw new Error('Cron Prisma client not initialized')
     }
     
-    console.log(`✅ Prisma client ready for workflow processing`)
+    console.log(`✅ Cron Prisma client ready for workflow processing`)
     console.log(`🔍 Prisma client type:`, typeof prisma)
     console.log(`🔍 Prisma has $connect:`, typeof prisma.$connect)
     console.log(`🔍 Prisma has workflowExecution:`, typeof prisma.workflowExecution)
@@ -188,8 +256,8 @@ async function processWorkflow(workflow) {
 
     // Mark workflow as failed
     try {
-      // Get a fresh client reference in case the original failed
-      const prismaClient = prisma ?? (await db.getClient())
+      // Use cron client for error updates too
+      const prismaClient = prisma ?? (await getCronPrismaClient())
       
       await prismaClient.workflowExecution.update({
         where: { workflowId },
@@ -236,21 +304,18 @@ async function autoFixStuckPOs(prisma) {
     // 3. Last updated >5 minutes ago
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000)
     
-    const stuckPOs = await prismaOperation(
-      (client) => client.purchaseOrder.findMany({
-        where: {
-          status: 'processing',
-          updatedAt: {
-            lt: fiveMinutesAgo
-          }
-        },
-        include: {
-          lineItems: true
-        },
-        take: 10 // Limit to 10 POs per run
-      }),
-      'Find stuck POs with data'
-    )
+    const stuckPOs = await prisma.purchaseOrder.findMany({
+      where: {
+        status: 'processing',
+        updatedAt: {
+          lt: fiveMinutesAgo
+        }
+      },
+      include: {
+        lineItems: true
+      },
+      take: 10 // Limit to 10 POs per run
+    })
     
     if (stuckPOs.length === 0) {
       console.log('✅ No stuck POs found')
@@ -275,43 +340,34 @@ async function autoFixStuckPOs(prisma) {
           const finalStatus = (po.confidence && po.confidence >= 0.8) ? 'completed' : 'review_needed'
           
           // Update PO status
-          await prismaOperation(
-            (client) => client.purchaseOrder.update({
-              where: { id: po.id },
-              data: {
-                status: finalStatus,
-                jobStatus: 'completed',
-                jobCompletedAt: new Date(),
-                processingNotes: `Auto-recovered from stuck state. ${po.lineItems.length} line items processed. Confidence: ${Math.round((po.confidence || 0) * 100)}%`,
-                updatedAt: new Date()
-              }
-            }),
-            `Auto-fix stuck PO ${po.id}`
-          )
+          await prisma.purchaseOrder.update({
+            where: { id: po.id },
+            data: {
+              status: finalStatus,
+              jobStatus: 'completed',
+              jobCompletedAt: new Date(),
+              processingNotes: `Auto-recovered from stuck state. ${po.lineItems.length} line items processed. Confidence: ${Math.round((po.confidence || 0) * 100)}%`,
+              updatedAt: new Date()
+            }
+          })
           
           // Update workflow if it exists
-          const workflow = await prismaOperation(
-            (client) => client.workflowExecution.findFirst({
-              where: { purchaseOrderId: po.id },
-              orderBy: { createdAt: 'desc' }
-            }),
-            `Find workflow for PO ${po.id}`
-          )
+          const workflow = await prisma.workflowExecution.findFirst({
+            where: { purchaseOrderId: po.id },
+            orderBy: { createdAt: 'desc' }
+          })
           
           if (workflow) {
-            await prismaOperation(
-              (client) => client.workflowExecution.update({
-                where: { id: workflow.id },
-                data: {
-                  status: 'completed',
-                  currentStage: 'status_update',
-                  progressPercent: 100,
-                  completedAt: new Date(),
-                  updatedAt: new Date()
-                }
-              }),
-              `Auto-fix workflow ${workflow.id}`
-            )
+            await prisma.workflowExecution.update({
+              where: { id: workflow.id },
+              data: {
+                status: 'completed',
+                currentStage: 'status_update',
+                progressPercent: 100,
+                completedAt: new Date(),
+                updatedAt: new Date()
+              }
+            })
           }
           
           console.log(`✅ Fixed PO ${po.id} - new status: ${finalStatus}`)
@@ -368,9 +424,9 @@ export default async function handler(req, res) {
     console.log(`🧭 Ensuring queue processors are ready before database work...`)
     await ensureProcessorsInitialized()
 
-    // Initialize database connection with proper async handling
-    console.log(`� Initializing database connection...`)
-    prisma = await db.getClient()
+    // CRITICAL FIX 2025-10-12: Use dedicated cron client on DIRECT_URL
+    console.log(`🔧 Initializing dedicated cron database connection...`)
+    prisma = await getCronPrismaClient()
     console.log(`✅ Database connected successfully`)
 
     // CRITICAL: Auto-fix stuck POs before processing new workflows

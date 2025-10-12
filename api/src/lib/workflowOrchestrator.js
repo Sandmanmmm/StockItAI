@@ -276,7 +276,11 @@ export class WorkflowOrchestrator {
       await this.redis.waitForConnection()
       if (this.redis.redis && this.redis.redis.status === 'ready') {
         const key = `workflow:${workflowId}`
-        await this.redis.redis.setex(key, 3600, JSON.stringify(metadata)) // 1 hour expiry
+        // Set TTL to 30 minutes (1800s) - workflows complete in <5min under normal conditions,
+        // but may take longer with queue delays, retries, and error handling. 30min provides
+        // ample buffer while preventing stale metadata from accumulating in Redis.
+        // Previous 1hr TTL caused orphaned workflows to persist too long.
+        await this.redis.redis.setex(key, 1800, JSON.stringify(metadata)) // 30 minute expiry
       } else {
         console.log('⚠️ Redis not available, skipping workflow metadata storage')
       }
