@@ -187,8 +187,8 @@ export class DatabasePersistenceService {
           processingTime: Date.now() - startTime
         }
       }, {
-        maxWait: 15000, // Maximum time to wait to start transaction (15s - handle slow connection acquisition)
-        timeout: 10000, // Maximum transaction time (10s - FAST WRITES ONLY, expensive queries already moved outside)
+        maxWait: 60000, // Maximum time to wait to start transaction (60s - handle PO lock contention, up to 200 retry attempts @ 300ms)
+        timeout: 60000, // Maximum transaction time (60s - allow time for lock acquisition and progress updates)
         isolationLevel: 'ReadCommitted' // Reduce lock contention
       })
       
