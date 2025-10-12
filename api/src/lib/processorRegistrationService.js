@@ -255,6 +255,29 @@ export class ProcessorRegistrationService {
       queue = new BullModule(queueName, { redis: redisOptions });
     }
 
+    // Check for duplicate jobs for the same PO (prevent lock contention)
+    const purchaseOrderId = jobData?.data?.purchaseOrderId || jobData?.purchaseOrderId;
+    if (purchaseOrderId) {
+      try {
+        const activeJobs = await queue.getActive();
+        const waitingJobs = await queue.getWaiting();
+        const allPendingJobs = [...activeJobs, ...waitingJobs];
+        
+        const duplicateJob = allPendingJobs.find(job => {
+          const jobPOId = job.data?.data?.purchaseOrderId || job.data?.purchaseOrderId;
+          return jobPOId === purchaseOrderId;
+        });
+        
+        if (duplicateJob) {
+          console.log(`⏭️ [DUPLICATE] Skipping job for PO ${purchaseOrderId} - already ${duplicateJob.id in activeJobs ? 'active' : 'waiting'} (job ${duplicateJob.id})`);
+          return duplicateJob; // Return existing job instead of creating duplicate
+        }
+      } catch (error) {
+        console.warn(`⚠️ [DUPLICATE] Failed to check for duplicates: ${error.message}`);
+        // Continue with job creation if duplicate check fails
+      }
+    }
+
     const job = await queue.add(jobData, {
       removeOnComplete: 10,
       removeOnFail: 50,
