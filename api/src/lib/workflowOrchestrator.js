@@ -779,8 +779,10 @@ export class WorkflowOrchestrator {
         ? `${stageName} - ${itemsProcessed}/${totalItems} items (${progress}% complete)`
         : `${stageName} - ${progress}% complete`
 
-      const PROGRESS_LOCK_TIMEOUT_MS = 2000
-      const PROGRESS_STATEMENT_TIMEOUT_MS = 5000
+      // CRITICAL FIX 2025-10-12: Aggressive timeouts for progress updates
+      // Progress updates are NON-CRITICAL - better to skip than block workflow
+      const PROGRESS_LOCK_TIMEOUT_MS = 1000  // Reduced from 2000ms → 1000ms
+      const PROGRESS_STATEMENT_TIMEOUT_MS = 2000 // Reduced from 5000ms → 2000ms
 
       await prismaOperation(
         (prisma) => prisma.$transaction(
@@ -804,8 +806,8 @@ export class WorkflowOrchestrator {
             })
           },
           {
-            maxWait: PROGRESS_LOCK_TIMEOUT_MS + 1500,
-            timeout: PROGRESS_LOCK_TIMEOUT_MS + PROGRESS_STATEMENT_TIMEOUT_MS + 2000,
+            maxWait: 1000, // Reduced from PROGRESS_LOCK_TIMEOUT_MS + 1500 → 1000ms (fail fast)
+            timeout: 4000, // Reduced from 9000ms → 4000ms (1s lock + 2s statement + 1s buffer)
             isolationLevel: 'ReadCommitted'
           }
         ),
@@ -817,15 +819,29 @@ export class WorkflowOrchestrator {
       const errorCode = error?.code || error?.originalError?.code
       const errorMessage = error?.message || ''
 
+      // CRITICAL FIX 2025-10-12: Better error categorization for progress updates
       const isLockOrTimeout =
         errorCode === '55P03' || // lock_not_available
-        errorCode === '57014' ||
+        errorCode === '57014' || // query_canceled (statement timeout)
         errorMessage.includes('canceling statement due to statement timeout') ||
-        errorMessage.includes('lock timeout')
+        errorMessage.includes('lock timeout') ||
+        errorMessage.includes('lock_timeout')
+      
+      const isTransactionTimeout =
+        errorMessage.includes('Transaction already closed') ||
+        errorMessage.includes('Transaction API error') ||
+        errorMessage.includes('expired transaction')
 
       if (isLockOrTimeout) {
         console.warn(
-          `⚠️ Skipped PO progress update for ${purchaseOrderId} (stage ${stage}) due to row lock/timeout (${errorCode || 'unknown'}). This is non-fatal.`
+          `⚠️ Skipped PO progress update for ${purchaseOrderId} (stage ${stage}) due to row lock/timeout (${errorCode || 'timeout'}). This is non-fatal - PO is being updated by another workflow.`
+        )
+        return
+      }
+      
+      if (isTransactionTimeout) {
+        console.warn(
+          `⚠️ Skipped PO progress update for ${purchaseOrderId} (stage ${stage}) - transaction timeout (likely waiting for database lock). This is non-fatal.`
         )
         return
       }
