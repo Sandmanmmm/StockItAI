@@ -570,7 +570,17 @@ export class DatabasePersistenceService {
     } catch (error) {
       // 🚨 CRITICAL FIX: P2002 (unique constraint) ABORTS the transaction in PostgreSQL
       // We CANNOT continue inside the aborted transaction - must throw and retry outside
-      if (error.code === 'P2002') {
+      
+      // Debug: Log full error structure
+      console.log(`🔍 [CREATE ERROR DEBUG] Error code: ${error.code}`)
+      console.log(`🔍 [CREATE ERROR DEBUG] Error message: ${error.message}`)
+      console.log(`🔍 [CREATE ERROR DEBUG] Error meta:`, JSON.stringify(error.meta || {}))
+      
+      // Check for P2002 in both code and message (Prisma error format can vary)
+      const isUniqueConstraintError = error.code === 'P2002' || 
+                                      error.message?.includes('Unique constraint failed')
+      
+      if (isUniqueConstraintError) {
         console.log(`⚠️ PO number ${extractedPoNumber} conflicts - transaction ABORTED by PostgreSQL`)
         console.log(`🔄 Will resolve conflict OUTSIDE transaction and retry entire operation`)
         
@@ -686,7 +696,17 @@ export class DatabasePersistenceService {
     } catch (updateError) {
       // 🚨 CRITICAL FIX: P2002 (unique constraint) ABORTS the transaction in PostgreSQL
       // We CANNOT continue inside the aborted transaction - must throw and retry outside
-      if (updateError.code === 'P2002') {
+      
+      // Debug: Log full error structure
+      console.log(`🔍 [UPDATE ERROR DEBUG] Error code: ${updateError.code}`)
+      console.log(`🔍 [UPDATE ERROR DEBUG] Error message: ${updateError.message}`)
+      console.log(`🔍 [UPDATE ERROR DEBUG] Error meta:`, JSON.stringify(updateError.meta || {}))
+      
+      // Check for P2002 in both code and message (Prisma error format can vary)
+      const isUniqueConstraintError = updateError.code === 'P2002' || 
+                                      updateError.message?.includes('Unique constraint failed')
+      
+      if (isUniqueConstraintError) {
         console.log(`⚠️ PO number ${updateData.number} conflicts - transaction ABORTED by PostgreSQL`)
         console.log(`🔄 Will resolve conflict OUTSIDE transaction and retry entire operation`)
         
