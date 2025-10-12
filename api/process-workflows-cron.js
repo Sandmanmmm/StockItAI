@@ -339,17 +339,28 @@ async function autoFixStuckPOs(prisma) {
           // Determine final status based on confidence
           const finalStatus = (po.confidence && po.confidence >= 0.8) ? 'completed' : 'review_needed'
           
-          // Update PO status
-          await prisma.purchaseOrder.update({
-            where: { id: po.id },
-            data: {
-              status: finalStatus,
-              jobStatus: 'completed',
-              jobCompletedAt: new Date(),
-              processingNotes: `Auto-recovered from stuck state. ${po.lineItems.length} line items processed. Confidence: ${Math.round((po.confidence || 0) * 100)}%`,
-              updatedAt: new Date()
-            }
-          })
+          // CRITICAL FIX: Use $executeRaw with FOR UPDATE SKIP LOCKED to avoid blocking
+          // This prevents the update from waiting on locks held by other connections
+          const updateResult = await prisma.$executeRaw`
+            UPDATE "PurchaseOrder"
+            SET 
+              "status" = ${finalStatus}::"text",
+              "jobStatus" = 'completed',
+              "jobCompletedAt" = NOW(),
+              "processingNotes" = ${`Auto-recovered from stuck state. ${po.lineItems.length} line items processed. Confidence: ${Math.round((po.confidence || 0) * 100)}%`},
+              "updatedAt" = NOW()
+            WHERE "id" = ${po.id}
+            AND "id" IN (
+              SELECT "id" FROM "PurchaseOrder" 
+              WHERE "id" = ${po.id}
+              FOR UPDATE SKIP LOCKED
+            )
+          `
+          
+          if (updateResult === 0) {
+            console.log(`⏭️ Skipped PO ${po.id} - locked by another process (will retry next cron run)`)
+            continue // Skip to next PO
+          }
           
           console.log(`✅ Updated PO ${po.id} status to: ${finalStatus}`)
           
