@@ -605,14 +605,14 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
    */
   async _processWithOpenAI(text) {
     const MAX_RETRIES = 3
-    const CHUNK_SIZE = 12000 // Reduced from 16k to be more conservative
+    const CHUNK_SIZE = 6000 // Reduced from 12k to prevent timeout on medium documents
     const BASE_DELAY = 5000 // 5 second base delay for retries
     
     // Determine if we need to chunk the content
     const needsChunking = text.length > CHUNK_SIZE
     
     if (needsChunking) {
-      console.log(`📄 Large document detected (${text.length} chars), using chunking strategy`)
+      console.log(`📄 Large document detected (${text.length} chars > ${CHUNK_SIZE}), using chunking strategy`)
       return await this._processLargeDocument(text)
     }
     
@@ -676,8 +676,8 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
    * @returns {Promise<Object>} - Processed response
    */
   async _processLargeDocument(text) {
-    const CHUNK_SIZE = 12000
-    const OVERLAP_SIZE = 1000 // Overlap between chunks to maintain context
+    const CHUNK_SIZE = 6000 // Match the threshold in _processWithOpenAI
+    const OVERLAP_SIZE = 500 // Reduced overlap to keep chunks smaller
     
     console.log(`📚 Processing large document (${text.length} chars) with intelligent chunking`)
     
