@@ -27,7 +27,7 @@ Extract:
 - Total amounts
 - Special instructions or notes
 
-Return the data in this JSON format:
+Return the data in this JSON format ONLY (do not wrap in markdown code blocks):
 {
   "confidence": 0.95,
   "extractedData": {
@@ -599,6 +599,29 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
   }
 
   /**
+   * Strip markdown code blocks from OpenAI response
+   * OpenAI sometimes wraps JSON in ```json ... ``` blocks
+   * @param {string} content - The content from OpenAI
+   * @returns {string} - Clean JSON string
+   */
+  _stripMarkdownCodeBlocks(content) {
+    if (!content) return '{}'
+    
+    // Remove markdown code blocks: ```json ... ``` or ``` ... ```
+    let cleaned = content.trim()
+    
+    // Match ```json or ``` at the start
+    if (cleaned.startsWith('```')) {
+      // Remove opening fence (```json\n or ```\n)
+      cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, '')
+      // Remove closing fence (\n```)
+      cleaned = cleaned.replace(/\n?```\s*$/, '')
+    }
+    
+    return cleaned.trim()
+  }
+
+  /**
    * Process text with OpenAI API with enhanced timeout, retry logic, and chunking
    * @param {string} text - The text content to process
    * @returns {Promise<Object>} - OpenAI API response
@@ -765,13 +788,16 @@ Document Content (Chunk 1/${chunks.length}):\n${chunks[0]}`
     
     // Extract line items from first chunk
     try {
-      const firstResult = JSON.parse(firstResponse.choices[0]?.message?.content || '{}')
+      const rawContent = firstResponse.choices[0]?.message?.content || '{}'
+      const cleanContent = this._stripMarkdownCodeBlocks(rawContent)
+      const firstResult = JSON.parse(cleanContent)
       if (firstResult.lineItems && Array.isArray(firstResult.lineItems)) {
         allLineItems.push(...firstResult.lineItems)
         console.log(`📋 First chunk: extracted ${firstResult.lineItems.length} line items`)
       }
     } catch (error) {
       console.warn('⚠️ Could not parse first chunk response, will try other chunks')
+      console.warn('⚠️ Parse error:', error.message)
     }
     
     // Process subsequent chunks to extract additional line items
@@ -781,6 +807,7 @@ Document Content (Chunk 1/${chunks.length}):\n${chunks[0]}`
       const chunkPrompt = `Extract ONLY the line items from this portion of a purchase order document.
 This is chunk ${i + 1} of ${chunks.length} from a larger document.
 Return a JSON object with a "lineItems" array containing all products/items found in this chunk.
+DO NOT wrap the JSON in markdown code blocks - return ONLY the raw JSON object.
 
 Each line item should have: productCode, description, quantity, unitPrice, total
 
@@ -794,7 +821,9 @@ Document Content (Chunk ${i + 1}/${chunks.length}):\n${chunks[i]}`
           temperature: 0 // Set to 0 for deterministic extraction
         })
         
-        const chunkResult = JSON.parse(chunkResponse.choices[0]?.message?.content || '{}')
+        const rawChunkContent = chunkResponse.choices[0]?.message?.content || '{}'
+        const cleanChunkContent = this._stripMarkdownCodeBlocks(rawChunkContent)
+        const chunkResult = JSON.parse(cleanChunkContent)
         
         if (chunkResult.lineItems && Array.isArray(chunkResult.lineItems)) {
           allLineItems.push(...chunkResult.lineItems)
@@ -814,7 +843,9 @@ Document Content (Chunk ${i + 1}/${chunks.length}):\n${chunks[i]}`
     
     // Merge the results - use first chunk structure but with all line items
     try {
-      const finalResult = JSON.parse(firstResponse.choices[0]?.message?.content || '{}')
+      const rawFinalContent = firstResponse.choices[0]?.message?.content || '{}'
+      const cleanFinalContent = this._stripMarkdownCodeBlocks(rawFinalContent)
+      const finalResult = JSON.parse(cleanFinalContent)
       
       // Replace line items with the complete merged set
       if (allLineItems.length > 0) {
