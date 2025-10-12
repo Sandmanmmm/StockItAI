@@ -351,30 +351,49 @@ async function autoFixStuckPOs(prisma) {
             }
           })
           
-          // Update workflow if it exists
-          const workflow = await prisma.workflowExecution.findFirst({
-            where: { purchaseOrderId: po.id },
-            orderBy: { createdAt: 'desc' }
+          console.log(`✅ Updated PO ${po.id} status to: ${finalStatus}`)
+          
+          // Update ALL workflows for this PO (not just the most recent)
+          const workflows = await prisma.workflowExecution.findMany({
+            where: { 
+              purchaseOrderId: po.id,
+              status: { in: ['pending', 'processing'] } // Only update active workflows
+            }
           })
           
-          if (workflow) {
+          console.log(`📋 Found ${workflows.length} active workflow(s) to complete for PO ${po.id}`)
+          
+          for (const workflow of workflows) {
             await prisma.workflowExecution.update({
               where: { id: workflow.id },
               data: {
                 status: 'completed',
                 currentStage: 'status_update',
                 progressPercent: 100,
+                stagesCompleted: workflow.stagesTotal || 4,
                 completedAt: new Date(),
-                updatedAt: new Date()
+                updatedAt: new Date(),
+                metadata: {
+                  ...(workflow.metadata || {}),
+                  autoFixApplied: true,
+                  autoFixReason: 'PO had data but workflow stuck >5 minutes',
+                  autoFixedAt: new Date().toISOString()
+                }
               }
             })
+            console.log(`   ✅ Completed workflow ${workflow.workflowId} (${workflow.currentStage} -> status_update)`)
           }
           
-          console.log(`✅ Fixed PO ${po.id} - new status: ${finalStatus}`)
+          console.log(`🎉 Auto-fix complete for PO ${po.id}:`)
+          console.log(`   - PO status: ${finalStatus}`)
+          console.log(`   - Workflows completed: ${workflows.length}`)
+          console.log(`   - Line items: ${po.lineItems.length}`)
+          
           fixedCount++
           
         } catch (fixError) {
           console.error(`❌ Failed to fix PO ${po.id}:`, fixError.message)
+          console.error(fixError.stack)
         }
       } else {
         console.log(`⏭️ Skipping PO ${po.id} - no line items (workflow may have failed earlier)`)
