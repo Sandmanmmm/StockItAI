@@ -487,17 +487,6 @@ export default async function handler(req, res) {
           lt: fiveMinutesAgo
         }
       },
-      include: {
-        purchaseOrder: {
-          select: {
-            id: true,
-            status: true,
-            _count: {
-              select: { lineItems: true }
-            }
-          }
-        }
-      },
       orderBy: {
         createdAt: 'asc'
       },
@@ -505,21 +494,42 @@ export default async function handler(req, res) {
     })
     
     // CRITICAL: Filter out workflows whose PO has completed data (auto-fix should handle those)
-    const stuckWorkflows = potentiallyStuckWorkflows.filter(w => {
-      if (!w.purchaseOrder) return true // Keep workflows without PO
-      
-      const po = w.purchaseOrder
-      const hasLineItems = po._count.lineItems > 0
-      
-      // Only keep workflows for POs that are truly stuck (no line items yet)
-      // If PO has line items, auto-fix will handle it
-      if (hasLineItems) {
-        console.log(`⏭️ Skipping workflow ${w.workflowId} - PO ${po.id} has ${po._count.lineItems} line items (auto-fix will handle)`)
-        return false
+    // Need to fetch PO data separately since WorkflowExecution doesn't have purchaseOrder relation
+    const stuckWorkflows = []
+    for (const workflow of potentiallyStuckWorkflows) {
+      if (!workflow.purchaseOrderId) {
+        stuckWorkflows.push(workflow)
+        continue
       }
       
-      return true
-    })
+      // Check if PO has line items
+      const po = await prisma.purchaseOrder.findUnique({
+        where: { id: workflow.purchaseOrderId },
+        select: {
+          id: true,
+          _count: {
+            select: { lineItems: true }
+          }
+        }
+      })
+      
+      if (!po) {
+        // PO doesn't exist, keep workflow for processing
+        stuckWorkflows.push(workflow)
+        continue
+      }
+      
+      const hasLineItems = po._count.lineItems > 0
+      
+      if (hasLineItems) {
+        // PO has line items - auto-fix will handle it
+        console.log(`⏭️ Skipping workflow ${workflow.workflowId} - PO ${po.id} has ${po._count.lineItems} line items (auto-fix will handle)`)
+        continue
+      }
+      
+      // PO exists but has no line items - workflow is truly stuck
+      stuckWorkflows.push(workflow)
+    }
     
     // Take only first 5 stuck workflows to avoid timeout
     const limitedStuckWorkflows = stuckWorkflows.slice(0, 5)
