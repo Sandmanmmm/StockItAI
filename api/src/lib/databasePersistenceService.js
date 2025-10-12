@@ -221,6 +221,50 @@ export class DatabasePersistenceService {
         
         console.error(`❌ Database persistence failed (attempt ${attempt}/${maxRetries}):`, error.message)
         
+        // 🚨 CRITICAL FIX: Handle PO number conflict OUTSIDE transaction
+        // PostgreSQL aborts transactions on unique constraint violations
+        // We must resolve conflicts and retry with new PO number
+        if (error.isPoNumberConflict) {
+          console.log(`🔄 [CONFLICT RESOLUTION] Resolving PO number conflict outside transaction...`)
+          
+          // Get fresh Prisma client for conflict resolution
+          const prisma = await db.getClient()
+          const basePoNumber = error.conflictPoNumber
+          const maxSuffixAttempts = 10
+          
+          // Try suffixes 1-10
+          let resolvedNumber = null
+          for (let suffix = 1; suffix <= maxSuffixAttempts; suffix++) {
+            const tryNumber = `${basePoNumber}-${suffix}`
+            const existing = await prisma.purchaseOrder.findFirst({
+              where: {
+                merchantId,
+                number: tryNumber
+              }
+            })
+            
+            if (!existing) {
+              resolvedNumber = tryNumber
+              console.log(`✅ [CONFLICT RESOLUTION] Found available PO number: ${tryNumber}`)
+              break
+            }
+            console.log(`   Suffix ${suffix} taken, trying next...`)
+          }
+          
+          // Fallback to timestamp if all suffixes taken
+          if (!resolvedNumber) {
+            resolvedNumber = `${basePoNumber}-${Date.now()}`
+            console.log(`⚠️ [CONFLICT RESOLUTION] All suffixes taken, using timestamp: ${resolvedNumber}`)
+          }
+          
+          // Update AI result with resolved number for retry
+          aiResult.extractedData.poNumber = resolvedNumber
+          console.log(`🔄 [CONFLICT RESOLUTION] Will retry transaction with PO number: ${resolvedNumber}`)
+          
+          // Continue to retry loop (don't count as retry attempt for conflict resolution)
+          continue
+        }
+        
         // Check if error is retryable (connection/engine errors/transaction errors)
         const isRetryable = error.message?.includes('Engine') || 
                            error.message?.includes('empty') ||
@@ -524,96 +568,18 @@ export class DatabasePersistenceService {
       return purchaseOrder
       
     } catch (error) {
-      // OPTIMISTIC LOCKING FALLBACK (Solution 2)
-      // Handle unique constraint violation with automatic suffix retry
+      // 🚨 CRITICAL FIX: P2002 (unique constraint) ABORTS the transaction in PostgreSQL
+      // We CANNOT continue inside the aborted transaction - must throw and retry outside
       if (error.code === 'P2002') {
-        console.log(`⚠️ PO number ${extractedPoNumber} conflicts (pre-check race condition or concurrent upload)`)
-        console.warn(`⚠️ CONFLICT RESOLUTION INSIDE TRANSACTION - this can be slow!`)
-        console.log(`   Using optimistic locking fallback to find next available suffix...`)
+        console.log(`⚠️ PO number ${extractedPoNumber} conflicts - transaction ABORTED by PostgreSQL`)
+        console.log(`🔄 Will resolve conflict OUTSIDE transaction and retry entire operation`)
         
-        // 🔥 CRITICAL FIX: Limit attempts to 10 instead of 100 to prevent transaction timeout
-        // If we can't find a free suffix in 10 tries, use timestamp fallback immediately
-        const basePoNumber = extractedPoNumber
-        let suffix = 1
-        let attempts = 0
-        const maxAttempts = 10 // ← REDUCED FROM 100 to prevent long transaction times
-        
-        const conflictResolutionStart = Date.now()
-        
-        while (attempts < maxAttempts) {
-          const tryNumber = `${basePoNumber}-${suffix}`
-          
-          try {
-            console.log(`   Attempt ${attempts + 1}/${maxAttempts}: Trying suffix ${suffix} → ${tryNumber}`)
-            
-            const purchaseOrder = await tx.purchaseOrder.create({
-              data: {
-                number: tryNumber,
-                supplierName: extractedData.vendor?.name || extractedData.supplierName || 'Unknown',
-                orderDate: parseDate(extractedData.orderDate || extractedData.date),
-                dueDate: parseDate(extractedData.dueDate || extractedData.deliveryDate),
-                totalAmount: totalAmount,
-                currency: extractedData.currency || 'USD',
-                status: status,
-                confidence: overallConfidence / 100,
-                rawData: extractedData,
-                processingNotes: aiResult.processingNotes || (aiResult.model ? `Processed by ${aiResult.model}` : 'Processing in progress...'),
-                fileName: fileName,
-                fileSize: options.fileSize || null,
-                fileUrl: options.fileUrl || null,
-                merchantId: merchantId,
-                supplierId: supplierId,
-                jobStatus: 'completed'
-              }
-            })
-            
-            const conflictResolutionTime = Date.now() - conflictResolutionStart
-            console.log(`✅ Created purchase order with suffix: ${purchaseOrder.number} (conflict resolution took ${conflictResolutionTime}ms)`)
-            return purchaseOrder
-            
-          } catch (retryError) {
-            if (retryError.code === 'P2002') {
-              // This suffix is also taken, try next
-              suffix++
-              attempts++
-              console.log(`   ❌ Conflict on ${tryNumber}, trying next...`)
-              continue
-            }
-            // Other error - re-throw
-            throw retryError
-          }
-        }
-        
-        // 🔥 CRITICAL FIX: Use timestamp IMMEDIATELY after 10 failed attempts
-        // Don't keep trying - this prevents transaction timeout
-        const conflictResolutionTime = Date.now() - conflictResolutionStart
-        console.error(`⚠️ Exhausted ${maxAttempts} suffix attempts in ${conflictResolutionTime}ms, using timestamp fallback`)
-        console.error(`⚠️ This indicates MANY duplicate PO numbers - investigate root cause!`)
-        const timestampNumber = `${basePoNumber}-${Date.now()}`
-        const purchaseOrder = await tx.purchaseOrder.create({
-          data: {
-            number: timestampNumber,
-            supplierName: extractedData.vendor?.name || extractedData.supplierName || 'Unknown',
-            orderDate: parseDate(extractedData.orderDate || extractedData.date),
-            dueDate: parseDate(extractedData.dueDate || extractedData.deliveryDate),
-            totalAmount: totalAmount,
-            currency: extractedData.currency || 'USD',
-            status: status,
-            confidence: overallConfidence / 100,
-            rawData: extractedData,
-            processingNotes: aiResult.processingNotes || (aiResult.model ? `Processed by ${aiResult.model}` : 'Processing in progress...'),
-            fileName: fileName,
-            fileSize: options.fileSize || null,
-            fileUrl: options.fileUrl || null,
-            merchantId: merchantId,
-            supplierId: supplierId,
-            jobStatus: 'completed'
-          }
-        })
-        console.log(`📋 Created purchase order with timestamp: ${purchaseOrder.number}`)
-        return purchaseOrder
+        // Tag error so outer retry loop can handle conflict resolution
+        error.isPoNumberConflict = true
+        error.conflictPoNumber = extractedPoNumber
       }
-      // Re-throw other errors
+      
+      // Re-throw - transaction is aborted and must be retried
       throw error
     }
   }
@@ -718,62 +684,16 @@ export class DatabasePersistenceService {
       return purchaseOrder
       
     } catch (updateError) {
-      // OPTIMISTIC LOCKING FALLBACK (Solution 2) - Same as CREATE scenario
-      // Handle unique constraint violation with automatic suffix retry
+      // 🚨 CRITICAL FIX: P2002 (unique constraint) ABORTS the transaction in PostgreSQL
+      // We CANNOT continue inside the aborted transaction - must throw and retry outside
       if (updateError.code === 'P2002') {
-        console.log(`⚠️ PO number ${updateData.number} conflicts with existing PO (pre-check race or concurrent update)`)
-        console.warn(`⚠️ CONFLICT RESOLUTION INSIDE TRANSACTION - this can be slow!`)
-        console.log(`   Using optimistic locking fallback to find next available suffix...`)
+        console.log(`⚠️ PO number ${updateData.number} conflicts - transaction ABORTED by PostgreSQL`)
+        console.log(`🔄 Will resolve conflict OUTSIDE transaction and retry entire operation`)
         
-        // 🔥 CRITICAL FIX: Limit attempts to 10 instead of 100 to prevent transaction timeout
-        // If we can't find a free suffix in 10 tries, use timestamp fallback immediately
-        const basePoNumber = updateData.number
-        let suffix = 1
-        let attempts = 0
-        const maxAttempts = 10 // ← REDUCED FROM 100 to prevent long transaction times
-        
-        const conflictResolutionStart = Date.now()
-        
-        while (attempts < maxAttempts) {
-          const tryNumber = `${basePoNumber}-${suffix}`
-          
-          try {
-            console.log(`   Attempt ${attempts + 1}/${maxAttempts}: Trying suffix ${suffix} → ${tryNumber}`)
-            
-            const purchaseOrder = await tx.purchaseOrder.update({
-              where: { id: purchaseOrderId },
-              data: { ...updateData, number: tryNumber }
-            })
-            
-            const conflictResolutionTime = Date.now() - conflictResolutionStart
-            console.log(`✅ Updated purchase order with suffix: ${purchaseOrder.number} (conflict resolution took ${conflictResolutionTime}ms)`)
-            return purchaseOrder
-            
-          } catch (retryError) {
-            if (retryError.code === 'P2002') {
-              // This suffix is also taken, try next
-              suffix++
-              attempts++
-              console.log(`   ❌ Conflict on ${tryNumber}, trying next...`)
-              continue
-            }
-            // Other error - re-throw
-            throw retryError
-          }
-        }
-        
-        // 🔥 CRITICAL FIX: Use timestamp IMMEDIATELY after 10 failed attempts
-        // Don't keep trying - this prevents transaction timeout
-        const conflictResolutionTime = Date.now() - conflictResolutionStart
-        console.error(`⚠️ Exhausted ${maxAttempts} suffix attempts in ${conflictResolutionTime}ms, using timestamp fallback`)
-        console.error(`⚠️ This indicates MANY duplicate PO numbers - investigate root cause!`)
-        const timestampNumber = `${basePoNumber}-${Date.now()}`
-        const purchaseOrder = await tx.purchaseOrder.update({
-          where: { id: purchaseOrderId },
-          data: { ...updateData, number: timestampNumber }
-        })
-        console.log(`📋 Updated purchase order with timestamp: ${purchaseOrder.number}`)
-        return purchaseOrder
+        // Tag error so outer retry loop can handle conflict resolution
+        updateError.isPoNumberConflict = true
+        updateError.conflictPoNumber = updateData.number
+        throw updateError
       }
       
       // Handle PO not found (P2025) - fallback to create
