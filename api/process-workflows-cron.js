@@ -478,12 +478,20 @@ export default async function handler(req, res) {
     })
 
     // Also find stuck "processing" workflows (processing for more than 5 minutes)
+    // CRITICAL: Exclude workflows whose PO already has completed data (auto-fix should handle those)
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000)
     const stuckWorkflows = await prisma.workflowExecution.findMany({
       where: {
         status: 'processing',
         updatedAt: {
           lt: fiveMinutesAgo
+        },
+        purchaseOrder: {
+          // Only include workflows for POs that are truly stuck (no line items yet)
+          // If PO has line items, auto-fix should handle it
+          lineItems: {
+            none: {}
+          }
         }
       },
       orderBy: {
