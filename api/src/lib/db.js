@@ -313,6 +313,26 @@ async function initializePrisma() {
           // Connect immediately after creation
           await rawPrisma.$connect()
           console.log(`✅ Prisma $connect() succeeded`)
+
+          // Ensure statement_timeout is explicitly applied for this session. Some hosts
+          // ignore URL parameters (especially with PgBouncer transaction pooling), so
+          // we set it via query after connecting to guarantee long transactions survive.
+          const sessionStatementTimeoutMs = parseInt(
+            process.env.PRISMA_SESSION_STATEMENT_TIMEOUT || '180000',
+            10
+          )
+          try {
+            await rawPrisma.$executeRawUnsafe(
+              `SET statement_timeout = '${sessionStatementTimeoutMs}ms'`
+            )
+            console.log(
+              `✅ Applied session statement_timeout = ${sessionStatementTimeoutMs}ms`
+            )
+          } catch (timeoutError) {
+            console.warn(
+              `⚠️ Failed to enforce session statement_timeout (${sessionStatementTimeoutMs}ms): ${timeoutError.message}`
+            )
+          }
           
           // Increased warmup time for serverless cold starts with concurrent requests
           const warmupDelayMs = parseInt(process.env.PRISMA_WARMUP_MS || '2500', 10)

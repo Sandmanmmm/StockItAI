@@ -722,29 +722,52 @@ export class WorkflowOrchestrator {
       const progressNote = totalItems > 0 
         ? `${stageName} - ${itemsProcessed}/${totalItems} items (${progress}% complete)`
         : `${stageName} - ${progress}% complete`
-      
-      // Use retry wrapper for transient connection errors
+
+      const PROGRESS_LOCK_TIMEOUT_MS = 2000
+      const PROGRESS_STATEMENT_TIMEOUT_MS = 5000
+
       await prismaOperation(
-        (prisma) => prisma.purchaseOrder.update({
-          where: { id: purchaseOrderId },
-          data: {
-            processingNotes: JSON.stringify({
-              currentStep: stageName,
-              progress: progress,
-              itemsProcessed: itemsProcessed,
-              totalItems: totalItems,
-              message: progressNote,
-              updatedAt: new Date().toISOString()
-            }),
-            updatedAt: new Date()
-          }
+        (prisma) => prisma.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe(`SET LOCAL lock_timeout = '${PROGRESS_LOCK_TIMEOUT_MS}ms'`)
+          await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = '${PROGRESS_STATEMENT_TIMEOUT_MS}ms'`)
+
+          await tx.purchaseOrder.update({
+            where: { id: purchaseOrderId },
+            data: {
+              processingNotes: JSON.stringify({
+                currentStep: stageName,
+                progress: progress,
+                itemsProcessed: itemsProcessed,
+                totalItems: totalItems,
+                message: progressNote,
+                updatedAt: new Date().toISOString()
+              }),
+              updatedAt: new Date()
+            }
+          })
         }),
         `Update PO progress for ${purchaseOrderId}`
       )
       
       console.log(`📊 Updated PO ${purchaseOrderId} progress: ${progressNote}`)
     } catch (error) {
-      // Don't fail the workflow if progress update fails
+      const errorCode = error?.code || error?.originalError?.code
+      const errorMessage = error?.message || ''
+
+      const isLockOrTimeout =
+        errorCode === '55P03' || // lock_not_available
+        errorCode === '57014' ||
+        errorMessage.includes('canceling statement due to statement timeout') ||
+        errorMessage.includes('lock timeout')
+
+      if (isLockOrTimeout) {
+        console.warn(
+          `⚠️ Skipped PO progress update for ${purchaseOrderId} due to row lock/timeout (${errorCode || 'unknown'}). This is non-fatal.`
+        )
+        return
+      }
+
+      // Don't fail the workflow if progress update fails for other reasons
       console.error(`⚠️ Failed to update PO progress:`, error.message)
     }
   }
