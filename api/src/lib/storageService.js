@@ -26,6 +26,15 @@ const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabase
   auth: {
     autoRefreshToken: false,
     persistSession: false
+  },
+  global: {
+    fetch: (url, options = {}) => {
+      // Increase timeout to 120 seconds for large file downloads (3MB+ PDFs)
+      return fetch(url, {
+        ...options,
+        signal: AbortSignal.timeout(120000) // 120 second timeout
+      })
+    }
   }
 }) : null
 
