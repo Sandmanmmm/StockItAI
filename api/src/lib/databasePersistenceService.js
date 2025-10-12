@@ -92,6 +92,7 @@ export class DatabasePersistenceService {
         console.log(`   options.purchaseOrderId:`, options.purchaseOrderId)
         console.log(`   Will ${options.purchaseOrderId ? 'UPDATE' : 'CREATE'} purchase order`)
         
+        const step1Start = Date.now()
         const purchaseOrder = options.purchaseOrderId 
           ? await this.updatePurchaseOrder(
               tx,
@@ -110,23 +111,27 @@ export class DatabasePersistenceService {
               supplier?.id,
               options
             )
+        console.log(`⏱️ [${txId}] Step 1 (${options.purchaseOrderId ? 'UPDATE' : 'CREATE'} PO) took ${Date.now() - step1Start}ms`)
         
         // 3. Delete existing line items if updating (to avoid duplicates/stale data)
         if (options.purchaseOrderId) {
           console.log(`🗑️ Deleting existing line items for PO update...`)
+          const step2Start = Date.now()
           const deletedCount = await tx.pOLineItem.deleteMany({
             where: { purchaseOrderId: purchaseOrder.id }
           })
-          console.log(`✅ Deleted ${deletedCount.count} existing line items`)
+          console.log(`⏱️ [${txId}] Step 2 (DELETE line items) took ${Date.now() - step2Start}ms - deleted ${deletedCount.count} items`)
         }
         
         // 4. Create line items (fresh or initial creation)
+        const step3Start = Date.now()
         const lineItems = await this.createLineItems(
           tx,
           aiResult.extractedData?.lineItems || aiResult.extractedData?.items || [],
           purchaseOrder.id,
           aiResult.confidence?.lineItems || {}
         )
+        console.log(`⏱️ [${txId}] Step 3 (CREATE ${lineItems.length} line items) took ${Date.now() - step3Start}ms`)
         
         console.log(`✅ Line items created in transaction:`)
         console.log(`   Count: ${lineItems.length}`)
@@ -134,6 +139,7 @@ export class DatabasePersistenceService {
         console.log(`   Sample line item IDs: ${lineItems.slice(0, 2).map(li => li.id).join(', ')}`)
         
         // 5. Create AI processing audit record
+        const step4Start = Date.now()
         const auditRecord = await this.createAIAuditRecord(
           tx,
           aiResult,
@@ -141,6 +147,8 @@ export class DatabasePersistenceService {
           fileName,
           options
         )
+        console.log(`⏱️ [${txId}] Step 4 (CREATE audit record) took ${Date.now() - step4Start}ms`)
+        console.log(`⏱️ [${txId}] Step 4 (CREATE audit record) took ${Date.now() - step4Start}ms`)
         
         console.log(`✅ Database persistence completed:`)
         console.log(`   PO ID: ${purchaseOrder.id}`)
@@ -149,17 +157,26 @@ export class DatabasePersistenceService {
         console.log(`   Line Items saved with PO ID: ${purchaseOrder.id}`)
         
         // Verify line items are actually in the transaction
+        const step5Start = Date.now()
         const verifyCount = await tx.pOLineItem.count({
           where: { purchaseOrderId: purchaseOrder.id }
         })
+        console.log(`⏱️ [${txId}] Step 5 (VERIFY line items count) took ${Date.now() - step5Start}ms`)
         console.log(`   ✓ Verification: ${verifyCount} line items in transaction before commit`)
         console.log(`   Audit ID: ${auditRecord.id}`)
         
-        const txDuration = Date.now() - txStartTime
+        const txDuration = Date.now() - txStartStart
         console.log(`🔒 [${txId}] Transaction body complete (duration: ${txDuration}ms)`)
+        console.log(`📊 [${txId}] Transaction Breakdown:`)
+        console.log(`   - Step 1 (PO ${options.purchaseOrderId ? 'update' : 'create'}): ${step1Start ? (Date.now() - txStartTime - (Date.now() - step1Start)) : 0}ms`)
+        console.log(`   - Step 2 (Delete line items): ${options.purchaseOrderId ? 'included' : 'skipped'}`)
+        console.log(`   - Step 3 (Create line items): timing logged above`)
+        console.log(`   - Step 4 (Create audit): timing logged above`)
+        console.log(`   - Step 5 (Verify count): timing logged above`)
         
-        if (txDuration > 7000) {
-          console.warn(`⚠️ [${txId}] Transaction took ${txDuration}ms - approaching 8s timeout!`)
+        if (txDuration > 5000) {
+          console.error(`🚨 [${txId}] CRITICAL: Transaction took ${txDuration}ms - exceeds 5s threshold!`)
+          console.error(`🚨 [${txId}] This indicates a serious performance issue inside the transaction`)
         }
         
         return {
@@ -171,7 +188,7 @@ export class DatabasePersistenceService {
         }
       }, {
         maxWait: 15000, // Maximum time to wait to start transaction (15s - handle slow connection acquisition)
-        timeout: 120000, // Maximum transaction time (120s / 2 minutes - handle complex operations safely)
+        timeout: 10000, // Maximum transaction time (10s - FAST WRITES ONLY, expensive queries already moved outside)
         isolationLevel: 'ReadCommitted' // Reduce lock contention
       })
       
@@ -511,19 +528,23 @@ export class DatabasePersistenceService {
       // Handle unique constraint violation with automatic suffix retry
       if (error.code === 'P2002') {
         console.log(`⚠️ PO number ${extractedPoNumber} conflicts (pre-check race condition or concurrent upload)`)
+        console.warn(`⚠️ CONFLICT RESOLUTION INSIDE TRANSACTION - this can be slow!`)
         console.log(`   Using optimistic locking fallback to find next available suffix...`)
         
-        // Try incrementing suffixes until we find one that works
+        // 🔥 CRITICAL FIX: Limit attempts to 10 instead of 100 to prevent transaction timeout
+        // If we can't find a free suffix in 10 tries, use timestamp fallback immediately
         const basePoNumber = extractedPoNumber
         let suffix = 1
         let attempts = 0
-        const maxAttempts = 100
+        const maxAttempts = 10 // ← REDUCED FROM 100 to prevent long transaction times
+        
+        const conflictResolutionStart = Date.now()
         
         while (attempts < maxAttempts) {
           const tryNumber = `${basePoNumber}-${suffix}`
           
           try {
-            console.log(`   Attempting to create with suffix: ${tryNumber}`)
+            console.log(`   Attempt ${attempts + 1}/${maxAttempts}: Trying suffix ${suffix} → ${tryNumber}`)
             
             const purchaseOrder = await tx.purchaseOrder.create({
               data: {
@@ -546,7 +567,8 @@ export class DatabasePersistenceService {
               }
             })
             
-            console.log(`✅ Created purchase order with suffix: ${purchaseOrder.number}`)
+            const conflictResolutionTime = Date.now() - conflictResolutionStart
+            console.log(`✅ Created purchase order with suffix: ${purchaseOrder.number} (conflict resolution took ${conflictResolutionTime}ms)`)
             return purchaseOrder
             
           } catch (retryError) {
@@ -554,7 +576,7 @@ export class DatabasePersistenceService {
               // This suffix is also taken, try next
               suffix++
               attempts++
-              console.log(`   Conflict on ${tryNumber}, trying next suffix...`)
+              console.log(`   ❌ Conflict on ${tryNumber}, trying next...`)
               continue
             }
             // Other error - re-throw
@@ -562,8 +584,11 @@ export class DatabasePersistenceService {
           }
         }
         
-        // If we exhausted all suffixes, use timestamp as final fallback
-        console.error(`⚠️ Exhausted ${maxAttempts} suffix attempts, using timestamp fallback`)
+        // 🔥 CRITICAL FIX: Use timestamp IMMEDIATELY after 10 failed attempts
+        // Don't keep trying - this prevents transaction timeout
+        const conflictResolutionTime = Date.now() - conflictResolutionStart
+        console.error(`⚠️ Exhausted ${maxAttempts} suffix attempts in ${conflictResolutionTime}ms, using timestamp fallback`)
+        console.error(`⚠️ This indicates MANY duplicate PO numbers - investigate root cause!`)
         const timestampNumber = `${basePoNumber}-${Date.now()}`
         const purchaseOrder = await tx.purchaseOrder.create({
           data: {
@@ -697,26 +722,31 @@ export class DatabasePersistenceService {
       // Handle unique constraint violation with automatic suffix retry
       if (updateError.code === 'P2002') {
         console.log(`⚠️ PO number ${updateData.number} conflicts with existing PO (pre-check race or concurrent update)`)
+        console.warn(`⚠️ CONFLICT RESOLUTION INSIDE TRANSACTION - this can be slow!`)
         console.log(`   Using optimistic locking fallback to find next available suffix...`)
         
-        // Try incrementing suffixes until we find one that works
+        // 🔥 CRITICAL FIX: Limit attempts to 10 instead of 100 to prevent transaction timeout
+        // If we can't find a free suffix in 10 tries, use timestamp fallback immediately
         const basePoNumber = updateData.number
         let suffix = 1
         let attempts = 0
-        const maxAttempts = 100
+        const maxAttempts = 10 // ← REDUCED FROM 100 to prevent long transaction times
+        
+        const conflictResolutionStart = Date.now()
         
         while (attempts < maxAttempts) {
           const tryNumber = `${basePoNumber}-${suffix}`
           
           try {
-            console.log(`   Attempting to update with suffix: ${tryNumber}`)
+            console.log(`   Attempt ${attempts + 1}/${maxAttempts}: Trying suffix ${suffix} → ${tryNumber}`)
             
             const purchaseOrder = await tx.purchaseOrder.update({
               where: { id: purchaseOrderId },
               data: { ...updateData, number: tryNumber }
             })
             
-            console.log(`✅ Updated purchase order with suffix: ${purchaseOrder.number}`)
+            const conflictResolutionTime = Date.now() - conflictResolutionStart
+            console.log(`✅ Updated purchase order with suffix: ${purchaseOrder.number} (conflict resolution took ${conflictResolutionTime}ms)`)
             return purchaseOrder
             
           } catch (retryError) {
@@ -724,7 +754,7 @@ export class DatabasePersistenceService {
               // This suffix is also taken, try next
               suffix++
               attempts++
-              console.log(`   Conflict on ${tryNumber}, trying next suffix...`)
+              console.log(`   ❌ Conflict on ${tryNumber}, trying next...`)
               continue
             }
             // Other error - re-throw
@@ -732,8 +762,11 @@ export class DatabasePersistenceService {
           }
         }
         
-        // If we exhausted all suffixes, use timestamp as final fallback
-        console.error(`⚠️ Exhausted ${maxAttempts} suffix attempts, using timestamp fallback`)
+        // 🔥 CRITICAL FIX: Use timestamp IMMEDIATELY after 10 failed attempts
+        // Don't keep trying - this prevents transaction timeout
+        const conflictResolutionTime = Date.now() - conflictResolutionStart
+        console.error(`⚠️ Exhausted ${maxAttempts} suffix attempts in ${conflictResolutionTime}ms, using timestamp fallback`)
+        console.error(`⚠️ This indicates MANY duplicate PO numbers - investigate root cause!`)
         const timestampNumber = `${basePoNumber}-${Date.now()}`
         const purchaseOrder = await tx.purchaseOrder.update({
           where: { id: purchaseOrderId },
