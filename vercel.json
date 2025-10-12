@@ -21,7 +21,7 @@
   ],
   "functions": {
     "api/src/server.js": {
-      "maxDuration": 30,
+      "maxDuration": 180,
       "memory": 1024
     },
     "api/process-workflows-cron.js": {

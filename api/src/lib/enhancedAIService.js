@@ -9,7 +9,7 @@ import { errorHandlingService, CONFIDENCE_THRESHOLDS } from './errorHandlingServ
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-  timeout: 25000, // 25 second timeout (within Vercel's 30s limit for server.js functions)
+  timeout: 60000, // 60 second timeout per API call (within 180s function limit)
   maxRetries: 2 // Enable automatic retries with exponential backoff
 })
 
