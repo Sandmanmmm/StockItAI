@@ -246,42 +246,64 @@ export class DatabasePersistenceService {
         if (error.isPoNumberConflict) {
           console.log(`🔄 [CONFLICT RESOLUTION] Resolving PO number conflict outside transaction...`)
           
-          // Get fresh Prisma client for conflict resolution
-          const prisma = await db.getClient()
-          const basePoNumber = error.conflictPoNumber
-          const maxSuffixAttempts = 10
+          // Different handling for CREATE vs UPDATE operations
+          const isUpdateOperation = options.purchaseOrderId && options.purchaseOrderId !== 'unknown'
           
-          // Try suffixes 1-10
-          let resolvedNumber = null
-          for (let suffix = 1; suffix <= maxSuffixAttempts; suffix++) {
-            const tryNumber = `${basePoNumber}-${suffix}`
-            const existing = await prisma.purchaseOrder.findFirst({
-              where: {
-                merchantId,
-                number: tryNumber
-              }
-            })
+          if (isUpdateOperation) {
+            // ✅ UPDATE operation: Skip number change, keep existing PO number
+            console.log(`📝 [UPDATE CONFLICT] Conflict on UPDATE - will skip number change and keep existing PO number`)
+            console.log(`   Existing PO ID: ${options.purchaseOrderId}`)
+            console.log(`   Conflicting number: ${error.conflictPoNumber}`)
             
-            if (!existing) {
-              resolvedNumber = tryNumber
-              console.log(`✅ [CONFLICT RESOLUTION] Found available PO number: ${tryNumber}`)
-              break
+            // Clear the PO number from extracted data so UPDATE doesn't try to change it
+            delete aiResult.extractedData.poNumber
+            delete aiResult.extractedData.number
+            
+            console.log(`✅ [UPDATE CONFLICT] Will retry UPDATE without changing PO number`)
+            
+            // Continue to retry loop (don't count as retry attempt for conflict resolution)
+            continue
+            
+          } else {
+            // ✅ CREATE operation: Find available suffix
+            console.log(`📝 [CREATE CONFLICT] Conflict on CREATE - will find available PO number with suffix`)
+            
+            const prisma = await db.getClient()
+            const basePoNumber = error.conflictPoNumber
+            const maxSuffixAttempts = 10
+            
+            // Try suffixes 1-10
+            let resolvedNumber = null
+            for (let suffix = 1; suffix <= maxSuffixAttempts; suffix++) {
+              const tryNumber = `${basePoNumber}-${suffix}`
+              const existing = await prisma.purchaseOrder.findFirst({
+                where: {
+                  merchantId,
+                  number: tryNumber
+                }
+              })
+              
+              if (!existing) {
+                resolvedNumber = tryNumber
+                console.log(`✅ [CREATE CONFLICT] Found available PO number: ${tryNumber}`)
+                break
+              }
+              console.log(`   Suffix ${suffix} taken, trying next...`)
             }
-            console.log(`   Suffix ${suffix} taken, trying next...`)
+            
+            // Fallback to timestamp if all suffixes taken
+            if (!resolvedNumber) {
+              resolvedNumber = `${basePoNumber}-${Date.now()}`
+              console.log(`⚠️ [CREATE CONFLICT] All suffixes taken, using timestamp: ${resolvedNumber}`)
+            }
+            
+            // Update AI result with resolved number for retry
+            aiResult.extractedData.poNumber = resolvedNumber
+            console.log(`🔄 [CREATE CONFLICT] Will retry CREATE with PO number: ${resolvedNumber}`)
+            
+            // Continue to retry loop (don't count as retry attempt for conflict resolution)
+            continue
           }
-          
-          // Fallback to timestamp if all suffixes taken
-          if (!resolvedNumber) {
-            resolvedNumber = `${basePoNumber}-${Date.now()}`
-            console.log(`⚠️ [CONFLICT RESOLUTION] All suffixes taken, using timestamp: ${resolvedNumber}`)
-          }
-          
-          // Update AI result with resolved number for retry
-          aiResult.extractedData.poNumber = resolvedNumber
-          console.log(`🔄 [CONFLICT RESOLUTION] Will retry transaction with PO number: ${resolvedNumber}`)
-          
-          // Continue to retry loop (don't count as retry attempt for conflict resolution)
-          continue
         }
         
         // Check if error is retryable (connection/engine errors/transaction errors)
