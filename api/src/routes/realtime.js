@@ -1,21 +1,62 @@
 import express from 'express'
 import { verifyShopifyRequest } from '../lib/auth.js'
 import { redisManager } from '../lib/redisManager.js'
+import { initializePrisma } from '../lib/prisma.js'
 
 const router = express.Router()
 
 /**
- * SSE endpoint for real-time updates
- * GET /api/realtime/events
+ * SSE-specific authentication middleware
+ * EventSource cannot send custom headers, so we use shop domain from query params
+ * and verify against active merchants in the database
  */
-router.get('/events', verifyShopifyRequest, async (req, res) => {
-  const merchantId = req.session?.merchantId || req.query.merchantId
-  
-  if (!merchantId) {
-    return res.status(401).json({ error: 'Unauthorized' })
+async function verifySSEConnection(req, res, next) {
+  try {
+    const shop = req.query.shop
+    
+    if (!shop) {
+      console.warn('🔐 SSE Auth rejected: missing shop parameter')
+      return res.status(401).json({ error: 'Missing shop parameter' })
+    }
+    
+    // Get merchant from database
+    const prisma = await initializePrisma()
+    const merchant = await prisma.merchant.findFirst({
+      where: {
+        OR: [
+          { shopDomain: shop },
+          { shopDomain: `${shop}.myshopify.com` }
+        ],
+        status: 'active'
+      }
+    })
+    
+    if (!merchant) {
+      console.warn(`🔐 SSE Auth rejected: merchant not found for shop ${shop}`)
+      return res.status(401).json({ error: 'Unauthorized merchant' })
+    }
+    
+    // Add merchant to request (same as verifyShopifyRequest)
+    req.merchant = merchant
+    req.shop = merchant
+    req.shopDomain = merchant.shopDomain
+    
+    console.log(`🔐 SSE Auth success for merchant ${merchant.id} (${merchant.shopDomain})`)
+    next()
+  } catch (error) {
+    console.error('SSE authentication error:', error)
+    return res.status(500).json({ error: 'Authentication failed' })
   }
+}
+
+/**
+ * SSE endpoint for real-time updates
+ * GET /api/realtime/events?shop=example.myshopify.com
+ */
+router.get('/events', verifySSEConnection, async (req, res) => {
+  const merchantId = req.merchant.id
   
-  console.log(`📡 SSE connection established for merchant: ${merchantId}`)
+  console.log(`📡 SSE connection established for merchant: ${merchantId} (${req.merchant.shopDomain})`)
   
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream')

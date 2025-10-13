@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { getShopDomain } from '@/lib/shopifyApiService'
 
 export interface SSEProgress {
   poId: string
@@ -151,7 +152,20 @@ export function useSSEUpdates(options: UseSSEUpdatesOptions = {}): UseSSEUpdates
     setConnectionStatus('connecting')
 
     try {
-      const eventSource = new EventSource('/api/realtime/events')
+      // Get shop domain from URL parameters for authentication
+      const shop = getShopDomain()
+      
+      if (!shop) {
+        console.error('❌ SSE: No shop domain found in URL parameters')
+        setConnectionStatus('error')
+        return
+      }
+      
+      // Build SSE URL with shop parameter for authentication
+      const sseUrl = `/api/realtime/events?shop=${encodeURIComponent(shop)}`
+      console.log(`🔌 SSE: Connecting with shop: ${shop}`)
+      
+      const eventSource = new EventSource(sseUrl)
       eventSourceRef.current = eventSource
 
       // Connection opened
