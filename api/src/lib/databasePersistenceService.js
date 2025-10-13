@@ -129,32 +129,18 @@ export class DatabasePersistenceService {
         // 4. Create line items (fresh or initial creation)
         const step3Start = Date.now()
         
-        // 📊 Progress: Starting line items creation (20% of DB stage, 44% global)
-        if (progressHelper) {
-          await progressHelper.publishProgress(
-            20,
-            `Saving ${aiResult.extractedData?.lineItems?.length || 0} line items`,
-            { totalItems: aiResult.extractedData?.lineItems?.length || 0 }
-          )
-        }
+        // 📊 CRITICAL FIX: Remove progress updates from inside transaction
+        // Progress updates are NON-CRITICAL and cause transaction timeout
+        // Will publish progress AFTER transaction completes
         
         const lineItems = await this.createLineItems(
           tx,
           aiResult.extractedData?.lineItems || aiResult.extractedData?.items || [],
           purchaseOrder.id,
           aiResult.confidence?.lineItems || {},
-          progressHelper // 📊 Pass progress helper
+          null // 📊 Do NOT pass progress helper inside transaction
         )
         console.log(`⏱️ [${txId}] Step 3 (CREATE ${lineItems.length} line items) took ${Date.now() - step3Start}ms`)
-        
-        // 📊 Progress: Line items saved (80% of DB stage, 56% global)
-        if (progressHelper) {
-          await progressHelper.publishProgress(
-            80,
-            `Saved ${lineItems.length} line items`,
-            { savedItems: lineItems.length }
-          )
-        }
         
         console.log(`✅ Line items created in transaction:`)
         console.log(`   Count: ${lineItems.length}`)
@@ -210,13 +196,23 @@ export class DatabasePersistenceService {
           processingTime: Date.now() - startTime
         }
       }, {
-        maxWait: 60000, // Maximum time to wait to start transaction (60s - handle PO lock contention, up to 200 retry attempts @ 300ms)
-        timeout: 60000, // Maximum transaction time (60s - allow time for lock acquisition and progress updates)
+        maxWait: 30000, // Maximum time to wait to start transaction (30s - reduced from 60s since progress updates are now outside)
+        timeout: 15000, // Maximum transaction time (15s - reduced from 60s since no blocking progress updates inside)
         isolationLevel: 'ReadCommitted' // Reduce lock contention
       })
       
       const txCommitDuration = Date.now() - txStartTime
       console.log(`🔒 [${txId}] Transaction committed successfully (total: ${txCommitDuration}ms)`)
+      
+      // 📊 CRITICAL FIX: Publish progress AFTER transaction completes (not inside)
+      // This prevents transaction timeout caused by blocking progress updates
+      if (progressHelper) {
+        await progressHelper.publishProgress(
+          80,
+          `Saved ${result.lineItems.length} line items to database`,
+          { savedItems: result.lineItems.length }
+        )
+      }
       
       // Verify line items persisted after transaction commit
         const postCommitCount = await prisma.pOLineItem.count({
@@ -789,14 +785,8 @@ export class DatabasePersistenceService {
     console.log(`⚡ [BATCH CREATE] Creating ${lineItemsData.length} line items in single batch operation...`)
     const batchStart = Date.now()
     
-    // 📊 Progress: Preparing line items data (30% of DB stage, 46% global)
-    if (progressHelper) {
-      await progressHelper.publishProgress(
-        30,
-        `Preparing ${lineItemsData.length} line items for save`,
-        { totalItems: lineItemsData.length }
-      )
-    }
+    // 📊 CRITICAL FIX: Progress updates removed from inside transaction (called outside instead)
+    // Keeping progressHelper parameter for backward compatibility but not using it
     
     // Prepare all line item data
     const lineItemsToCreate = lineItemsData.map((item, i) => {
@@ -830,14 +820,7 @@ export class DatabasePersistenceService {
     
     console.log(`✅ [BATCH CREATE] Created ${result.count} line items in ${Date.now() - batchStart}ms`)
     
-    // 📊 Progress: Batch insert complete (60% of DB stage, 52% global)
-    if (progressHelper) {
-      await progressHelper.publishProgress(
-        60,
-        `Batch saved ${result.count} line items`,
-        { savedItems: result.count }
-      )
-    }
+    // 📊 CRITICAL FIX: Progress updates removed from transaction
     
     // Fetch the created items to return them (createMany doesn't return created records)
     const lineItems = await tx.pOLineItem.findMany({
@@ -845,14 +828,7 @@ export class DatabasePersistenceService {
       orderBy: { createdAt: 'asc' }
     })
     
-    // 📊 Progress: Verifying line items (70% of DB stage, 54% global)
-    if (progressHelper) {
-      await progressHelper.publishProgress(
-        70,
-        `Verified ${lineItems.length} line items`,
-        { verifiedItems: lineItems.length }
-      )
-    }
+    // 📊 CRITICAL FIX: Progress updates removed from transaction
     
     console.log(`  📦 Sample items: ${lineItems.slice(0, 2).map(li => `${li.productName} x${li.quantity}`).join(', ')}`)
     
