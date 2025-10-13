@@ -558,7 +558,8 @@ async function initializePrisma() {
                   // CRITICAL FIX 2025-10-12: Increased retries from 3 to 5 during cold starts
                   // Warmup takes 2.5-2.7s, queries arriving before completion need more patience
                   // Total retry time: 200ms + 400ms + 800ms + 1600ms + 3200ms = 6.2s max (fits in 10s serverless timeout)
-                  const maxRetries = 5
+                  // CRITICAL FIX 2025-10-13: NO RETRIES for transaction operations - timeout is too strict (15s)
+                  const maxRetries = isTransactionOperation ? 1 : 5
                   let lastError
                   
                   // Helper to check if error is retryable
@@ -615,13 +616,15 @@ async function initializePrisma() {
                         throw error
                       }
                       
-                      // Exponential backoff: 200ms, 400ms, 800ms
+                      // Exponential backoff: 200ms, 400ms, 800ms (only for non-transaction operations)
                       const delay = 200 * Math.pow(2, attempt - 1)
                       console.warn(
                         `⚠️ [EXTENSION] ${model}.${operation} attempt ${attempt}/${maxRetries} ` +
-                        `failed: ${error.message}. Retrying in ${delay}ms...`
+                        `failed: ${error.message}.${isTransactionOperation ? ' (transaction - no retry)' : ` Retrying in ${delay}ms...`}`
                       )
-                      await new Promise(resolve => setTimeout(resolve, delay))
+                      if (!isTransactionOperation) {
+                        await new Promise(resolve => setTimeout(resolve, delay))
+                      }
                     }
                   }
                   
