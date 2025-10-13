@@ -118,6 +118,7 @@ import securityRouter from './routes/security.js'
 import suppliersRouter from './routes/suppliers.js'
 import searchRouter from './routes/search.js'
 import realtimeRouter from './routes/realtime.js'
+import queueAdminRouter from './routes/queueAdmin.js'
 
 // Import queue handlers (internal endpoints - no auth required)
 import processUploadQueueHandler from './queues/process-upload.js'
@@ -156,6 +157,7 @@ app.use('/api/analytics', verifyShopifyRequest, analyticsRouter)
 if (process.env.NODE_ENV === 'production') {
   app.use('/api/monitoring', adminAuth, monitoringRouter)
   app.use('/api/dlq', adminAuth, deadLetterQueueRouter)
+  app.use('/api/queue-admin', queueAdminRouter) // Queue admin - no auth for now (can add admin auth later)
 } else {
   // Development access without admin auth
   app.use('/api/monitoring', devBypassAuth, monitoringRouter)
