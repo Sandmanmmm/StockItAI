@@ -4,29 +4,40 @@
  */
 
 const REDIS_CONFIG = {
-  // Connection settings
-  connection: {
-    host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT) || 6379,
-    password: process.env.REDIS_PASSWORD,
-    db: parseInt(process.env.REDIS_DB) || 0,
+  // Connection settings - returns either URL string or config object
+  connection: (() => {
+    // Upstash Redis connection via URL (preferred for serverless)
+    if (process.env.REDIS_URL) {
+      console.log('🔴 Using REDIS_URL for Upstash connection')
+      // ioredis accepts URL string directly in constructor
+      return process.env.REDIS_URL
+    }
     
-    // Connection pooling
-    family: 4,
-    keepAlive: true,
-    connectTimeout: 10000,
-    lazyConnect: true,
-    
-    // Retry configuration
-    retryDelayOnFailover: 100,
-    retryConnectOnFailure: true,
-    // CRITICAL: Explicitly set to null/false to prevent ioredis from adding defaults that Bull v3 rejects
-    maxRetriesPerRequest: null,
-    enableReadyCheck: false,
-    
-    // Enable TLS for production
-    tls: process.env.REDIS_TLS === 'true' ? {} : null
-  },
+    // Fallback to legacy host/port configuration
+    console.log('🔴 Using legacy REDIS_HOST/PORT configuration')
+    return {
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT) || 6379,
+      password: process.env.REDIS_PASSWORD,
+      db: parseInt(process.env.REDIS_DB) || 0,
+      
+      // Connection pooling
+      family: 4,
+      keepAlive: true,
+      connectTimeout: 10000,
+      lazyConnect: true,
+      
+      // Retry configuration
+      retryDelayOnFailover: 100,
+      retryConnectOnFailure: true,
+      // CRITICAL: Explicitly set to null/false to prevent ioredis from adding defaults that Bull v3 rejects
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+      
+      // Enable TLS for production
+      tls: process.env.REDIS_TLS === 'true' ? {} : null
+    }
+  })(),
 
   // Persistence configuration
   persistence: {

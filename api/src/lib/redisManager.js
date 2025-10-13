@@ -19,6 +19,7 @@ export class RedisManager {
     this.maxConnectionAttempts = 5
     this.reconnectDelay = 2000
     this.initializationPromise = null
+    this.connectionConfig = null // Store connection config for createSubscriber
     
     // Start initialization but don't block constructor
     this.initializationPromise = this.initializeConnections()
@@ -52,7 +53,11 @@ export class RedisManager {
       const redisConfig = getRedisConfig(environment)
       const connectionOptions = redisConfig.connection
       
+      // Store connection config for createSubscriber method
+      this.connectionConfig = connectionOptions
+      
       console.log(`Initializing Redis connections for ${environment} environment...`)
+      console.log(`Redis config type: ${typeof connectionOptions}`)
       
       // Main Redis connection for queue operations
       this.redis = new Redis(connectionOptions)
