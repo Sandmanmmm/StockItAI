@@ -179,4 +179,74 @@ router.get('/status', async (req, res) => {
   }
 })
 
+/**
+ * Get failed job details
+ * GET /api/queue-admin/failed-jobs
+ */
+router.get('/failed-jobs', async (req, res) => {
+  try {
+    console.log('🔍 Fetching failed job details...')
+    
+    const queueNames = [
+      'ai-parsing',
+      'database-save',
+      'product-draft-creation',
+      'image-attachment',
+      'shopify-sync',
+      'status-update',
+      'data-normalization',
+      'merchant-config',
+      'ai-enrichment',
+      'shopify-payload',
+      'background-image-processing'
+    ]
+    
+    const redisOptions = getRedisOptions()
+    const allFailedJobs = []
+    
+    for (const queueName of queueNames) {
+      try {
+        const queue = new Bull(queueName, { redis: redisOptions })
+        
+        const failedJobs = await queue.getFailed()
+        
+        for (const job of failedJobs) {
+          allFailedJobs.push({
+            queue: queueName,
+            jobId: job.id,
+            data: job.data,
+            failedReason: job.failedReason,
+            stacktrace: job.stacktrace,
+            attemptsMade: job.attemptsMade,
+            timestamp: job.timestamp,
+            processedOn: job.processedOn,
+            finishedOn: job.finishedOn
+          })
+        }
+        
+        await queue.close()
+        
+      } catch (error) {
+        console.error(`❌ Error fetching failed jobs from ${queueName}:`, error.message)
+      }
+    }
+    
+    console.log(`📋 Found ${allFailedJobs.length} failed jobs total`)
+    
+    res.json({
+      success: true,
+      totalFailed: allFailedJobs.length,
+      failedJobs: allFailedJobs
+    })
+    
+  } catch (error) {
+    console.error('❌ Failed to get failed jobs:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get failed jobs',
+      message: error.message
+    })
+  }
+})
+
 export default router
