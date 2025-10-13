@@ -4,7 +4,7 @@
  */
 
 import express from 'express'
-import { queueService } from '../lib/queueService.js'
+import { processorRegistrationService } from '../lib/processorRegistrationService.js'
 
 const router = express.Router()
 
@@ -17,17 +17,17 @@ router.get('/clean-failed', async (req, res) => {
     console.log('🧹 Starting failed jobs cleanup...')
     
     const queueNames = [
-      'ai-parsing',
-      'database-save',
-      'product-draft-creation',
-      'image-attachment',
-      'shopify-sync',
-      'status-update',
-      'data-normalization',
-      'merchant-config',
-      'ai-enrichment',
-      'shopify-payload',
-      'background-image-processing'
+      'ai_parsing',
+      'database_save',
+      'product_draft_creation',
+      'image_attachment',
+      'shopify_sync',
+      'status_update',
+      'data_normalization',
+      'merchant_config',
+      'ai_enrichment',
+      'shopify_payload',
+      'background_image_processing'
     ]
     
     const results = []
@@ -35,9 +35,11 @@ router.get('/clean-failed', async (req, res) => {
     
     for (const queueName of queueNames) {
       try {
-        const queue = queueService.getQueue(queueName)
+        // Get queue from registered processors
+        const queue = processorRegistrationService.registeredProcessors.get(queueName)
         if (!queue) {
-          console.warn(`⚠️ Queue not found: ${queueName}`)
+          console.warn(`⚠️ Queue not registered: ${queueName}`)
+          results.push({ queue: queueName, error: 'Queue not registered' })
           continue
         }
         
@@ -94,26 +96,28 @@ router.get('/status', async (req, res) => {
     console.log('📊 Fetching queue status...')
     
     const queueNames = [
-      'ai-parsing',
-      'database-save',
-      'product-draft-creation',
-      'image-attachment',
-      'shopify-sync',
-      'status-update',
-      'data-normalization',
-      'merchant-config',
-      'ai-enrichment',
-      'shopify-payload',
-      'background-image-processing'
+      'ai_parsing',
+      'database_save',
+      'product_draft_creation',
+      'image_attachment',
+      'shopify_sync',
+      'status_update',
+      'data_normalization',
+      'merchant_config',
+      'ai_enrichment',
+      'shopify_payload',
+      'background_image_processing'
     ]
     
     const report = []
     
     for (const queueName of queueNames) {
       try {
-        const queue = queueService.getQueue(queueName)
+        // Get queue from registered processors
+        const queue = processorRegistrationService.registeredProcessors.get(queueName)
         if (!queue) {
-          console.warn(`⚠️ Queue not found: ${queueName}`)
+          console.warn(`⚠️ Queue not registered: ${queueName}`)
+          report.push({ queue: queueName, error: 'Queue not registered' })
           continue
         }
         
