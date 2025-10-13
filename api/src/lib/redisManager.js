@@ -333,6 +333,95 @@ export class RedisManager {
   }
 
   /**
+   * Create a new subscriber instance for SSE connections
+   */
+  createSubscriber() {
+    const subscriber = new Redis(this.connectionConfig)
+    
+    subscriber.on('error', (error) => {
+      console.error('Redis subscriber error:', error)
+    })
+    
+    subscriber.on('ready', () => {
+      console.log('✅ Redis subscriber ready for SSE')
+    })
+    
+    return subscriber
+  }
+
+  /**
+   * Publish progress update to merchant channel
+   */
+  async publishMerchantProgress(merchantId, data) {
+    try {
+      const message = JSON.stringify({
+        type: 'progress',
+        ...data,
+        timestamp: Date.now()
+      })
+      
+      await this.publisher.publish(`merchant:${merchantId}:progress`, message)
+      console.log(`📢 Published progress for merchant ${merchantId}:`, data.type || 'progress')
+    } catch (error) {
+      console.error('Failed to publish merchant progress:', error)
+    }
+  }
+
+  /**
+   * Publish stage change to merchant channel
+   */
+  async publishMerchantStage(merchantId, data) {
+    try {
+      const message = JSON.stringify({
+        type: 'stage',
+        ...data,
+        timestamp: Date.now()
+      })
+      
+      await this.publisher.publish(`merchant:${merchantId}:stage`, message)
+      console.log(`📢 Published stage for merchant ${merchantId}:`, data.stage)
+    } catch (error) {
+      console.error('Failed to publish merchant stage:', error)
+    }
+  }
+
+  /**
+   * Publish completion to merchant channel
+   */
+  async publishMerchantCompletion(merchantId, data) {
+    try {
+      const message = JSON.stringify({
+        type: 'completion',
+        ...data,
+        timestamp: Date.now()
+      })
+      
+      await this.publisher.publish(`merchant:${merchantId}:completion`, message)
+      console.log(`📢 Published completion for merchant ${merchantId}:`, data.stage)
+    } catch (error) {
+      console.error('Failed to publish merchant completion:', error)
+    }
+  }
+
+  /**
+   * Publish error to merchant channel
+   */
+  async publishMerchantError(merchantId, data) {
+    try {
+      const message = JSON.stringify({
+        type: 'error',
+        ...data,
+        timestamp: Date.now()
+      })
+      
+      await this.publisher.publish(`merchant:${merchantId}:error`, message)
+      console.log(`📢 Published error for merchant ${merchantId}:`, data.stage)
+    } catch (error) {
+      console.error('Failed to publish merchant error:', error)
+    }
+  }
+
+  /**
    * Handle connection failures with exponential backoff
    */
   async handleConnectionFailure(error) {

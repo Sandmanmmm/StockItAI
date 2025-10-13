@@ -12,6 +12,7 @@
 
 import Bull from 'bull'
 import redisManager from './redisManager.js'
+import { redisManager as redisManagerInstance } from './redisManager.js'
 import { getRedisConfig } from '../config/redis.production.js'
 import { enhancedAIService } from './enhancedAIService.js'
 import { enhancedShopifyService } from './enhancedShopifyService.js'
@@ -908,102 +909,115 @@ export class WorkflowOrchestrator {
     // Get purchaseOrderId from workflow metadata for progress updates
     const workflowMetadata = await this.getWorkflowMetadata(workflowId)
     const purchaseOrderId = workflowMetadata?.data?.purchaseOrderId || data.purchaseOrderId
+    const merchantId = workflowMetadata?.data?.merchantId || data.merchantId
     
-    // Update progress: Starting AI parsing
-    await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.AI_PARSING, 5)
-
-    // Get file content for processing
-    let contentForProcessing
-    let fileBuffer = rehydrateBuffer(inputFileBuffer) // Keep reference to original buffer for binary files
-
-    if (!fileBuffer && inputFileBuffer) {
-      console.warn('⚠️ Received fileBuffer in unexpected format; attempting to recover via download')
+    // 📡 SSE: Publish stage start
+    if (merchantId && purchaseOrderId) {
+      await redisManagerInstance.publishMerchantStage(merchantId, {
+        stage: 'ai_parsing',
+        poId: purchaseOrderId,
+        workflowId,
+        status: 'started',
+        message: 'AI parsing started'
+      })
     }
+    
+    try {
+      // Update progress: Starting AI parsing
+      await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.AI_PARSING, 5)
 
-    if (parsedContent) {
-      console.log('📋 Using parsedContent from job data')
-      contentForProcessing = parsedContent
-    } else if (fileBuffer) {
-      console.log('📋 Using fileBuffer from job data')
-    } else if (uploadId) {
-      console.log('📥 Downloading file content from storage...')
-      try {
-        // Get upload record to find file URL
-        const upload = await prismaOperation(
-          (prisma) => prisma.upload.findUnique({
-            where: { id: uploadId },
-            select: { fileUrl: true }
-          }),
-          `Lookup upload ${uploadId} for file download`
-        )
-        
-        if (!upload || !upload.fileUrl) {
-          throw new Error(`No file URL found for upload ${uploadId}`)
-        }
-        
-        console.log('📁 File URL found:', upload.fileUrl)
-        
-        // Download file content
-        const fileResult = await this.storageService.downloadFile(upload.fileUrl)
-        if (!fileResult.success) {
-          throw new Error(`Failed to download file: ${fileResult.error}`)
-        }
+      // Get file content for processing
+      let contentForProcessing
+      let fileBuffer = rehydrateBuffer(inputFileBuffer) // Keep reference to original buffer for binary files
 
-        let downloadedBuffer = rehydrateBuffer(fileResult.buffer)
-
-        if (!downloadedBuffer && fileResult.buffer && typeof fileResult.buffer === 'object' && Array.isArray(fileResult.buffer.data)) {
-          downloadedBuffer = Buffer.from(fileResult.buffer.data)
-        }
-
-        if (!downloadedBuffer && fileResult.buffer !== undefined && fileResult.buffer !== null) {
-          try {
-            downloadedBuffer = Buffer.from(fileResult.buffer)
-          } catch (bufferError) {
-            console.warn('⚠️ Failed to coerce downloaded payload into buffer:', bufferError.message)
-          }
-        }
-
-        if (!downloadedBuffer) {
-          throw new Error('Downloaded file did not return a usable buffer')
-        }
-
-        fileBuffer = downloadedBuffer
-        console.log('📄 Downloaded file buffer, size:', fileBuffer.length)
-        
-      } catch (error) {
-        console.error('❌ Failed to download file content:', error)
-        throw new Error(`Failed to retrieve file content: ${error.message}`)
+      if (!fileBuffer && inputFileBuffer) {
+        console.warn('⚠️ Received fileBuffer in unexpected format; attempting to recover via download')
       }
-    }
 
-    // Parse file content based on file type if we have a file buffer
-    if (fileBuffer && !contentForProcessing) {
-      console.log('🔍 Parsing file content based on MIME type:', mimeType)
-      
-      try {
-        const parsedResult = await this.fileParsingService.parseFile(fileBuffer, mimeType, fileName)
-        
-        // Handle different content types from parsing
-        if (parsedResult.text && parsedResult.text.length > 0) {
-          contentForProcessing = parsedResult.text
-        } else if (parsedResult.rawContent) {
-          contentForProcessing = parsedResult.rawContent
-        } else if (parsedResult.imageBuffer) {
-          // For images, use the imageBuffer for OCR processing
-          contentForProcessing = parsedResult.imageBuffer
-          console.log('🖼️ Image prepared for OCR processing')
-        } else {
-          console.warn('⚠️ No usable content extracted from file')
-          contentForProcessing = 'Image file processed but no text content extracted'
+      if (parsedContent) {
+        console.log('📋 Using parsedContent from job data')
+        contentForProcessing = parsedContent
+      } else if (fileBuffer) {
+        console.log('📋 Using fileBuffer from job data')
+      } else if (uploadId) {
+        console.log('📥 Downloading file content from storage...')
+        try {
+          // Get upload record to find file URL
+          const upload = await prismaOperation(
+            (prisma) => prisma.upload.findUnique({
+              where: { id: uploadId },
+              select: { fileUrl: true }
+            }),
+            `Lookup upload ${uploadId} for file download`
+          )
+          
+          if (!upload || !upload.fileUrl) {
+            throw new Error(`No file URL found for upload ${uploadId}`)
+          }
+          
+          console.log('📁 File URL found:', upload.fileUrl)
+          
+          // Download file content
+          const fileResult = await this.storageService.downloadFile(upload.fileUrl)
+          if (!fileResult.success) {
+            throw new Error(`Failed to download file: ${fileResult.error}`)
+          }
+
+          let downloadedBuffer = rehydrateBuffer(fileResult.buffer)
+
+          if (!downloadedBuffer && fileResult.buffer && typeof fileResult.buffer === 'object' && Array.isArray(fileResult.buffer.data)) {
+            downloadedBuffer = Buffer.from(fileResult.buffer.data)
+          }
+
+          if (!downloadedBuffer && fileResult.buffer !== undefined && fileResult.buffer !== null) {
+            try {
+              downloadedBuffer = Buffer.from(fileResult.buffer)
+            } catch (bufferError) {
+              console.warn('⚠️ Failed to coerce downloaded payload into buffer:', bufferError.message)
+            }
+          }
+
+          if (!downloadedBuffer) {
+            throw new Error('Downloaded file did not return a usable buffer')
+          }
+
+          fileBuffer = downloadedBuffer
+          console.log('📄 Downloaded file buffer, size:', fileBuffer.length)
+          
+        } catch (error) {
+          console.error('❌ Failed to download file content:', error)
+          throw new Error(`Failed to retrieve file content: ${error.message}`)
         }
+      }
+
+      // Parse file content based on file type if we have a file buffer
+      if (fileBuffer && !contentForProcessing) {
+        console.log('🔍 Parsing file content based on MIME type:', mimeType)
         
-        if (contentForProcessing && typeof contentForProcessing === 'string') {
-          console.log('📝 File parsed successfully, content length:', contentForProcessing.length)
-        } else if (contentForProcessing && Buffer.isBuffer(contentForProcessing)) {
-          console.log('📝 File parsed successfully, buffer size:', contentForProcessing.length)
-        } else {
-          console.log('📝 File parsed successfully, content type:', typeof contentForProcessing)
-        }
+        try {
+          const parsedResult = await this.fileParsingService.parseFile(fileBuffer, mimeType, fileName)
+          
+          // Handle different content types from parsing
+          if (parsedResult.text && parsedResult.text.length > 0) {
+            contentForProcessing = parsedResult.text
+          } else if (parsedResult.rawContent) {
+            contentForProcessing = parsedResult.rawContent
+          } else if (parsedResult.imageBuffer) {
+            // For images, use the imageBuffer for OCR processing
+            contentForProcessing = parsedResult.imageBuffer
+            console.log('🖼️ Image prepared for OCR processing')
+          } else {
+            console.warn('⚠️ No usable content extracted from file')
+            contentForProcessing = 'Image file processed but no text content extracted'
+          }
+          
+          if (contentForProcessing && typeof contentForProcessing === 'string') {
+            console.log('📝 File parsed successfully, content length:', contentForProcessing.length)
+          } else if (contentForProcessing && Buffer.isBuffer(contentForProcessing)) {
+            console.log('📝 File parsed successfully, buffer size:', contentForProcessing.length)
+          } else {
+            console.log('📝 File parsed successfully, content type:', typeof contentForProcessing)
+          }
         
         // Log parsing results for debugging
         if (parsedResult.pages) {
@@ -1012,120 +1026,159 @@ export class WorkflowOrchestrator {
         if (parsedResult.extractionMethod) {
           console.log(`🛠️ Extraction method: ${parsedResult.extractionMethod}`)
         }
-      } catch (parseError) {
-        console.error('❌ File parsing failed:', parseError)
-        throw new Error(`File parsing failed: ${parseError.message}`)
+        } catch (parseError) {
+          console.error('❌ File parsing failed:', parseError)
+          throw new Error(`File parsing failed: ${parseError.message}`)
+        }
       }
-    }
-    
-    if (!contentForProcessing) {
-      throw new Error('No file content provided for AI parsing')
-    }
+      
+      if (!contentForProcessing) {
+        throw new Error('No file content provided for AI parsing')
+      }
 
-    // Log content details safely
-    if (typeof contentForProcessing === 'string') {
-      console.log('📝 Content length:', contentForProcessing.length)
-    } else if (Buffer.isBuffer(contentForProcessing)) {
-      console.log('📝 Buffer size:', contentForProcessing.length)
-    } else {
-      console.log('📝 Content type:', typeof contentForProcessing)
-    }
-    
-    job.progress(10)
-    
-    // Update DB progress: Parsing document
-    await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.AI_PARSING, 10)
-    
-    try {
-      // Determine which parsing service to use based on file type
-      const fileExtension = fileName.split('.').pop().toLowerCase()
-      console.log(`📄 File extension: ${fileExtension}`)
-      
-      // Parse document with AI service
-      job.progress(30)
-      
-      // Update DB progress: AI analyzing
-      await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.AI_PARSING, 30)
-      
-      // Use original file buffer for AI service if available, otherwise use processed content
-      const aiServiceInput = fileBuffer || contentForProcessing
-      const aiResult = await enhancedAIService.parseDocument(aiServiceInput, workflowId, {
-        fileName,
-        fileType: fileExtension,
-        mimeType, // Pass the original MIME type
-        isProcessedContent: !fileBuffer, // Flag to indicate if this is already processed content
-        ...options
-      })
-      
-      // Check if AI parsing actually succeeded
-      if (aiResult.success === false || aiResult.error) {
-        console.error('❌ AI parsing returned error result:', aiResult.error)
-        throw new Error(aiResult.error || 'AI parsing failed')
+      // Log content details safely
+      if (typeof contentForProcessing === 'string') {
+        console.log('📝 Content length:', contentForProcessing.length)
+      } else if (Buffer.isBuffer(contentForProcessing)) {
+        console.log('📝 Buffer size:', contentForProcessing.length)
+      } else {
+        console.log('📝 Content type:', typeof contentForProcessing)
       }
       
-      // Validate that we have meaningful AI results
-      if (!aiResult.extractedData) {
-        console.error('❌ AI parsing returned no extracted data')
-        throw new Error('AI parsing returned no extracted data')
-      }
+      job.progress(10)
       
-      // Check confidence - use normalized (0-1) for calculations, overall (0-100) for display
-      const confidence = aiResult.confidence?.normalized || aiResult.confidence?.overall / 100 || aiResult.confidence || 0
-      if (confidence === undefined || confidence === null) {
-        console.error('❌ AI parsing returned no confidence score')
-        throw new Error('AI parsing returned no confidence score')
-      }
+      // Update DB progress: Parsing document
+      await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.AI_PARSING, 10)
       
-      console.log('🎯 AI parsing completed successfully')
-      console.log('   Model:', aiResult.model)
-      console.log('   Confidence:', `${aiResult.confidence?.overall || 0}%`)
-      
-      job.progress(90)
-      
-      // Update DB progress: AI parsing complete
-      await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.AI_PARSING, 90)
-      
-      // Save AI result to stage store and prepare next stage data
-      const stageResult = {
-        aiResult,
-        contentForProcessing,
-        fileName,
-        mimeType,
-        timestamp: new Date().toISOString(),
-        stage: WORKFLOW_STAGES.AI_PARSING
-      }
-      
-      const nextStageData = {
-        ...data,
-        aiResult,
-        contentForProcessing
-      }
-      
-      // Save and accumulate data for next stage
-      const enrichedNextStageData = await this.saveAndAccumulateStageData(
-        workflowId,
-        WORKFLOW_STAGES.AI_PARSING,
-        stageResult,
-        nextStageData
-      )
-      
-      // Update workflow metadata with AI result
-      await this.updateWorkflowStage(workflowId, WORKFLOW_STAGES.AI_PARSING, 'completed')
-      
-      // Schedule database save stage with enriched data
-      await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.DATABASE_SAVE, enrichedNextStageData)
-      
-      job.progress(100)
-      
-      return {
-        success: true,
-        stage: WORKFLOW_STAGES.AI_PARSING,
-        aiResult,
-        nextStage: WORKFLOW_STAGES.DATABASE_SAVE
+      try {
+        // Determine which parsing service to use based on file type
+        const fileExtension = fileName.split('.').pop().toLowerCase()
+        console.log(`📄 File extension: ${fileExtension}`)
+        
+        // Parse document with AI service
+        job.progress(30)
+        
+        // Update DB progress: AI analyzing
+        await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.AI_PARSING, 30)
+        
+        // Use original file buffer for AI service if available, otherwise use processed content
+        const aiServiceInput = fileBuffer || contentForProcessing
+        const aiResult = await enhancedAIService.parseDocument(aiServiceInput, workflowId, {
+          fileName,
+          fileType: fileExtension,
+          mimeType, // Pass the original MIME type
+          isProcessedContent: !fileBuffer, // Flag to indicate if this is already processed content
+          ...options
+        })
+        
+        // Check if AI parsing actually succeeded
+        if (aiResult.success === false || aiResult.error) {
+          console.error('❌ AI parsing returned error result:', aiResult.error)
+          throw new Error(aiResult.error || 'AI parsing failed')
+        }
+        
+        // Validate that we have meaningful AI results
+        if (!aiResult.extractedData) {
+          console.error('❌ AI parsing returned no extracted data')
+          throw new Error('AI parsing returned no extracted data')
+        }
+        
+        // Check confidence - use normalized (0-1) for calculations, overall (0-100) for display
+        const confidence = aiResult.confidence?.normalized || aiResult.confidence?.overall / 100 || aiResult.confidence || 0
+        if (confidence === undefined || confidence === null) {
+          console.error('❌ AI parsing returned no confidence score')
+          throw new Error('AI parsing returned no confidence score')
+        }
+        
+        console.log('🎯 AI parsing completed successfully')
+        console.log('   Model:', aiResult.model)
+        console.log('   Confidence:', `${aiResult.confidence?.overall || 0}%`)
+        
+        job.progress(90)
+        
+        // Update DB progress: AI parsing complete
+        await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.AI_PARSING, 90)
+        
+        // Save AI result to stage store and prepare next stage data
+        const stageResult = {
+          aiResult,
+          contentForProcessing,
+          fileName,
+          mimeType,
+          timestamp: new Date().toISOString(),
+          stage: WORKFLOW_STAGES.AI_PARSING
+        }
+        
+        const nextStageData = {
+          ...data,
+          aiResult,
+          contentForProcessing
+        }
+        
+        // Save and accumulate data for next stage
+        const enrichedNextStageData = await this.saveAndAccumulateStageData(
+          workflowId,
+          WORKFLOW_STAGES.AI_PARSING,
+          stageResult,
+          nextStageData
+        )
+        
+        // Update workflow metadata with AI result
+        await this.updateWorkflowStage(workflowId, WORKFLOW_STAGES.AI_PARSING, 'completed')
+        
+        // Schedule database save stage with enriched data
+        await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.DATABASE_SAVE, enrichedNextStageData)
+        
+        job.progress(100)
+        
+        // 📡 SSE: Publish completion
+        if (merchantId && purchaseOrderId) {
+          await redisManagerInstance.publishMerchantCompletion(merchantId, {
+            stage: 'ai_parsing',
+            poId: purchaseOrderId,
+            workflowId,
+            lineItems: aiResult.lineItems?.length || 0,
+            confidence: aiResult.confidence?.overall || 0
+          })
+        }
+        
+        return {
+          success: true,
+          stage: WORKFLOW_STAGES.AI_PARSING,
+          aiResult,
+          nextStage: WORKFLOW_STAGES.DATABASE_SAVE
+        }
+        
+      } catch (error) {
+        console.error('❌ AI parsing failed:', error)
+        
+        // 📡 SSE: Publish error
+        if (merchantId && purchaseOrderId) {
+          await redisManagerInstance.publishMerchantError(merchantId, {
+            stage: 'ai_parsing',
+            poId: purchaseOrderId,
+            workflowId,
+            error: error.message
+          })
+        }
+        
+        await this.failWorkflow(workflowId, WORKFLOW_STAGES.AI_PARSING, error)
+        throw error
       }
       
     } catch (error) {
-      console.error('❌ AI parsing failed:', error)
+      console.error('❌ AI parsing failed (outer):', error)
+      
+      // 📡 SSE: Publish error
+      if (merchantId && purchaseOrderId) {
+        await redisManagerInstance.publishMerchantError(merchantId, {
+          stage: 'ai_parsing',
+          poId: purchaseOrderId,
+          workflowId,
+          error: error.message
+        })
+      }
+      
       await this.failWorkflow(workflowId, WORKFLOW_STAGES.AI_PARSING, error)
       throw error
     }
@@ -1154,12 +1207,25 @@ export class WorkflowOrchestrator {
     const purchaseOrderId = data.purchaseOrderId
     await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.DATABASE_SAVE, 10)
     
+    // Get merchant ID early for SSE
+    const merchantId = data.merchantId
+    
+    // 📡 SSE: Publish stage start
+    if (merchantId && purchaseOrderId) {
+      await redisManagerInstance.publishMerchantStage(merchantId, {
+        stage: 'database_save',
+        poId: purchaseOrderId,
+        workflowId,
+        status: 'started',
+        message: 'Saving to database'
+      })
+    }
+    
     try {
       // Get merchant ID - REQUIRED for database save
       if (!data.merchantId) {
         throw new Error('merchantId is required but not provided in workflow data')
       }
-      const merchantId = data.merchantId
       
       console.log('💾 Persisting AI results to database...')
       
@@ -1178,6 +1244,17 @@ export class WorkflowOrchestrator {
       // Update DB progress: Saving to database
       await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.DATABASE_SAVE, 30)
       
+      // 📡 SSE: Publish progress - validating data
+      if (merchantId && purchaseOrderId) {
+        await redisManagerInstance.publishMerchantProgress(merchantId, {
+          poId: purchaseOrderId,
+          workflowId,
+          stage: 'database_save',
+          progress: 30,
+          message: 'Validating AI results'
+        })
+      }
+      
       // Save AI results to database
       const dbResult = await this.dbService.persistAIResults(
         aiResult, 
@@ -1194,6 +1271,17 @@ export class WorkflowOrchestrator {
       console.log('✅ Database save completed successfully')
       console.log('   Purchase Order ID:', dbResult.purchaseOrder?.id)
       console.log('   Line Items:', dbResult.lineItems?.length || 0)
+      
+      // 📡 SSE: Publish progress - database saved
+      if (merchantId && purchaseOrderId) {
+        await redisManagerInstance.publishMerchantProgress(merchantId, {
+          poId: purchaseOrderId,
+          workflowId,
+          stage: 'database_save',
+          progress: 60,
+          message: `Saved ${dbResult.lineItems?.length || 0} line items`
+        })
+      }
       
       job.progress(90)
       
@@ -1277,6 +1365,17 @@ export class WorkflowOrchestrator {
       
       job.progress(100)
       
+      // 📡 SSE: Publish completion
+      if (merchantId && dbResult.purchaseOrder?.id) {
+        await redisManagerInstance.publishMerchantCompletion(merchantId, {
+          stage: 'database_save',
+          poId: dbResult.purchaseOrder.id,
+          workflowId,
+          lineItems: dbResult.lineItems?.length || 0,
+          purchaseOrderId: dbResult.purchaseOrder.id
+        })
+      }
+      
       return {
         success: true,
         stage: WORKFLOW_STAGES.DATABASE_SAVE,
@@ -1286,6 +1385,17 @@ export class WorkflowOrchestrator {
       
     } catch (error) {
       console.error('❌ Database save failed:', error)
+      
+      // 📡 SSE: Publish error
+      if (merchantId && purchaseOrderId) {
+        await redisManagerInstance.publishMerchantError(merchantId, {
+          stage: 'database_save',
+          poId: purchaseOrderId,
+          workflowId,
+          error: error.message
+        })
+      }
+      
       await this.failWorkflow(workflowId, WORKFLOW_STAGES.DATABASE_SAVE, error, purchaseOrderId)
       throw error
     }
@@ -2259,6 +2369,20 @@ export class WorkflowOrchestrator {
     
     job.progress(10)
     
+    // Get merchant ID for SSE
+    const merchantId = data.merchantId
+    
+    // 📡 SSE: Publish stage start
+    if (merchantId && purchaseOrderId) {
+      await redisManagerInstance.publishMerchantStage(merchantId, {
+        stage: 'shopify_sync',
+        poId: purchaseOrderId,
+        workflowId,
+        status: 'started',
+        message: 'Syncing to Shopify'
+      })
+    }
+    
     try {
       // For now, we'll simulate Shopify sync
       // In the future, this would integrate with actual Shopify API
@@ -2311,6 +2435,16 @@ export class WorkflowOrchestrator {
       
       job.progress(100)
       
+      // 📡 SSE: Publish completion
+      if (merchantId && purchaseOrderId) {
+        await redisManagerInstance.publishMerchantCompletion(merchantId, {
+          stage: 'shopify_sync',
+          poId: purchaseOrderId,
+          workflowId,
+          shopifyOrderId: shopifyResult.shopifyOrderId
+        })
+      }
+      
       return {
         success: true,
         stage: WORKFLOW_STAGES.SHOPIFY_SYNC,
@@ -2320,6 +2454,17 @@ export class WorkflowOrchestrator {
       
     } catch (error) {
       console.error('❌ Shopify sync failed:', error)
+      
+      // 📡 SSE: Publish error
+      if (merchantId && purchaseOrderId) {
+        await redisManagerInstance.publishMerchantError(merchantId, {
+          stage: 'shopify_sync',
+          poId: purchaseOrderId,
+          workflowId,
+          error: error.message
+        })
+      }
+      
       await this.failWorkflow(workflowId, WORKFLOW_STAGES.SHOPIFY_SYNC, error)
       throw error
     }

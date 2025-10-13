@@ -117,6 +117,7 @@ import aiGenerationRouter from './routes/aiGeneration.js'
 import securityRouter from './routes/security.js'
 import suppliersRouter from './routes/suppliers.js'
 import searchRouter from './routes/search.js'
+import realtimeRouter from './routes/realtime.js'
 
 // Import queue handlers (internal endpoints - no auth required)
 import processUploadQueueHandler from './queues/process-upload.js'
@@ -141,6 +142,7 @@ app.use('/api/ai-generation', process.env.NODE_ENV === 'development' ? devBypass
 app.use('/api/security', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, securityRouter)
 app.use('/api/suppliers', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, suppliersRouter)
 app.use('/api/search', process.env.NODE_ENV === 'development' ? devBypassAuth : verifyShopifyRequest, searchRouter)
+app.use('/api/realtime', realtimeRouter) // SSE endpoint - handles auth internally
 app.use('/api/files', filesRouter) // File serving doesn't need auth verification
 
 // Queue handlers - Internal endpoints, no authentication required
