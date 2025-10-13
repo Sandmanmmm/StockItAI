@@ -1,5 +1,5 @@
 import express from 'express'
-import { verifyShopifyRequest } from '../middleware/auth.js'
+import { verifyShopifyRequest } from '../lib/auth.js'
 import { redisManager } from '../lib/redisManager.js'
 
 const router = express.Router()
