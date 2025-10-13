@@ -636,6 +636,35 @@ async function initializePrisma() {
           
           console.log(`✅ Prisma Client Extension installed - all queries will wait for warmup`)
 
+          // CRITICAL FIX 2025-10-13: Intercept $transaction to ensure warmup completes first
+          // Transactions were starting before warmup completed, causing 60s delays inside transaction
+          // This wraps $transaction to wait for warmup before allowing transaction to start
+          const originalTransaction = extendedPrisma.$transaction
+          extendedPrisma.$transaction = async function(...args) {
+            // Wait for warmup to complete before starting transaction
+            if (!warmupComplete) {
+              console.log(`⏳ [TRANSACTION GUARD] Waiting for warmup before starting transaction...`)
+              if (warmupPromise) {
+                await warmupPromise
+              } else {
+                // Fallback: poll for warmupComplete
+                for (let i = 0; i < 100; i++) {
+                  if (warmupComplete) break
+                  await new Promise(resolve => setTimeout(resolve, 100))
+                }
+              }
+              
+              if (!warmupComplete) {
+                console.error(`❌ [TRANSACTION GUARD] Warmup not complete after 10s wait!`)
+              } else {
+                console.log(`✅ [TRANSACTION GUARD] Warmup complete, proceeding with transaction`)
+              }
+            }
+            
+            // Now call the original $transaction
+            return originalTransaction.apply(this, args)
+          }
+
           // Phase 2: Use extended client directly - retry logic is now in extension
           // No need for additional PrismaRetryWrapper layer (was redundant)
           prisma = extendedPrisma
