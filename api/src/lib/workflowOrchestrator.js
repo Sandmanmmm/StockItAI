@@ -159,7 +159,7 @@ export class WorkflowOrchestrator {
     // Don't initialize refinementConfigService in constructor - it needs async DB client
     this.refinementConfigService = null
     this.activePurchaseOrders = new Map()
-    this.MAX_PO_LOCK_AGE_MS = 10 * 60 * 1000 // 10 minutes safeguard
+    this.MAX_PO_LOCK_AGE_MS = 30 * 1000 // 30 seconds (reduced from 10 minutes for faster failure detection)
   }
 
   /**
@@ -360,6 +360,35 @@ export class WorkflowOrchestrator {
     const workflowId = `workflow_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     
     console.log(`🎬 Starting workflow ${workflowId} for file: ${data.fileName}`)
+    
+    // CRITICAL FIX: Check for duplicate workflows for same upload within 60 seconds
+    // This prevents race conditions where multiple workflows try to process the same PO
+    if (data.uploadId) {
+      try {
+        const prisma = await db.getClient()
+        const recentWorkflow = await prisma.workflowExecution.findFirst({
+          where: {
+            uploadId: data.uploadId,
+            merchantId: data.merchantId,
+            createdAt: {
+              gte: new Date(Date.now() - 60 * 1000) // Within last 60 seconds
+            }
+          },
+          orderBy: {
+            createdAt: 'desc'
+          }
+        })
+        
+        if (recentWorkflow) {
+          console.warn(`⚠️ [DUPLICATE WORKFLOW] Found existing workflow ${recentWorkflow.workflowId} for upload ${data.uploadId} (created ${Math.round((Date.now() - recentWorkflow.createdAt.getTime()) / 1000)}s ago)`)
+          console.warn(`⚠️ [DUPLICATE WORKFLOW] Returning existing workflow ID instead of creating duplicate`)
+          return recentWorkflow.workflowId
+        }
+      } catch (dedupeError) {
+        console.error(`⚠️ Failed to check for duplicate workflows:`, dedupeError.message)
+        // Continue anyway - better to have duplicate than fail completely
+      }
+    }
     
     // Initialize workflow metadata
     const workflowMetadata = {
