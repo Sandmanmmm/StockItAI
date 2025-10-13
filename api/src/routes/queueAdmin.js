@@ -4,9 +4,34 @@
  */
 
 import express from 'express'
-import { processorRegistrationService } from '../lib/processorRegistrationService.js'
+import Bull from 'bull'
+import { getRedisConfig } from '../config/redis.production.js'
 
 const router = express.Router()
+
+/**
+ * Get Redis options for Bull queues
+ */
+function getRedisOptions() {
+  const config = getRedisConfig()
+  
+  // Handle both URL-based (Upstash) and host/port configurations
+  if (typeof config.connection === 'string') {
+    // Redis URL (Upstash)
+    return config.connection
+  }
+  
+  // Legacy host/port configuration
+  return {
+    host: config.connection.host,
+    port: config.connection.port,
+    password: config.connection.password,
+    db: config.connection.db,
+    tls: config.connection.tls,
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false
+  }
+}
 
 /**
  * Clean failed jobs from all queues
@@ -17,31 +42,27 @@ router.get('/clean-failed', async (req, res) => {
     console.log('🧹 Starting failed jobs cleanup...')
     
     const queueNames = [
-      'ai_parsing',
-      'database_save',
-      'product_draft_creation',
-      'image_attachment',
-      'shopify_sync',
-      'status_update',
-      'data_normalization',
-      'merchant_config',
-      'ai_enrichment',
-      'shopify_payload',
-      'background_image_processing'
+      'ai-parsing',
+      'database-save',
+      'product-draft-creation',
+      'image-attachment',
+      'shopify-sync',
+      'status-update',
+      'data-normalization',
+      'merchant-config',
+      'ai-enrichment',
+      'shopify-payload',
+      'background-image-processing'
     ]
     
+    const redisOptions = getRedisOptions()
     const results = []
     let totalCleaned = 0
     
     for (const queueName of queueNames) {
       try {
-        // Get queue from registered processors
-        const queue = processorRegistrationService.registeredProcessors.get(queueName)
-        if (!queue) {
-          console.warn(`⚠️ Queue not registered: ${queueName}`)
-          results.push({ queue: queueName, error: 'Queue not registered' })
-          continue
-        }
+        // Create Bull queue instance directly
+        const queue = new Bull(queueName, { redis: redisOptions })
         
         const failedJobs = await queue.getFailed()
         console.log(`🔍 ${queueName}: ${failedJobs.length} failed jobs`)
@@ -58,6 +79,9 @@ router.get('/clean-failed', async (req, res) => {
           cleaned: cleanedCount 
         })
         totalCleaned += cleanedCount
+        
+        // Close queue connection
+        await queue.close()
         
       } catch (error) {
         console.error(`❌ Error cleaning ${queueName}:`, error.message)
@@ -96,30 +120,26 @@ router.get('/status', async (req, res) => {
     console.log('📊 Fetching queue status...')
     
     const queueNames = [
-      'ai_parsing',
-      'database_save',
-      'product_draft_creation',
-      'image_attachment',
-      'shopify_sync',
-      'status_update',
-      'data_normalization',
-      'merchant_config',
-      'ai_enrichment',
-      'shopify_payload',
-      'background_image_processing'
+      'ai-parsing',
+      'database-save',
+      'product-draft-creation',
+      'image-attachment',
+      'shopify-sync',
+      'status-update',
+      'data-normalization',
+      'merchant-config',
+      'ai-enrichment',
+      'shopify-payload',
+      'background-image-processing'
     ]
     
+    const redisOptions = getRedisOptions()
     const report = []
     
     for (const queueName of queueNames) {
       try {
-        // Get queue from registered processors
-        const queue = processorRegistrationService.registeredProcessors.get(queueName)
-        if (!queue) {
-          console.warn(`⚠️ Queue not registered: ${queueName}`)
-          report.push({ queue: queueName, error: 'Queue not registered' })
-          continue
-        }
+        // Create Bull queue instance directly
+        const queue = new Bull(queueName, { redis: redisOptions })
         
         const [counts, isPaused] = await Promise.all([
           queue.getJobCounts(),
@@ -131,6 +151,9 @@ router.get('/status', async (req, res) => {
           paused: isPaused,
           ...counts
         })
+        
+        // Close queue connection
+        await queue.close()
         
       } catch (error) {
         console.error(`❌ Error checking ${queueName}:`, error.message)
