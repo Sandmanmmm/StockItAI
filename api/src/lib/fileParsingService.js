@@ -13,13 +13,15 @@ export class FileParsingService {
   /**
    * Parse uploaded file based on its type
    */
-  async parseFile(buffer, mimeType, fileName) {
+  async parseFile(buffer, mimeType, fileName, options = {}) {
+    const { progressHelper } = options
+    
     try {
       console.log(`Starting file parsing for ${fileName} (${mimeType})`)
       
       switch (mimeType) {
         case 'application/pdf':
-          return await this.parsePDF(buffer)
+          return await this.parsePDF(buffer, progressHelper)
         
         case 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
         case 'application/vnd.ms-excel':
@@ -45,8 +47,10 @@ export class FileParsingService {
   /**
    * Parse PDF files and extract text content using pdf2json
    * Serverless-friendly PDF parser that works in Lambda/Vercel environments
+   * @param {Buffer} buffer - PDF file buffer
+   * @param {ProgressHelper} progressHelper - Progress tracker (optional)
    */
-  async parsePDF(buffer) {
+  async parsePDF(buffer, progressHelper = null) {
     try {
       // Use pdf2json which is serverless-compatible
       const PDFParser = (await import('pdf2json')).default
@@ -59,16 +63,38 @@ export class FileParsingService {
           reject(new Error(`PDF parsing failed: ${errData.parserError}`))
         })
         
-        pdfParser.on('pdfParser_dataReady', (pdfData) => {
+        pdfParser.on('pdfParser_dataReady', async (pdfData) => {
           try {
-            // Extract text from all pages
+            // Extract text from all pages with progress tracking
             const pages = pdfData.Pages || []
-            const pageTexts = pages.map(page => {
+            const totalPages = pages.length
+            
+            // PDF parsing is 0-20% of AI Parsing stage (which is 0-40% of total)
+            // So local 0-100% within parsePDF → 0-20% of AI stage → 0-8% global
+            
+            const pageTexts = []
+            
+            for (let i = 0; i < pages.length; i++) {
+              const page = pages[i]
               const texts = page.Texts || []
-              return texts.map(text => {
+              const pageText = texts.map(text => {
                 return decodeURIComponent(text.R[0].T || '')
               }).join(' ')
-            })
+              
+              pageTexts.push(pageText)
+              
+              // Publish progress for each page (0-20% of AI stage, 0-8% global)
+              if (progressHelper) {
+                const pageProgress = ((i + 1) / totalPages) * 100
+                await progressHelper.publishSubStageProgress(
+                  pageProgress,
+                  0, // Sub-stage starts at 0% of AI stage
+                  20, // Sub-stage occupies 0-20% of AI stage
+                  `Parsing page ${i + 1}/${totalPages}`,
+                  { currentPage: i + 1, totalPages }
+                )
+              }
+            }
             
             const fullText = pageTexts.join('\n\n')
             
@@ -86,6 +112,22 @@ export class FileParsingService {
             }
             
             console.log(`PDF parsed successfully: ${result.pages} pages, ${result.text.length} characters`)
+            
+            // Publish completion of PDF parsing (20% of AI stage, 8% global)
+            if (progressHelper) {
+              await progressHelper.publishSubStageProgress(
+                100,
+                0,
+                20,
+                `Extracted ${result.text.length} characters from ${result.pages} pages`,
+                { 
+                  pages: result.pages, 
+                  characters: result.text.length,
+                  confidence: result.confidence
+                }
+              )
+            }
+            
             resolve(result)
           } catch (error) {
             reject(new Error(`PDF text extraction failed: ${error.message}`))

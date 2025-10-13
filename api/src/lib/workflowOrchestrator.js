@@ -27,6 +27,7 @@ import { stageResultStore } from './stageResultStore.js'
 import { SimpleProductDraftService } from '../services/simpleProductDraftService.js'
 import { RefinementConfigService } from '../services/refinementConfigService.js'
 import { RefinementPipelineService } from './refinementPipelineService.js'
+import { ProgressHelper } from './progressHelper.js'
 
 /**
  * Convert BigInt values to strings for JSON serialization
@@ -911,7 +912,16 @@ export class WorkflowOrchestrator {
     const purchaseOrderId = workflowMetadata?.data?.purchaseOrderId || data.purchaseOrderId
     const merchantId = workflowMetadata?.data?.merchantId || data.merchantId
     
-    // 📡 SSE: Publish stage start
+    // � Create granular progress helper for AI Parsing stage (0-40% of total)
+    const progressHelper = new ProgressHelper({
+      stage: 'ai_parsing',
+      merchantId,
+      purchaseOrderId,
+      workflowId,
+      redisManager: redisManagerInstance
+    })
+    
+    // �📡 SSE: Publish stage start
     if (merchantId && purchaseOrderId) {
       await redisManagerInstance.publishMerchantStage(merchantId, {
         stage: 'ai_parsing',
@@ -924,6 +934,7 @@ export class WorkflowOrchestrator {
     
     try {
       // Update progress: Starting AI parsing
+      await progressHelper.publishProgress(5, 'Starting AI parsing')
       await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.AI_PARSING, 5)
 
       // Get file content for processing
@@ -994,8 +1005,12 @@ export class WorkflowOrchestrator {
       if (fileBuffer && !contentForProcessing) {
         console.log('🔍 Parsing file content based on MIME type:', mimeType)
         
+        await progressHelper.publishProgress(8, 'Parsing file content')
+        
         try {
-          const parsedResult = await this.fileParsingService.parseFile(fileBuffer, mimeType, fileName)
+          const parsedResult = await this.fileParsingService.parseFile(fileBuffer, mimeType, fileName, {
+            progressHelper
+          })
           
           // Handle different content types from parsing
           if (parsedResult.text && parsedResult.text.length > 0) {
@@ -1059,6 +1074,7 @@ export class WorkflowOrchestrator {
         job.progress(30)
         
         // Update DB progress: AI analyzing
+        await progressHelper.publishProgress(40, 'Starting AI analysis')
         await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.AI_PARSING, 30)
         
         // Use original file buffer for AI service if available, otherwise use processed content
@@ -1068,6 +1084,7 @@ export class WorkflowOrchestrator {
           fileType: fileExtension,
           mimeType, // Pass the original MIME type
           isProcessedContent: !fileBuffer, // Flag to indicate if this is already processed content
+          progressHelper, // 📊 Pass progress helper for granular chunk tracking
           ...options
         })
         
@@ -1097,6 +1114,10 @@ export class WorkflowOrchestrator {
         job.progress(90)
         
         // Update DB progress: AI parsing complete
+        await progressHelper.publishProgress(95, 'AI parsing complete', {
+          lineItems: aiResult.lineItems?.length || 0,
+          confidence: aiResult.confidence?.overall || 0
+        })
         await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.AI_PARSING, 90)
         
         // Save AI result to stage store and prepare next stage data
@@ -1131,7 +1152,13 @@ export class WorkflowOrchestrator {
         
         job.progress(100)
         
-        // 📡 SSE: Publish completion
+        // � Complete stage progress
+        await progressHelper.publishStageComplete('AI parsing stage complete', {
+          lineItems: aiResult.lineItems?.length || 0,
+          confidence: aiResult.confidence?.overall || 0
+        })
+        
+        // �📡 SSE: Publish completion
         if (merchantId && purchaseOrderId) {
           await redisManagerInstance.publishMerchantCompletion(merchantId, {
             stage: 'ai_parsing',
@@ -1205,10 +1232,19 @@ export class WorkflowOrchestrator {
     
     // Get purchaseOrderId for progress updates
     const purchaseOrderId = data.purchaseOrderId
-    await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.DATABASE_SAVE, 10)
-    
-    // Get merchant ID early for SSE
     const merchantId = data.merchantId
+    
+    // 📊 Create granular progress helper for Database Save stage (40-60% of total)
+    const progressHelper = new ProgressHelper({
+      stage: 'database_save',
+      merchantId,
+      purchaseOrderId,
+      workflowId,
+      redisManager: redisManagerInstance
+    })
+    
+    await progressHelper.publishProgress(5, 'Starting database save')
+    await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.DATABASE_SAVE, 10)
     
     // 📡 SSE: Publish stage start
     if (merchantId && purchaseOrderId) {
@@ -1242,6 +1278,9 @@ export class WorkflowOrchestrator {
       job.progress(30)
       
       // Update DB progress: Saving to database
+      await progressHelper.publishProgress(10, 'Validating AI results', {
+        lineItems: aiResult.extractedData?.lineItems?.length || 0
+      })
       await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.DATABASE_SAVE, 30)
       
       // 📡 SSE: Publish progress - validating data
@@ -1264,7 +1303,8 @@ export class WorkflowOrchestrator {
           uploadId,
           workflowId,
           purchaseOrderId: data.purchaseOrderId, // Pass the original PO ID
-          source: 'automatic_processing'
+          source: 'automatic_processing',
+          progressHelper // 📊 Pass progress helper for per-item tracking
         }
       )
       
@@ -1272,7 +1312,13 @@ export class WorkflowOrchestrator {
       console.log('   Purchase Order ID:', dbResult.purchaseOrder?.id)
       console.log('   Line Items:', dbResult.lineItems?.length || 0)
       
-      // 📡 SSE: Publish progress - database saved
+      // � Progress: Database save complete
+      await progressHelper.publishProgress(90, `Saved ${dbResult.lineItems?.length || 0} line items`, {
+        lineItems: dbResult.lineItems?.length || 0,
+        purchaseOrderId: dbResult.purchaseOrder?.id
+      })
+      
+      // �📡 SSE: Publish progress - database saved
       if (merchantId && purchaseOrderId) {
         await redisManagerInstance.publishMerchantProgress(merchantId, {
           poId: purchaseOrderId,
@@ -1365,7 +1411,13 @@ export class WorkflowOrchestrator {
       
       job.progress(100)
       
-      // 📡 SSE: Publish completion
+      // � Complete stage progress
+      await progressHelper.publishStageComplete('Database save stage complete', {
+        lineItems: dbResult.lineItems?.length || 0,
+        purchaseOrderId: dbResult.purchaseOrder.id
+      })
+      
+      // �📡 SSE: Publish completion
       if (merchantId && dbResult.purchaseOrder?.id) {
         await redisManagerInstance.publishMerchantCompletion(merchantId, {
           stage: 'database_save',

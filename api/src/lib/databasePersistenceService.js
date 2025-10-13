@@ -24,6 +24,9 @@ export class DatabasePersistenceService {
     const startTime = Date.now()
     const maxRetries = 3
     let lastError = null
+    
+    // Extract progressHelper from options
+    const progressHelper = options.progressHelper || null
 
     // Retry loop for transient connection errors
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -125,13 +128,33 @@ export class DatabasePersistenceService {
         
         // 4. Create line items (fresh or initial creation)
         const step3Start = Date.now()
+        
+        // 📊 Progress: Starting line items creation (20% of DB stage, 44% global)
+        if (progressHelper) {
+          await progressHelper.publishProgress(
+            20,
+            `Saving ${aiResult.extractedData?.lineItems?.length || 0} line items`,
+            { totalItems: aiResult.extractedData?.lineItems?.length || 0 }
+          )
+        }
+        
         const lineItems = await this.createLineItems(
           tx,
           aiResult.extractedData?.lineItems || aiResult.extractedData?.items || [],
           purchaseOrder.id,
-          aiResult.confidence?.lineItems || {}
+          aiResult.confidence?.lineItems || {},
+          progressHelper // 📊 Pass progress helper
         )
         console.log(`⏱️ [${txId}] Step 3 (CREATE ${lineItems.length} line items) took ${Date.now() - step3Start}ms`)
+        
+        // 📊 Progress: Line items saved (80% of DB stage, 56% global)
+        if (progressHelper) {
+          await progressHelper.publishProgress(
+            80,
+            `Saved ${lineItems.length} line items`,
+            { savedItems: lineItems.length }
+          )
+        }
         
         console.log(`✅ Line items created in transaction:`)
         console.log(`   Count: ${lineItems.length}`)
@@ -754,7 +777,7 @@ export class DatabasePersistenceService {
   /**
    * Create line items for purchase order
    */
-  async createLineItems(tx, lineItemsData, purchaseOrderId, lineItemsConfidence) {
+  async createLineItems(tx, lineItemsData, purchaseOrderId, lineItemsConfidence, progressHelper = null) {
     if (!Array.isArray(lineItemsData) || lineItemsData.length === 0) {
       console.log('⚠️ No line items to create')
       return []
@@ -765,6 +788,15 @@ export class DatabasePersistenceService {
     // NEW: single createMany() with 50 items = 1 DB call = ~500ms
     console.log(`⚡ [BATCH CREATE] Creating ${lineItemsData.length} line items in single batch operation...`)
     const batchStart = Date.now()
+    
+    // 📊 Progress: Preparing line items data (30% of DB stage, 46% global)
+    if (progressHelper) {
+      await progressHelper.publishProgress(
+        30,
+        `Preparing ${lineItemsData.length} line items for save`,
+        { totalItems: lineItemsData.length }
+      )
+    }
     
     // Prepare all line item data
     const lineItemsToCreate = lineItemsData.map((item, i) => {
@@ -798,11 +830,29 @@ export class DatabasePersistenceService {
     
     console.log(`✅ [BATCH CREATE] Created ${result.count} line items in ${Date.now() - batchStart}ms`)
     
+    // 📊 Progress: Batch insert complete (60% of DB stage, 52% global)
+    if (progressHelper) {
+      await progressHelper.publishProgress(
+        60,
+        `Batch saved ${result.count} line items`,
+        { savedItems: result.count }
+      )
+    }
+    
     // Fetch the created items to return them (createMany doesn't return created records)
     const lineItems = await tx.pOLineItem.findMany({
       where: { purchaseOrderId },
       orderBy: { createdAt: 'asc' }
     })
+    
+    // 📊 Progress: Verifying line items (70% of DB stage, 54% global)
+    if (progressHelper) {
+      await progressHelper.publishProgress(
+        70,
+        `Verified ${lineItems.length} line items`,
+        { verifiedItems: lineItems.length }
+      )
+    }
     
     console.log(`  📦 Sample items: ${lineItems.slice(0, 2).map(li => `${li.productName} x${li.quantity}`).join(', ')}`)
     

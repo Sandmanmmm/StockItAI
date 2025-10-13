@@ -115,6 +115,9 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
     try {
       console.log(`🤖 Starting AI parsing for workflow ${workflowId}`)
       
+      // Store progressHelper for use in chunk processing
+      this.progressHelper = options.progressHelper || null
+      
       let fileType
       
       // Use provided mimeType if available and not already processed content
@@ -749,6 +752,17 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
     
     console.log(`📄 Created ${chunks.length} chunks for processing`)
     
+    // 📊 Progress: Chunking complete (20% of AI stage, 8% global)
+    if (this.progressHelper) {
+      await this.progressHelper.publishSubStageProgress(
+        100,
+        10, // Chunking is 10-20% of AI stage
+        10, // 10% range
+        `Created ${chunks.length} chunks for AI processing`,
+        { chunkCount: chunks.length, totalChars: text.length }
+      )
+    }
+    
     // Process first chunk to get the structure
     console.log('🔍 Processing first chunk to establish document structure...')
     
@@ -762,6 +776,17 @@ Document Content (Chunk 1/${chunks.length}):\n${chunks[0]}`
     
     let firstResponse
     try {
+      // 📊 Progress: Processing first chunk (20-30% of AI stage, 8-12% global)
+      if (this.progressHelper) {
+        await this.progressHelper.publishSubStageProgress(
+          5,
+          20, // OpenAI processing is 20-80% of AI stage
+          60, // 60% range
+          `Processing chunk 1/${chunks.length} with OpenAI API`,
+          { currentChunk: 1, totalChunks: chunks.length }
+        )
+      }
+      
       firstResponse = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [{ role: "user", content: firstChunkPrompt }],
@@ -794,6 +819,23 @@ Document Content (Chunk 1/${chunks.length}):\n${chunks[0]}`
       if (firstResult.lineItems && Array.isArray(firstResult.lineItems)) {
         allLineItems.push(...firstResult.lineItems)
         console.log(`📋 First chunk: extracted ${firstResult.lineItems.length} line items`)
+        
+        // 📊 Progress: First chunk complete
+        if (this.progressHelper) {
+          const chunkProgress = (1 / chunks.length) * 100
+          await this.progressHelper.publishSubStageProgress(
+            chunkProgress,
+            20, // OpenAI processing is 20-80% of AI stage
+            60, // 60% range
+            `Chunk 1/${chunks.length} complete: extracted ${firstResult.lineItems.length} items`,
+            { 
+              currentChunk: 1, 
+              totalChunks: chunks.length, 
+              itemsExtracted: firstResult.lineItems.length,
+              totalItems: allLineItems.length
+            }
+          )
+        }
       }
     } catch (error) {
       console.warn('⚠️ Could not parse first chunk response, will try other chunks')
@@ -803,6 +845,18 @@ Document Content (Chunk 1/${chunks.length}):\n${chunks[0]}`
     // Process subsequent chunks to extract additional line items
     for (let i = 1; i < chunks.length; i++) {
       console.log(`🔍 Processing chunk ${i + 1}/${chunks.length}...`)
+      
+      // 📊 Progress: Processing chunk i+1
+      if (this.progressHelper) {
+        const chunkProgress = ((i + 0.5) / chunks.length) * 100
+        await this.progressHelper.publishSubStageProgress(
+          chunkProgress,
+          20, // OpenAI processing is 20-80% of AI stage
+          60, // 60% range
+          `Processing chunk ${i + 1}/${chunks.length} with OpenAI API`,
+          { currentChunk: i + 1, totalChunks: chunks.length }
+        )
+      }
       
       const chunkPrompt = `Extract ONLY the line items from this portion of a purchase order document.
 This is chunk ${i + 1} of ${chunks.length} from a larger document.
@@ -828,6 +882,23 @@ Document Content (Chunk ${i + 1}/${chunks.length}):\n${chunks[i]}`
         if (chunkResult.lineItems && Array.isArray(chunkResult.lineItems)) {
           allLineItems.push(...chunkResult.lineItems)
           console.log(`📋 Chunk ${i + 1}: extracted ${chunkResult.lineItems.length} line items (total: ${allLineItems.length})`)
+          
+          // 📊 Progress: Chunk complete
+          if (this.progressHelper) {
+            const chunkProgress = ((i + 1) / chunks.length) * 100
+            await this.progressHelper.publishSubStageProgress(
+              chunkProgress,
+              20, // OpenAI processing is 20-80% of AI stage
+              60, // 60% range
+              `Chunk ${i + 1}/${chunks.length} complete: extracted ${chunkResult.lineItems.length} items`,
+              { 
+                currentChunk: i + 1, 
+                totalChunks: chunks.length, 
+                itemsExtracted: chunkResult.lineItems.length,
+                totalItems: allLineItems.length
+              }
+            )
+          }
         }
         
         // Add small delay between API calls to avoid rate limiting
@@ -843,6 +914,17 @@ Document Content (Chunk ${i + 1}/${chunks.length}):\n${chunks[i]}`
     
     // Merge the results - use first chunk structure but with all line items
     try {
+      // 📊 Progress: Merging results (80-90% of AI stage, 32-36% global)
+      if (this.progressHelper) {
+        await this.progressHelper.publishSubStageProgress(
+          50,
+          80, // Merging is 80-90% of AI stage
+          10, // 10% range
+          `Merging ${allLineItems.length} items from ${chunks.length} chunks`,
+          { totalItems: allLineItems.length, chunkCount: chunks.length }
+        )
+      }
+      
       const rawFinalContent = firstResponse.choices[0]?.message?.content || '{}'
       const cleanFinalContent = this._stripMarkdownCodeBlocks(rawFinalContent)
       const finalResult = JSON.parse(cleanFinalContent)
@@ -851,6 +933,17 @@ Document Content (Chunk ${i + 1}/${chunks.length}):\n${chunks[i]}`
       if (allLineItems.length > 0) {
         finalResult.lineItems = allLineItems
         console.log(`✅ Multi-chunk processing complete: merged ${allLineItems.length} total line items`)
+        
+        // 📊 Progress: Merging complete (90% of AI stage, 36% global)
+        if (this.progressHelper) {
+          await this.progressHelper.publishSubStageProgress(
+            100,
+            80, // Merging is 80-90% of AI stage
+            10, // 10% range
+            `Merged ${allLineItems.length} items successfully`,
+            { totalItems: allLineItems.length, chunkCount: chunks.length }
+          )
+        }
       }
       
       // Create a new response object with the merged content

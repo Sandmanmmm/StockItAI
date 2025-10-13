@@ -250,42 +250,66 @@ export function RealTimeFeedback() {
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: 20 }}
                       transition={{ delay: index * 0.05 }}
-                      className="group relative flex gap-4 p-4 mb-3 bg-white/80 border-2 border-slate-200/60 rounded-xl hover:border-blue-300/60 hover:shadow-md transition-all"
+                      className="group relative flex gap-4 p-4 mb-3 bg-gradient-to-r from-white to-slate-50/30 border-2 border-slate-200/60 rounded-xl hover:border-blue-300/60 hover:shadow-lg transition-all"
                     >
-                      {/* Timeline indicator */}
+                      {/* Timeline indicator with enhanced styling */}
                       <div className="flex flex-col items-center gap-2">
-                        <div className="w-10 h-10 bg-gradient-to-br from-slate-100 to-slate-200 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                        <div className="relative w-10 h-10 bg-gradient-to-br from-slate-100 to-slate-200 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
                           {getActivityIcon(log.type)}
+                          {log.type === 'processing' && (
+                            <div className="absolute -inset-1 bg-blue-400/20 rounded-xl animate-pulse" />
+                          )}
                         </div>
                         {index < activityLogs.length - 1 && (
-                          <div className="w-0.5 h-full bg-slate-200" />
+                          <div className="w-0.5 flex-1 bg-gradient-to-b from-slate-300 to-slate-100" />
                         )}
                       </div>
 
-                      {/* Content */}
+                      {/* Enhanced Content */}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Badge variant="outline" className="font-mono text-xs">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Badge 
+                            variant="outline" 
+                            className="font-mono text-xs border-2 font-bold"
+                          >
                             {log.poNumber}
                           </Badge>
-                          <span className="text-xs text-slate-500">{formatTime(log.timestamp)}</span>
+                          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                            <Clock className="w-3 h-3" />
+                            <span className="font-medium">{formatTime(log.timestamp)}</span>
+                          </div>
                         </div>
-                        <p className="font-semibold text-slate-800 mb-1">{log.message}</p>
+                        
+                        <p className="font-semibold text-slate-800 mb-1.5 leading-relaxed">
+                          {log.message}
+                        </p>
+                        
                         {log.details && (
-                          <p className="text-sm text-slate-600">{log.details}</p>
+                          <div className="flex items-start gap-2 mt-2 p-2 bg-slate-100/50 rounded-lg border border-slate-200/60">
+                            <ArrowRight className="w-3.5 h-3.5 text-slate-500 mt-0.5 flex-shrink-0" />
+                            <p className="text-sm text-slate-600 leading-relaxed">{log.details}</p>
+                          </div>
                         )}
                       </div>
 
-                      {/* Status badge */}
-                      <div>
+                      {/* Enhanced Status badge */}
+                      <div className="flex-shrink-0">
                         <Badge 
                           variant={log.type === 'success' ? 'default' : 'secondary'}
-                          className={
-                            log.type === 'success' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' :
-                            log.type === 'error' ? 'bg-red-100 text-red-700 hover:bg-red-200' :
-                            'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                          }
+                          className={`
+                            font-medium capitalize border-2 shadow-sm
+                            ${log.type === 'success' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-emerald-300' : ''}
+                            ${log.type === 'error' ? 'bg-red-100 text-red-700 hover:bg-red-200 border-red-300' : ''}
+                            ${log.type === 'processing' ? 'bg-blue-100 text-blue-700 hover:bg-blue-200 border-blue-300' : ''}
+                            ${log.type === 'sync' ? 'bg-purple-100 text-purple-700 hover:bg-purple-200 border-purple-300' : ''}
+                            ${log.type === 'upload' ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border-indigo-300' : ''}
+                          `}
                         >
+                          {log.type === 'processing' && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
+                          {log.type === 'success' && <CheckCircle2 className="w-3 h-3 mr-1" />}
+                          {log.type === 'error' && <XCircle className="w-3 h-3 mr-1" />}
+                          {log.type === 'sync' && <Database className="w-3 h-3 mr-1" />}
+                          {log.type === 'upload' && <Upload className="w-3 h-3 mr-1" />}
                           {log.type}
                         </Badge>
                       </div>
@@ -312,26 +336,100 @@ export function RealTimeFeedback() {
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.1 }}
-                      className="p-4 bg-white/80 border-2 border-slate-200/60 rounded-xl hover:border-blue-300/60 hover:shadow-md transition-all"
+                      className="p-5 bg-gradient-to-br from-white to-slate-50/50 border-2 border-slate-200/60 rounded-xl hover:border-blue-300/60 hover:shadow-lg transition-all"
                     >
-                      <div className="flex items-center justify-between mb-3">
+                      {/* Header */}
+                      <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-3">
-                          {getStatusIcon(po.status)}
+                          <div className="relative">
+                            {getStatusIcon(po.status)}
+                            {po.status === 'processing' && (
+                              <div className="absolute -inset-1 bg-blue-400/20 rounded-full animate-ping" />
+                            )}
+                          </div>
                           <div>
-                            <h4 className="font-bold text-slate-800">{po.poNumber}</h4>
-                            <p className="text-xs text-slate-500">{po.stage}</p>
+                            <h4 className="font-bold text-slate-800 text-lg">{po.poNumber}</h4>
+                            <p className="text-xs text-slate-500 font-medium flex items-center gap-1.5">
+                              <Activity className="w-3 h-3" />
+                              {po.stage}
+                            </p>
                           </div>
                         </div>
-                        <Badge variant="outline" className="font-medium">
-                          {po.itemsProcessed}/{po.totalItems} items
-                        </Badge>
+                        <div className="text-right">
+                          <Badge 
+                            variant="outline" 
+                            className="font-mono text-base font-bold border-2 px-3 py-1"
+                          >
+                            {po.itemsProcessed}/{po.totalItems}
+                          </Badge>
+                          <p className="text-xs text-slate-500 mt-1">items</p>
+                        </div>
                       </div>
 
-                      <Progress value={po.progress} className="h-2 mb-2" />
-                      
-                      <div className="flex items-center justify-between text-xs text-slate-600">
-                        <span>{po.progress}% complete</span>
-                        <span>{formatTime(po.uploadedAt)}</span>
+                      {/* Enhanced Progress Bar with Gradient */}
+                      <div className="space-y-2 mb-3">
+                        <div className="relative">
+                          <Progress 
+                            value={po.progress} 
+                            className="h-3 bg-slate-200/50"
+                          />
+                          {/* Progress percentage overlay */}
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <span className="text-xs font-bold text-white drop-shadow-md">
+                              {po.progress}%
+                            </span>
+                          </div>
+                        </div>
+                        
+                        {/* Stage indicators */}
+                        <div className="flex items-center justify-between text-xs">
+                          <div className={`flex items-center gap-1.5 ${po.progress >= 0 ? 'text-blue-600 font-semibold' : 'text-slate-400'}`}>
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>AI Parse</span>
+                            {po.progress >= 40 && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />}
+                          </div>
+                          
+                          <div className={`flex items-center gap-1.5 ${po.progress >= 40 && po.progress < 60 ? 'text-blue-600 font-semibold' : po.progress >= 60 ? 'text-slate-600' : 'text-slate-400'}`}>
+                            <Database className="w-3.5 h-3.5" />
+                            <span>Save DB</span>
+                            {po.progress >= 60 && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />}
+                          </div>
+                          
+                          <div className={`flex items-center gap-1.5 ${po.progress >= 60 && po.progress < 100 ? 'text-blue-600 font-semibold' : po.progress >= 100 ? 'text-emerald-600 font-semibold' : 'text-slate-400'}`}>
+                            <Package className="w-3.5 h-3.5" />
+                            <span>Shopify</span>
+                            {po.progress >= 100 && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Detailed Status Footer */}
+                      <div className="flex items-center justify-between pt-3 border-t border-slate-200/60">
+                        <div className="flex items-center gap-2 text-xs">
+                          <Clock className="w-3.5 h-3.5 text-slate-500" />
+                          <span className="text-slate-600 font-medium">{formatTime(po.uploadedAt)}</span>
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                          {po.status === 'processing' && (
+                            <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-200 border-blue-200">
+                              <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                              Processing
+                            </Badge>
+                          )}
+                          {po.status === 'completed' && (
+                            <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-emerald-200">
+                              <CheckCircle2 className="w-3 h-3 mr-1" />
+                              Complete
+                            </Badge>
+                          )}
+                          {po.status === 'syncing' && (
+                            <Badge className="bg-purple-100 text-purple-700 hover:bg-purple-200 border-purple-200">
+                              <Database className="w-3 h-3 mr-1 animate-pulse" />
+                              Syncing
+                            </Badge>
+                          )}
+                        </div>
                       </div>
                     </motion.div>
                   ))}
