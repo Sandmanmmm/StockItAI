@@ -964,7 +964,7 @@ export class WorkflowOrchestrator {
     try {
       // Update progress: Starting AI parsing
       await progressHelper.publishProgress(5, 'Starting AI parsing')
-      await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.AI_PARSING, 5)
+      // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
 
       // Get file content for processing
       let contentForProcessing
@@ -1091,8 +1091,7 @@ export class WorkflowOrchestrator {
       
       job.progress(10)
       
-      // Update DB progress: Parsing document
-      await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.AI_PARSING, 10)
+      // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
       
       try {
         // Determine which parsing service to use based on file type
@@ -1102,9 +1101,9 @@ export class WorkflowOrchestrator {
         // Parse document with AI service
         job.progress(30)
         
-        // Update DB progress: AI analyzing
+        // Update progress: AI analyzing
         await progressHelper.publishProgress(40, 'Starting AI analysis')
-        await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.AI_PARSING, 30)
+        // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
         
         // Use original file buffer for AI service if available, otherwise use processed content
         const aiServiceInput = fileBuffer || contentForProcessing
@@ -1142,12 +1141,12 @@ export class WorkflowOrchestrator {
         
         job.progress(90)
         
-        // Update DB progress: AI parsing complete
+        // Update progress: AI parsing complete
         await progressHelper.publishProgress(95, 'AI parsing complete', {
           lineItems: aiResult.lineItems?.length || 0,
           confidence: aiResult.confidence?.overall || 0
         })
-        await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.AI_PARSING, 90)
+        // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
         
         // Save AI result to stage store and prepare next stage data
         const stageResult = {
@@ -1273,7 +1272,7 @@ export class WorkflowOrchestrator {
     })
     
     await progressHelper.publishProgress(5, 'Starting database save')
-    await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.DATABASE_SAVE, 10)
+    // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
     
     // 📡 SSE: Publish stage start
     if (merchantId && purchaseOrderId) {
@@ -1306,11 +1305,11 @@ export class WorkflowOrchestrator {
       
       job.progress(30)
       
-      // Update DB progress: Saving to database
+      // Update progress: Validating AI results
       await progressHelper.publishProgress(10, 'Validating AI results', {
         lineItems: aiResult.extractedData?.lineItems?.length || 0
       })
-      await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.DATABASE_SAVE, 30)
+      // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
       
       // 📡 SSE: Publish progress - validating data
       if (merchantId && purchaseOrderId) {
@@ -1360,9 +1359,7 @@ export class WorkflowOrchestrator {
       
       job.progress(90)
       
-      // Update DB progress: Database save complete
-      const newPurchaseOrderId = dbResult.purchaseOrder?.id || purchaseOrderId
-      await this.updatePurchaseOrderProgress(newPurchaseOrderId, WORKFLOW_STAGES.DATABASE_SAVE, 90)
+      // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
       
       // Update workflow metadata (non-fatal if fails)
       try {
@@ -1428,13 +1425,7 @@ export class WorkflowOrchestrator {
       // Product draft creation has all the logic needed for pricing, refinement, etc.
       console.log('🎯 Skipping intermediate stages - proceeding directly to Product Draft Creation')
       
-      // Update PO progress to show we're moving to next stage
-      await this.updatePurchaseOrderProgress(
-        dbResult.purchaseOrder.id, 
-        'Creating product drafts for refinement...', 
-        40,
-        'Product draft creation starting...'
-      )
+      // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
       
       await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION, enrichedNextStageData)
       
@@ -1561,13 +1552,7 @@ export class WorkflowOrchestrator {
       job.progress(30)
       
       // Update DB progress: Creating product drafts
-      await this.updatePurchaseOrderProgress(
-        purchaseOrder.id, 
-        WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION, 
-        30,
-        0,
-        lineItemsFromDb.length
-      )
+      // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
 
       // Create product drafts for each line item
       const productDrafts = []
@@ -1702,13 +1687,7 @@ export class WorkflowOrchestrator {
         
         // Update DB progress with item counts
         const currentProgress = Math.round(30 + (index / lineItemsFromDb.length) * 50)
-        await this.updatePurchaseOrderProgress(
-          purchaseOrder.id,
-          WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION,
-          currentProgress,
-          index + 1,
-          lineItemsFromDb.length
-        )
+        // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
       }
 
       console.log(`🎨 Successfully created ${productDrafts.length} product drafts`)
@@ -1745,13 +1724,7 @@ export class WorkflowOrchestrator {
       // Continue to image search and attachment stage
       console.log('🎯 Product Draft Creation completed - Proceeding to image search...')
       
-      // Update PO progress to show transition to next stage
-      await this.updatePurchaseOrderProgress(
-        purchaseOrder.id,
-        'Searching and attaching product images...',
-        60,
-        `Found ${productDrafts.length} products, now searching for images...`
-      )
+      // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
       
       // Schedule image search stage to find and attach product images
       await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.IMAGE_ATTACHMENT, enrichedNextStageData)
@@ -1857,8 +1830,7 @@ export class WorkflowOrchestrator {
     // LEGACY MODE: Synchronous image processing (slow but blocking)
     console.log('⏳ SYNC MODE: Processing images synchronously (this may take 2-3 minutes)...')
     
-    // Update DB progress: Starting image search
-    await this.updatePurchaseOrderProgress(purchaseOrderId, WORKFLOW_STAGES.IMAGE_ATTACHMENT, 10)
+    // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
     
     try {
       if (!purchaseOrderId) {
@@ -1922,14 +1894,7 @@ export class WorkflowOrchestrator {
       
       job.progress(20)
       
-      // Update DB progress: Searching for images
-      await this.updatePurchaseOrderProgress(
-        purchaseOrderId,
-        WORKFLOW_STAGES.IMAGE_ATTACHMENT,
-        20,
-        0,
-        draftsToProcess.length
-      )
+      // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
 
       // Import the image processing service
       const { ImageProcessingService } = await import('./imageProcessingService.js')
@@ -2007,13 +1972,7 @@ export class WorkflowOrchestrator {
           
           // Update DB progress with item counts
           const currentProgress = Math.round(20 + (processedCount / draftsToProcess.length) * 60)
-          await this.updatePurchaseOrderProgress(
-            purchaseOrderId,
-            WORKFLOW_STAGES.IMAGE_ATTACHMENT,
-            currentProgress,
-            processedCount,
-            draftsToProcess.length
-          )
+          // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
 
         } catch (itemError) {
           console.error(`   ❌ Failed to process images for draft ${draft.id}:`, itemError.message)
@@ -2137,13 +2096,7 @@ export class WorkflowOrchestrator {
       // Continue to status update
       console.log('🎯 Image Attachment completed - Proceeding to status update...')
       
-      // Update PO progress to show finalizing
-      await this.updatePurchaseOrderProgress(
-        purchaseOrderId,
-        'Finalizing purchase order...',
-        90,
-        `Images attached. Processing final status update...`
-      )
+      // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
       
       await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.STATUS_UPDATE, enrichedNextStageData)
 
