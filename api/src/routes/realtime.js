@@ -1,7 +1,7 @@
 import express from 'express'
 import { verifyShopifyRequest } from '../lib/auth.js'
 import { redisManager } from '../lib/redisManager.js'
-import { initializePrisma } from '../lib/prisma.js'
+import { db } from '../lib/db.js'
 
 const router = express.Router()
 
@@ -20,7 +20,7 @@ async function verifySSEConnection(req, res, next) {
     }
     
     // Get merchant from database
-    const prisma = await initializePrisma()
+    const prisma = await db.getClient()
     const merchant = await prisma.merchant.findFirst({
       where: {
         OR: [
