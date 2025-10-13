@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { supabase, TABLES, CHANNELS } from '@/lib/supabaseClient'
 import { authenticatedRequest } from '@/lib/shopifyApiService'
 import type { RealtimeChannel } from '@supabase/supabase-js'
+import { useSSEUpdates } from './useSSEUpdates'
 
 export interface PipelineStatus {
   queued: number
@@ -44,6 +45,162 @@ export function useRealtimePOData() {
   const [activePOs, setActivePOs] = useState<POProgress[]>([])
   const [isConnected, setIsConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // 🚀 NEW: Use SSE for real-time updates
+  const { 
+    events: sseEvents, 
+    connectionStatus: sseConnectionStatus,
+    lastHeartbeat 
+  } = useSSEUpdates({
+    onProgress: (data) => {
+      console.log('📊 SSE Progress received:', data)
+      
+      // Update active PO progress in real-time
+      setActivePOs(prev => prev.map(po => {
+        if (po.id === data.poId) {
+          return {
+            ...po,
+            progress: data.progress,
+            stage: data.message,
+            status: 'processing'
+          }
+        }
+        return po
+      }))
+      
+      // Add to activity logs
+      const newLog: ActivityLog = {
+        id: `${data.poId}-${Date.now()}`,
+        timestamp: data.timestamp || new Date(),
+        type: 'processing',
+        poNumber: data.poId.substring(0, 8),
+        message: data.message,
+        details: `Progress: ${data.progress}%`
+      }
+      setActivityLogs(prev => [newLog, ...prev].slice(0, 50))
+    },
+    
+    onStage: (data) => {
+      console.log('🎯 SSE Stage received:', data)
+      
+      // Update active PO stage
+      setActivePOs(prev => prev.map(po => {
+        if (po.id === data.poId) {
+          let progress = po.progress
+          let status = po.status
+          
+          // Map stage to progress
+          if (data.stage === 'ai_parsing') {
+            progress = data.status === 'started' ? 10 : progress
+            status = 'processing'
+          } else if (data.stage === 'database_save') {
+            progress = data.status === 'started' ? 50 : progress
+            status = 'processing'
+          } else if (data.stage === 'shopify_sync') {
+            progress = data.status === 'started' ? 80 : progress
+            status = 'syncing'
+          }
+          
+          return {
+            ...po,
+            progress,
+            stage: data.message,
+            status
+          }
+        }
+        return po
+      }))
+      
+      // Add to activity logs
+      let logType: ActivityLog['type'] = 'processing'
+      if (data.stage === 'shopify_sync') {
+        logType = 'sync'
+      }
+      
+      const newLog: ActivityLog = {
+        id: `${data.poId}-${Date.now()}`,
+        timestamp: data.timestamp || new Date(),
+        type: logType,
+        poNumber: data.poId.substring(0, 8),
+        message: data.message,
+        details: `Stage: ${data.stage} - ${data.status}`
+      }
+      setActivityLogs(prev => [newLog, ...prev].slice(0, 50))
+    },
+    
+    onCompletion: (data) => {
+      console.log('🎉 SSE Completion received:', data)
+      
+      // Update active PO to completed
+      setActivePOs(prev => prev.map(po => {
+        if (po.id === data.poId) {
+          return {
+            ...po,
+            progress: 100,
+            stage: 'Completed successfully',
+            status: 'completed'
+          }
+        }
+        return po
+      }))
+      
+      // Add to activity logs
+      const newLog: ActivityLog = {
+        id: `${data.poId}-${Date.now()}`,
+        timestamp: data.timestamp || new Date(),
+        type: 'success',
+        poNumber: data.poId.substring(0, 8),
+        message: `Completed ${data.stage}`,
+        details: data.lineItems ? `Processed ${data.lineItems} line items` : undefined
+      }
+      setActivityLogs(prev => [newLog, ...prev].slice(0, 50))
+      
+      // Refresh pipeline status to get updated counts
+      fetchPipelineStatus()
+    },
+    
+    onError: (data) => {
+      console.log('❌ SSE Error received:', data)
+      
+      // Update active PO to failed
+      setActivePOs(prev => prev.map(po => {
+        if (po.id === data.poId) {
+          return {
+            ...po,
+            progress: 0,
+            stage: 'Processing failed',
+            status: 'failed'
+          }
+        }
+        return po
+      }))
+      
+      // Add to activity logs
+      const newLog: ActivityLog = {
+        id: `${data.poId}-${Date.now()}`,
+        timestamp: data.timestamp || new Date(),
+        type: 'error',
+        poNumber: data.poId.substring(0, 8),
+        message: `Error in ${data.stage}`,
+        details: data.error
+      }
+      setActivityLogs(prev => [newLog, ...prev].slice(0, 50))
+      
+      // Refresh pipeline status
+      fetchPipelineStatus()
+    }
+  })
+  
+  // Update connection status based on SSE
+  useEffect(() => {
+    setIsConnected(sseConnectionStatus === 'connected')
+    
+    if (sseConnectionStatus === 'error') {
+      setError('Real-time connection error. Using fallback polling...')
+    } else if (sseConnectionStatus === 'connected') {
+      setError(null)
+    }
+  }, [sseConnectionStatus])
 
   // Fetch initial pipeline status from API
   const fetchPipelineStatus = useCallback(async () => {
@@ -304,11 +461,16 @@ export function useRealtimePOData() {
 
     setupRealtimeSubscription()
 
-    // Set up automatic polling as backup (every 5 seconds for active POs)
+    // Set up automatic polling as backup (every 30 seconds instead of 5)
+    // SSE handles real-time updates, polling is just a fallback
     const pollingInterval = setInterval(() => {
-      fetchActivePOs()
-      fetchActivityLogs()
-    }, 5000)
+      // Only poll if SSE is not connected
+      if (sseConnectionStatus !== 'connected') {
+        console.log('⚠️ SSE disconnected, using fallback polling...')
+        fetchActivePOs()
+        fetchActivityLogs()
+      }
+    }, 30000) // Increased from 5s to 30s since SSE provides real-time updates
 
     // Cleanup on unmount
     return () => {
@@ -317,7 +479,7 @@ export function useRealtimePOData() {
       }
       clearInterval(pollingInterval)
     }
-  }, [fetchPipelineStatus, fetchActivePOs, fetchActivityLogs])
+  }, [fetchPipelineStatus, fetchActivePOs, fetchActivityLogs, sseConnectionStatus])
 
   // Refresh data manually
   const refresh = useCallback(async () => {
