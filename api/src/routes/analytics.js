@@ -34,11 +34,13 @@ router.get('/dashboard', async (req, res) => {
         where: { merchantId: merchant.id }
       }),
       
-      // Pending purchase orders
+      // Active purchase orders (pending, processing, analyzing, syncing)
       prisma.purchaseOrder.count({
         where: { 
           merchantId: merchant.id,
-          status: 'pending'
+          status: {
+            in: ['pending', 'processing', 'analyzing', 'syncing']
+          }
         }
       }),
       
