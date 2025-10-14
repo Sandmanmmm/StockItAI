@@ -173,12 +173,20 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
         console.log(`📊 MIME type: ${fileType.mimeType}`)
         
         try {
-          // Create timeout promise (60s - optimized for low detail mode)
+          // Create AbortController for proper request cancellation
+          const controller = new AbortController()
+          let timeoutId
+          
+          // Create timeout that actually aborts the request
           const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Vision API timeout after 60 seconds')), 60000)
+            timeoutId = setTimeout(() => {
+              console.log('⏰ Vision API timeout reached (60s), aborting request...')
+              controller.abort()
+              reject(new Error('Vision API timeout after 60 seconds'))
+            }, 60000)
           })
           
-          // Create API call promise
+          // Create API call promise with abort signal
           const apiCallPromise = openai.chat.completions.create({
             model: "gpt-4o-mini", // Optimized: faster and cheaper for text extraction
             messages: [
@@ -198,15 +206,18 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
             ],
             max_tokens: 8000, // Optimized: sufficient for 50+ line items, faster response
             temperature: 0 // Set to 0 for deterministic extraction (same image → same result)
+          }, {
+            signal: controller.signal // Enable request cancellation
           })
           
-          console.log('⏳ Waiting for vision API response (60s timeout)...')
+          console.log('⏳ Waiting for vision API response (60s timeout with abort)...')
           response = await Promise.race([apiCallPromise, timeoutPromise])
+          clearTimeout(timeoutId) // Clear timeout if API completes successfully
           console.log('✅ Vision API response received successfully')
           
         } catch (error) {
           console.error('❌ Vision API call failed:', error.message)
-          if (error.message.includes('timeout')) {
+          if (error.message.includes('timeout') || error.name === 'AbortError') {
             throw new Error(`Vision API timed out after 60 seconds. Image may be too complex or API is slow.`)
           }
           throw error
@@ -562,43 +573,62 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
     }
 
     // Use higher temperature for retry to get different perspective
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini", // Optimized: faster and cheaper for text extraction
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: enhancedPrompt
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:image/jpeg;base64,${fileContent.toString('base64')}`,
-                detail: "low" // Optimized: 10x faster, 85% cheaper, excellent for text extraction
+    // Create AbortController for proper request cancellation
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => {
+      console.log('⏰ Vision API reprocess timeout reached (60s), aborting request...')
+      controller.abort()
+    }, 60000)
+    
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini", // Optimized: faster and cheaper for text extraction
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: enhancedPrompt
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:image/jpeg;base64,${fileContent.toString('base64')}`,
+                  detail: "low" // Optimized: 10x faster, 85% cheaper, excellent for text extraction
+                }
               }
-            }
-          ]
-        }
-      ],
-      max_tokens: 8000, // Optimized: sufficient for 50+ line items, faster response
-      temperature: 0 // Changed from 0.3 - we want accuracy, not "different perspective"
-    })
-
-    // Process result similar to main parsing
-    const aiResponse = response.choices[0]?.message?.content
-    const jsonMatch = aiResponse.match(/\{[\s\S]*\}/)
-    
-    // Strip JavaScript-style comments from JSON (AI sometimes adds them)
-    let jsonString = jsonMatch[0]
-    jsonString = jsonString.replace(/\/\/.*$/gm, '') // Remove single-line comments
-    jsonString = jsonString.replace(/\/\*[\s\S]*?\*\//g, '') // Remove multi-line comments
-    jsonString = jsonString.replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
-    
-    const parsedResult = JSON.parse(jsonString)
-    
-    return await this.enhanceAIResult(parsedResult, workflowId)
+            ]
+          }
+        ],
+        max_tokens: 8000, // Optimized: sufficient for 50+ line items, faster response
+        temperature: 0 // Changed from 0.3 - we want accuracy, not "different perspective"
+      }, {
+        signal: controller.signal // Enable request cancellation
+      })
+      
+      clearTimeout(timeoutId)
+      
+      // Process result similar to main parsing
+      const aiResponse = response.choices[0]?.message?.content
+      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/)
+      
+      // Strip JavaScript-style comments from JSON (AI sometimes adds them)
+      let jsonString = jsonMatch[0]
+      jsonString = jsonString.replace(/\/\/.*$/gm, '') // Remove single-line comments
+      jsonString = jsonString.replace(/\/\*[\s\S]*?\*\//g, '') // Remove multi-line comments
+      jsonString = jsonString.replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
+      
+      const parsedResult = JSON.parse(jsonString)
+      
+      return await this.enhanceAIResult(parsedResult, workflowId)
+    } catch (error) {
+      clearTimeout(timeoutId)
+      if (error.name === 'AbortError') {
+        throw new Error('Vision API reprocess timed out after 60 seconds')
+      }
+      throw error
+    }
   }
 
   /**
