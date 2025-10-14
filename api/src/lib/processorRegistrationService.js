@@ -39,7 +39,31 @@ export class ProcessorRegistrationService {
     try {
       const redisOptions = this.getRedisOptions();
 
-      const queue = new Bull(queueName, { redis: redisOptions });
+      const queue = new Bull(queueName, { 
+        redis: redisOptions,
+        
+        // 🔧 SERVERLESS-OPTIMIZED SETTINGS (Fix for "Missing lock" and "job stalled" errors)
+        // Default Bull settings assume long-running servers, but serverless functions:
+        //   - Have cold starts (2-60 seconds for Prisma warmup)
+        //   - AI parsing takes 20-30 seconds (OpenAI API)
+        //   - Total job time: 45-60 seconds
+        // Default lockDuration (30s) < Actual job time (60s) = Lock expires before completion!
+        settings: {
+          lockDuration: 120000,      // 120 seconds (4x default 30s) - covers cold starts
+          lockRenewTime: 60000,      // 60 seconds (renew at 50% of lock duration)
+          stalledInterval: 60000,    // 60 seconds (2x default 30s) - more tolerant of serverless delays
+          maxStalledCount: 3,        // Allow 3 stalls before permanent failure
+          guardInterval: 5000,       // 5 seconds - lock guard checks
+          retryProcessDelay: 5000    // 5 seconds - wait before retrying stalled job
+        },
+        
+        // 🔧 RATE LIMITER (Prevents Redis connection pool overwhelm)
+        limiter: {
+          max: 10,                   // Max 10 jobs
+          duration: 5000,            // per 5 seconds
+          bounceBack: false          // Don't requeue immediately
+        }
+      });
 
       // Optional: attach redis client listeners for diagnostics
       try {
