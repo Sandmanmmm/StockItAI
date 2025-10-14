@@ -110,10 +110,14 @@ function isFatalPrismaError(error) {
   return false
 }
 
-async function prismaOperationInternal(operation, operationName = 'Database operation') {
+async function prismaOperationInternal(operation, operationName = 'Database operation', options = {}) {
   if (typeof operation !== 'function') {
     throw new Error('prismaOperation requires a function argument')
   }
+
+  // PERFORMANCE FIX: Allow skipping warmup wait for simple read operations
+  // This prevents 60s delays in queue jobs that just need to lookup a record
+  const skipWarmupWait = options.skipWarmupWait || false
 
   let retries = 0
   // CRITICAL FIX 2025-10-12: Increased from 2 to 4 max retries before forcing reconnect
@@ -123,7 +127,7 @@ async function prismaOperationInternal(operation, operationName = 'Database oper
   
   while (retries <= maxRetries) {
     try {
-      const client = await initializePrisma()
+      const client = await initializePrisma(skipWarmupWait)
       const execute = () => operation(client)
       return await withPrismaRetry(execute, { operationName })
     } catch (error) {
@@ -182,9 +186,9 @@ async function forceDisconnect() {
 }
 
 // Initialize Prisma client - CONCURRENT-SAFE v5 with TRANSACTION RECOVERY
-async function initializePrisma() {
+async function initializePrisma(skipWarmupWait = false) {
   try {
-    console.log(`🔍 [v5] initializePrisma called, current prisma:`, prisma ? 'exists' : 'null', `isConnecting: ${isConnecting}`)
+    console.log(`🔍 [v5] initializePrisma called, current prisma:`, prisma ? 'exists' : 'null', `isConnecting: ${isConnecting}`, `skipWarmupWait: ${skipWarmupWait}`)
     
     // If another request is already connecting, wait for it to complete
     if (isConnecting && connectionPromise) {
@@ -206,14 +210,20 @@ async function initializePrisma() {
       await connectionPromise
       console.log(`✅ Reconnection completed by other request`)
       // Recursively call to do health check on new client
-      return await initializePrisma()
+      return await initializePrisma(skipWarmupWait)
     }
     
-    // WARMUP GATE: If client exists but warmup not complete, wait for it
-    if (prisma && !warmupComplete && warmupPromise) {
+    // WARMUP GATE: If client exists but warmup not complete, wait for it (unless skipping)
+    if (prisma && !warmupComplete && warmupPromise && !skipWarmupWait) {
       console.log(`⏳ Engine warming up, waiting for warmup to complete...`)
       await warmupPromise
       console.log(`✅ Engine warmup completed, proceeding with query`)
+      return prisma
+    }
+    
+    // FAST PATH: Return existing client even during warmup if skip requested
+    if (prisma && skipWarmupWait) {
+      console.log(`⚡ Fast path: Returning client during warmup (skipWarmupWait=true)`)
       return prisma
     }
     

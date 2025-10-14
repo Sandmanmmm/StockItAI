@@ -983,12 +983,14 @@ export class WorkflowOrchestrator {
         console.log('📥 Downloading file content from storage...')
         try {
           // Get upload record to find file URL
+          // Use fast path to skip 60s warmup wait for simple read operation
           const upload = await prismaOperation(
             (prisma) => prisma.upload.findUnique({
               where: { id: uploadId },
               select: { fileUrl: true }
             }),
-            `Lookup upload ${uploadId} for file download`
+            `Lookup upload ${uploadId} for file download`,
+            { skipWarmupWait: true } // PERFORMANCE FIX: Don't wait for warmup
           )
           
           if (!upload || !upload.fileUrl) {
