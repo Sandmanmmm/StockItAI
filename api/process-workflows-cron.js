@@ -54,8 +54,14 @@ async function getCronPrismaClient() {
       log: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error']
     })
     
+    console.log(`🔌 [CRON] Connecting Prisma client...`)
     await cronPrisma.$connect()
-    console.log(`✅ [CRON] Dedicated Prisma client connected successfully`)
+    console.log(`⏳ [CRON] Connection established, warming up query engine...`)
+    
+    // CRITICAL: Ensure query engine is fully initialized before returning
+    // $connect() may return before engine is ready in serverless cold starts
+    await cronPrisma.$queryRaw`SELECT 1 as warmup`
+    console.log(`✅ [CRON] Prisma client ready and warmed up`)
     
     return cronPrisma
   } finally {
