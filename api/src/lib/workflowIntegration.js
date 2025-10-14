@@ -33,6 +33,7 @@ export class WorkflowIntegrationService {
       const parsedContent = await this.parseFile(uploadData)
       
       // Step 2: Start the workflow with parsed content
+      // 🔧 CRITICAL: Pass fileUrl instead of buffer to prevent Redis bloat
       const workflowData = {
         uploadId: uploadData.uploadId,
         fileName: uploadData.fileName,
@@ -41,6 +42,7 @@ export class WorkflowIntegrationService {
         merchantId: uploadData.merchantId,
         supplierId: uploadData.supplierId,
         purchaseOrderId: uploadData.purchaseOrderId, // Pass through the original PO ID
+        fileUrl: uploadData.fileUrl, // 🔧 NEW: File storage URL for downloading when needed
         parsedContent: parsedContent.content,
         aiSettings: uploadData.aiSettings || {},
         metadata: {
@@ -98,8 +100,24 @@ export class WorkflowIntegrationService {
       // Update upload status to parsing
       await this.updateUploadStatus(uploadData.uploadId, 'parsing')
       
+      // 🔧 CRITICAL FIX: Download file here only for parsing, don't pass buffer to workflow
+      // For images, we only extract metadata, not the full buffer
+      let fileBuffer = uploadData.buffer
+      
+      // If buffer not provided, download from storage URL
+      if (!fileBuffer && uploadData.fileUrl) {
+        console.log(`⬇️ Downloading file from storage: ${uploadData.fileUrl}`)
+        const storageService = (await import('./storageService.js')).default
+        fileBuffer = await storageService.downloadFile(uploadData.fileUrl)
+        
+        if (!fileBuffer) {
+          throw new Error('Failed to download file from storage')
+        }
+        console.log(`✅ File downloaded: ${fileBuffer.length} bytes`)
+      }
+      
       const parsedContent = await fileParsingService.parseFile(
-        uploadData.buffer,
+        fileBuffer,
         uploadData.mimeType,
         uploadData.fileName
       )
@@ -107,6 +125,7 @@ export class WorkflowIntegrationService {
       // Update upload status to parsed
       await this.updateUploadStatus(uploadData.uploadId, 'parsed')
       
+      // 🔧 Note: parsedContent for images now excludes buffers (metadata only)
       return parsedContent
 
     } catch (error) {

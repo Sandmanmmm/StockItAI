@@ -213,31 +213,29 @@ export class FileParsingService {
    */
   async parseImage(buffer) {
     try {
-      // Process image for better OCR results
-      const processedBuffer = await sharp(buffer)
-        .greyscale()
-        .normalize()
-        .sharpen()
-        .png()
-        .toBuffer()
+      //🔧 CRITICAL FIX: DO NOT include buffer data in return value
+      // Buffers will bloat Redis/Bull queues with binary data (79KB+ per image)
+      // Instead, return only metadata and let AI parsing stage download from storage
       
       const metadata = await sharp(buffer).metadata()
       
       const result = {
-        imageBuffer: processedBuffer,
-        originalBuffer: buffer,
+        // ❌ REMOVED: imageBuffer and originalBuffer (causes Redis bloat)
+        // ✅ File will be downloaded from storage URL when needed in AI parsing
         metadata: {
           width: metadata.width,
           height: metadata.height,
           format: metadata.format,
           size: buffer.length
         },
-        text: '', // Will be filled by OCR service
+        text: '', // Will be filled by OCR/AI service
         confidence: 0.7, // Lower confidence for images (depends on OCR)
-        extractionMethod: 'image-ocr-ready'
+        extractionMethod: 'image-needs-ai-parsing', // Signal that AI parsing needs to download file
+        requiresFileDownload: true // Flag for AI parsing stage
       }
       
-      console.log(`Image processed successfully: ${metadata.width}x${metadata.height} ${metadata.format}`)
+      console.log(`✅ Image metadata extracted: ${metadata.width}x${metadata.height} ${metadata.format} (${buffer.length} bytes)`)
+      console.log(`📝 Note: Image buffer NOT included in workflow data to prevent Redis bloat`)
       return result
     } catch (error) {
       console.error('Image processing error:', error)

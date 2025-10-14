@@ -100,15 +100,9 @@ router.post('/trigger/:uploadId', async (req, res) => {
       })
     }
 
-    // Get file from storage
-    const fileBuffer = await storageService.downloadFile(upload.fileUrl)
-    
-    if (!fileBuffer) {
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to download file from storage'
-      })
-    }
+    // 🔧 CRITICAL FIX: Don't download file here - causes Redis bloat when passed to Bull queues
+    // File will be downloaded on-demand in AI parsing stage using fileUrl
+    console.log(`📝 File location: ${upload.fileUrl}`)
 
     // Get merchant AI settings
   const aiSettings = await prisma.aISettings.findUnique({
@@ -124,6 +118,7 @@ router.post('/trigger/:uploadId', async (req, res) => {
     }
 
     // Prepare workflow data
+    // 🔧 CRITICAL: Pass fileUrl instead of buffer to prevent Redis bloat (79KB+ per image)
     const workflowData = {
       uploadId: upload.id,
       fileName: upload.fileName,
@@ -132,7 +127,7 @@ router.post('/trigger/:uploadId', async (req, res) => {
       mimeType: upload.mimeType,
       merchantId: upload.merchantId,
       supplierId: upload.supplierId,
-      buffer: fileBuffer,
+      fileUrl: upload.fileUrl, // 🔧 NEW: Pass URL instead of buffer
       aiSettings: processingOptions,
       purchaseOrderId: workflow.purchaseOrderId
     }

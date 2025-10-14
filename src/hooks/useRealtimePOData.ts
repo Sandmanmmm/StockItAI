@@ -292,8 +292,9 @@ export function useRealtimePOData() {
   // Fetch active POs being processed via API
   const fetchActivePOs = useCallback(async () => {
     try {
-      // Fetch processing POs from API using authenticated request
-      const result = await authenticatedRequest<any>('/purchase-orders?status=processing&limit=20')
+      // Fetch pending and processing POs from API using authenticated request
+      // Note: We fetch all POs and filter on client side since API doesn't support multiple status values
+      const result = await authenticatedRequest<any>('/purchase-orders?limit=20')
 
       if (!result.success) {
         throw new Error(result.error || 'Failed to fetch purchase orders')
@@ -302,7 +303,13 @@ export function useRealtimePOData() {
       const orders = result.data?.orders || []
 
       if (orders && Array.isArray(orders)) {
-        const poProgress: POProgress[] = orders.map((po: any) => {
+        // Filter to only include pending and processing POs (active statuses)
+        const activePOList = orders.filter((po: any) => {
+          const status = po.status?.toLowerCase() || ''
+          return status === 'pending' || status === 'processing' || status === 'analyzing' || status === 'syncing'
+        })
+
+        const poProgress: POProgress[] = activePOList.map((po: any) => {
           const status = po.status?.toLowerCase() || 'queued'
           let mappedStatus: POProgress['status'] = 'queued'
           let progress = 0
