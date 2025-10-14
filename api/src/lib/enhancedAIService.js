@@ -9,7 +9,7 @@ import { errorHandlingService, CONFIDENCE_THRESHOLDS } from './errorHandlingServ
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-  timeout: 120000, // 120 second timeout per API call (increased from 60s for reliability)
+  timeout: 65000, // 65 second timeout (allows 60s Vision API + 5s buffer)
   maxRetries: 2 // Enable automatic retries with exponential backoff
 })
 
