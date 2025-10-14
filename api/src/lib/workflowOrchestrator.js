@@ -1209,7 +1209,97 @@ export class WorkflowOrchestrator {
       } catch (error) {
         console.error('❌ AI parsing failed:', error)
         
-        // 📡 SSE: Publish error
+        // � AUTO-RETRY: Check if error is retryable (Vision API timeout)
+        if (error.retryable && error.stage === 'ai_parsing') {
+          console.warn(`⚠️ Retryable error detected: ${error.message}`)
+          
+          // Get current retry count from workflow metadata
+          const metadata = await this.getWorkflowMetadata(workflowId)
+          const currentRetries = metadata?.aiParsingRetries || 0
+          const maxRetries = 2 // Allow 2 retries for timeout errors
+          
+          if (currentRetries < maxRetries) {
+            console.log(`🔄 Auto-retrying AI parsing (attempt ${currentRetries + 1}/${maxRetries})`)
+            
+            // Update metadata with retry count
+            if (metadata) {
+              metadata.aiParsingRetries = currentRetries + 1
+              await this.setWorkflowMetadata(workflowId, metadata)
+            }
+            
+            // Update workflow to show retry in progress
+            try {
+              const prisma = await db.getClient()
+              await prisma.workflowExecution.update({
+                where: { workflowId },
+                data: {
+                  currentStage: WORKFLOW_STAGES.AI_PARSING,
+                  progressPercent: 5,
+                  errorMessage: `Retrying after timeout (attempt ${currentRetries + 1}/${maxRetries})`,
+                  updatedAt: new Date()
+                }
+              })
+              
+              // Also update PO to show retry
+              if (purchaseOrderId) {
+                await prisma.purchaseOrder.update({
+                  where: { id: purchaseOrderId },
+                  data: {
+                    processingNotes: JSON.stringify({
+                      currentStep: 'AI Parsing',
+                      message: `Retrying after timeout (attempt ${currentRetries + 1}/${maxRetries})`,
+                      retryCount: currentRetries + 1,
+                      updatedAt: new Date().toISOString()
+                    }),
+                    updatedAt: new Date()
+                  }
+                })
+              }
+            } catch (dbError) {
+              console.error('❌ Failed to update retry status in database:', dbError.message)
+            }
+            
+            // Re-schedule the AI parsing job with a delay (exponential backoff)
+            const retryDelay = Math.pow(2, currentRetries) * 5000 // 5s, 10s, 20s...
+            console.log(`⏰ Scheduling retry in ${retryDelay}ms`)
+            
+            // Reschedule with delay
+            await processorRegistrationService.addJob('ai-parsing', {
+              workflowId,
+              stage: WORKFLOW_STAGES.AI_PARSING,
+              data
+            }, {
+              delay: retryDelay,
+              attempts: 1 // Single attempt per retry (we handle retries manually)
+            })
+            
+            // 📡 SSE: Publish retry notification
+            if (merchantId && purchaseOrderId) {
+              await redisManagerInstance.publishMerchantStage(merchantId, {
+                stage: 'ai_parsing',
+                poId: purchaseOrderId,
+                workflowId,
+                status: 'retrying',
+                message: `Retrying after timeout (attempt ${currentRetries + 1}/${maxRetries})`,
+                retryCount: currentRetries + 1
+              })
+            }
+            
+            // Don't throw - retry is scheduled
+            return {
+              success: false,
+              retrying: true,
+              retryCount: currentRetries + 1,
+              maxRetries,
+              stage: WORKFLOW_STAGES.AI_PARSING
+            }
+          } else {
+            console.error(`❌ Max retries (${maxRetries}) exceeded for AI parsing`)
+            error.message = `AI parsing failed after ${maxRetries} retries: ${error.message}`
+          }
+        }
+        
+        // �📡 SSE: Publish error
         if (merchantId && purchaseOrderId) {
           await redisManagerInstance.publishMerchantError(merchantId, {
             stage: 'ai_parsing',

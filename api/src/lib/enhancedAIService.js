@@ -167,23 +167,40 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
         response = await this._processWithOpenAI(parseResult.text)
         
       } else if (['jpeg', 'png', 'gif', 'webp'].includes(fileType.type)) {
-        // For images, use vision API with timeout protection
+        // For images, use vision API with adaptive timeout based on file size
         console.log(`📊 Processing image with vision API...`)
         console.log(`📊 Image size: ${fileContent.length} bytes`)
         console.log(`📊 MIME type: ${fileType.mimeType}`)
         
         try {
+          // 🎯 ADAPTIVE TIMEOUT: Scale based on file size
+          // Base: 60s for files under 100KB
+          // Add 10s per 100KB for larger files, cap at 120s
+          const fileSizeMB = fileContent.length / (1024 * 1024)
+          const baseTimeout = 60000 // 60 seconds base
+          const additionalTimeout = Math.min(
+            Math.floor(fileContent.length / (100 * 1024)) * 10000, // 10s per 100KB
+            60000 // Cap additional time at 60s (max total 120s)
+          )
+          const adaptiveTimeout = baseTimeout + additionalTimeout
+          
+          console.log(`⏱️ Adaptive timeout: ${adaptiveTimeout}ms (${(adaptiveTimeout / 1000).toFixed(1)}s) for ${fileSizeMB.toFixed(2)}MB image`)
+          
           // Create AbortController for proper request cancellation
           const controller = new AbortController()
           let timeoutId
           
+          // 📊 METRIC TRACKING: Start timing the Vision API call
+          const visionStartTime = Date.now()
+          
           // Create timeout that actually aborts the request
           const timeoutPromise = new Promise((_, reject) => {
             timeoutId = setTimeout(() => {
-              console.log('⏰ Vision API timeout reached (60s), aborting request...')
+              const duration = Date.now() - visionStartTime
+              console.log(`⏰ Vision API timeout reached (${adaptiveTimeout}ms), aborting request after ${duration}ms...`)
               controller.abort()
-              reject(new Error('Vision API timeout after 60 seconds'))
-            }, 60000)
+              reject(new Error(`VISION_API_TIMEOUT:${duration}`)) // Include duration in error
+            }, adaptiveTimeout)
           })
           
           // Create API call promise with abort signal
@@ -210,15 +227,35 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
             signal: controller.signal // Enable request cancellation
           })
           
-          console.log('⏳ Waiting for vision API response (60s timeout with abort)...')
+          console.log(`⏳ Waiting for vision API response (${adaptiveTimeout}ms timeout with abort)...`)
           response = await Promise.race([apiCallPromise, timeoutPromise])
           clearTimeout(timeoutId) // Clear timeout if API completes successfully
-          console.log('✅ Vision API response received successfully')
+          
+          // 📊 METRIC: Log successful completion time
+          const visionDuration = Date.now() - visionStartTime
+          console.log(`✅ Vision API response received successfully in ${visionDuration}ms (${(visionDuration / 1000).toFixed(1)}s)`)
+          console.log(`📊 Performance: ${fileSizeMB.toFixed(2)}MB processed in ${(visionDuration / 1000).toFixed(1)}s = ${(fileSizeMB / (visionDuration / 1000)).toFixed(2)}MB/s`)
+          
+          // 🚨 METRIC: Warn if approaching timeout threshold (>80%)
+          if (visionDuration > adaptiveTimeout * 0.8) {
+            console.warn(`⚠️ Vision API took ${(visionDuration / adaptiveTimeout * 100).toFixed(1)}% of timeout budget - consider optimizing image`)
+          }
           
         } catch (error) {
           console.error('❌ Vision API call failed:', error.message)
-          if (error.message.includes('timeout') || error.name === 'AbortError') {
-            throw new Error(`Vision API timed out after 60 seconds. Image may be too complex or API is slow.`)
+          
+          // 📊 METRIC: Log failure timing
+          if (error.message.startsWith('VISION_API_TIMEOUT:')) {
+            const duration = error.message.split(':')[1]
+            console.error(`⏱️ Vision API timeout metrics: ${duration}ms elapsed`)
+          }
+          
+          if (error.message.includes('timeout') || error.message.includes('VISION_API_TIMEOUT') || error.name === 'AbortError') {
+            // Mark as retryable timeout error for orchestrator to handle
+            const timeoutError = new Error(`Vision API timed out. Image processing took too long.`)
+            timeoutError.retryable = true // Flag for auto-retry
+            timeoutError.stage = 'ai_parsing'
+            throw timeoutError
           }
           throw error
         }
