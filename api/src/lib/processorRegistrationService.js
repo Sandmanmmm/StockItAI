@@ -13,6 +13,11 @@ export class ProcessorRegistrationService {
     this.registeredProcessors = new Map();
     this.initializationPromise = null;
     this.monitorIntervals = new Map();
+    this.initializationCompleted = false;
+    this.initializationStartedAt = null;
+    this.initializationWaits = 0;
+    this.rehydratedQueues = new Set();
+    this.fallbackEvents = [];
     
     // 🔧 SHARED REDIS CONNECTIONS (Fix #2: Connection Pool)
     // Instead of creating 3 connections per queue (11 queues × 3 = 33+ connections),
@@ -21,6 +26,36 @@ export class ProcessorRegistrationService {
     this.sharedSubscriber = null;    // Subscriber for pub/sub
     this.sharedBclient = null;       // Blocking client for BRPOP operations
     this.connectionInitialized = false;
+  }
+
+  /**
+   * Ensure queue processors are initialized before accepting jobs
+   */
+  async waitForProcessorsReady(trigger = 'addJob') {
+    if (this.initializationCompleted) {
+      return;
+    }
+
+    const waitStart = Date.now();
+
+    if (!this.initializationPromise) {
+      console.warn(`⚠️ [BULL] ${trigger} triggered processor initialization`);
+      await this.initializeAllProcessors();
+      return;
+    }
+
+    this.initializationWaits += 1;
+    console.log(`⏳ [BULL] ${trigger} waiting for processor initialization (attempt ${this.initializationWaits})`);
+
+    try {
+      await this.initializationPromise;
+    } catch (error) {
+      console.error(`❌ [BULL] ${trigger} detected initialization failure:`, error.message || error);
+      throw error;
+    } finally {
+      const duration = Date.now() - waitStart;
+      console.log(`✅ [BULL] ${trigger} wait complete after ${duration}ms`);
+    }
   }
 
   /**
@@ -255,6 +290,8 @@ export class ProcessorRegistrationService {
         }
       }
 
+      await this.rehydrateQueueIfNeeded(queueName, jobType, queue);
+
       return queue;
     } catch (error) {
       console.error(`❌ [PERMANENT FIX] Failed to register processor for ${jobType}:`, error.message);
@@ -324,6 +361,9 @@ export class ProcessorRegistrationService {
     // 🔧 INITIALIZE SHARED CONNECTIONS FIRST (Fix #2)
     // This must happen before creating any Bull queues
     // Otherwise each queue will create its own 3 connections (33+ total)
+    this.rehydratedQueues.clear();
+    this.initializationCompleted = false;
+    this.initializationStartedAt = Date.now();
     this.initializationPromise = (async () => {
       try {
         await this.initializeSharedConnections();
@@ -387,11 +427,14 @@ export class ProcessorRegistrationService {
 
         console.log('🎉 [PERMANENT FIX] All processors initialized successfully');
         console.log('📋 [PERMANENT FIX] Registered processors:', Array.from(this.registeredProcessors.keys()));
+        this.initializationCompleted = true;
+        this.initializationStartedAt = null;
         return results;
         
       } catch (err) {
         console.error('❌ [PERMANENT FIX] Processor initialization encountered an error:', err.message || err);
         this.initializationPromise = null;
+        this.initializationCompleted = false;
         throw err;
       }
     })();
@@ -404,6 +447,8 @@ export class ProcessorRegistrationService {
    */
   async addJob(queueName, jobData, options = {}) {
     console.log(`📋 [PERMANENT FIX] Adding job to queue: ${queueName}`);
+
+    await this.waitForProcessorsReady('addJob');
 
     const queueNameToJobType = {
       'ai-parsing': 'ai_parsing',
@@ -428,11 +473,16 @@ export class ProcessorRegistrationService {
     }
 
     if (!queue) {
-      console.warn(`⚠️ [PERMANENT FIX] Queue ${queueName} not found (jobType: ${jobType}), creating temporary queue`);
-      const BullModule = (await import('bull')).default;
-      const redisOptions = this.getRedisOptions();
-      console.log(`🔌 [REDIS] Creating temporary queue with ${redisOptions.host}:${redisOptions.port}`);
-      queue = new BullModule(queueName, { redis: redisOptions });
+      const fallbackEvent = {
+        queueName,
+        jobType,
+        timestamp: Date.now(),
+        reason: 'missing_registered_queue',
+        purchaseOrderId: jobData?.data?.purchaseOrderId || jobData?.purchaseOrderId
+      };
+      this.fallbackEvents.push(fallbackEvent);
+      console.error('� [BULL][FALLBACK] Attempted to enqueue without registered processor:', fallbackEvent);
+      throw new Error(`Queue ${queueName} is not registered. Processor initialization is incomplete.`);
     }
 
     // Check for duplicate jobs for the same PO (prevent lock contention)
@@ -471,6 +521,57 @@ export class ProcessorRegistrationService {
     return job;
   }
 
+  async rehydrateQueueIfNeeded(queueName, jobType, queue) {
+    if (this.rehydratedQueues.has(jobType)) {
+      return;
+    }
+
+    this.rehydratedQueues.add(jobType);
+
+    const thresholdMs = Number(process.env.BULL_REHYDRATE_THRESHOLD_MS || 60000);
+
+    try {
+      const [waitingJobs, delayedJobs] = await Promise.all([
+        queue.getWaiting(),
+        queue.getDelayed()
+      ]);
+
+      const staleJobs = [...waitingJobs, ...delayedJobs].filter((job) => {
+        if (!job || typeof job.timestamp !== 'number') {
+          return false;
+        }
+        return Date.now() - job.timestamp > thresholdMs;
+      });
+
+      if (staleJobs.length === 0) {
+        return;
+      }
+
+      console.warn(`🚨 [BULL][RECOVERY] Found ${staleJobs.length} stale job(s) in ${queueName}; rehydrating`);
+
+      let recoveredCount = 0;
+      for (const job of staleJobs) {
+        try {
+          const jobClone = job.data;
+          const jobOpts = {
+            ...job.opts,
+            jobId: job.opts?.jobId || job.id
+          };
+
+          await job.remove();
+          await queue.add(jobClone, jobOpts);
+          recoveredCount += 1;
+        } catch (jobError) {
+          console.error(`⚠️ [BULL][RECOVERY] Failed to rehydrate job ${job?.id} in ${queueName}:`, jobError.message || jobError);
+        }
+      }
+
+      console.log(`✅ [BULL][RECOVERY] Rehydrated ${recoveredCount} job(s) for ${jobType}`);
+    } catch (error) {
+      console.error(`⚠️ [BULL][RECOVERY] Failed to inspect queue ${queueName} for stale jobs:`, error.message || error);
+    }
+  }
+
   /**
    * Clean up queues and shared Redis connections
    */
@@ -494,6 +595,12 @@ export class ProcessorRegistrationService {
       console.log(`🛑 [PERMANENT FIX] Stopped monitoring interval for ${jobType}`);
     }
     this.monitorIntervals.clear();
+
+  this.initializationCompleted = false;
+  this.initializationStartedAt = null;
+  this.initializationWaits = 0;
+  this.rehydratedQueues.clear();
+  this.fallbackEvents = [];
     
     // 🔧 CLOSE SHARED REDIS CONNECTIONS (Fix #2)
     // Graceful shutdown prevents leaked connections in serverless
