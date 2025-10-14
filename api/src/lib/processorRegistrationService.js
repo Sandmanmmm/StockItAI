@@ -68,10 +68,11 @@ export class ProcessorRegistrationService {
       this.sharedBclient = new Redis(redisConfig);
       
       // Increase max listeners for shared connections (11 queues share 3 connections)
-      // Each queue attaches event listeners, so we need more than the default 10
-      this.sharedClient.setMaxListeners(15);
-      this.sharedSubscriber.setMaxListeners(15);
-      this.sharedBclient.setMaxListeners(15);
+      // Each queue attaches ~2 event listeners per connection (error, ready, etc.)
+      // 11 queues × 2 listeners = 22 needed, set to 25 for safety margin
+      this.sharedClient.setMaxListeners(25);
+      this.sharedSubscriber.setMaxListeners(25);
+      this.sharedBclient.setMaxListeners(25);
       
       // Setup connection event handlers for monitoring
       this.setupSharedConnectionHandlers();
