@@ -4,6 +4,7 @@
  */
 
 import Bull from 'bull';
+import Redis from 'ioredis';
 import { workflowOrchestrator } from './workflowOrchestrator.js';
 import { getRedisConfig } from '../config/redis.production.js';
 
@@ -12,21 +13,152 @@ export class ProcessorRegistrationService {
     this.registeredProcessors = new Map();
     this.initializationPromise = null;
     this.monitorIntervals = new Map();
+    
+    // 🔧 SHARED REDIS CONNECTIONS (Fix #2: Connection Pool)
+    // Instead of creating 3 connections per queue (11 queues × 3 = 33+ connections),
+    // we create 3 shared connections reused by all queues (91% reduction)
+    this.sharedClient = null;        // Main client for queue operations
+    this.sharedSubscriber = null;    // Subscriber for pub/sub
+    this.sharedBclient = null;       // Blocking client for BRPOP operations
+    this.connectionInitialized = false;
   }
 
-  getRedisOptions() {
-    const config = getRedisConfig();
+  /**
+   * Initialize shared Redis connections (called once, reused by all queues)
+   */
+  async initializeSharedConnections() {
+    if (this.connectionInitialized) {
+      console.log('♻️ Shared Redis connections already initialized, reusing...');
+      return;
+    }
+    
+    try {
+      console.log('🔗 Creating shared Redis connection pool for Bull queues...');
+      
+      const config = getRedisConfig();
+      const connectionOptions = config.connection;
+      
+      // Handle both URL string (Upstash) and object configuration
+      const redisConfig = typeof connectionOptions === 'string' 
+        ? connectionOptions 
+        : {
+            host: connectionOptions.host,
+            port: connectionOptions.port,
+            password: connectionOptions.password,
+            db: connectionOptions.db,
+            tls: connectionOptions.tls,
+            connectTimeout: 15000,
+            maxRetriesPerRequest: null,
+            enableReadyCheck: false,
+            retryStrategy: (times) => {
+              const delay = Math.min(times * 50, 2000);
+              console.log(`🔄 Redis retry attempt ${times}, delay: ${delay}ms`);
+              return delay;
+            }
+          };
+      
+      // Create 3 shared connections
+      this.sharedClient = new Redis(redisConfig);
+      this.sharedSubscriber = new Redis(redisConfig);
+      this.sharedBclient = new Redis(redisConfig);
+      
+      // Setup connection event handlers for monitoring
+      this.setupSharedConnectionHandlers();
+      
+      // Wait for connections to be ready
+      await Promise.all([
+        this.waitForConnection(this.sharedClient, 'client'),
+        this.waitForConnection(this.sharedSubscriber, 'subscriber'),
+        this.waitForConnection(this.sharedBclient, 'bclient')
+      ]);
+      
+      this.connectionInitialized = true;
+      console.log('✅ Shared Redis connection pool established (3 connections)');
+      
+    } catch (error) {
+      console.error('❌ Failed to initialize shared Redis connections:', error);
+      throw error;
+    }
+  }
 
+  /**
+   * Wait for a Redis connection to be ready
+   */
+  async waitForConnection(client, name) {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error(`Redis ${name} connection timeout after 10s`));
+      }, 10000);
+      
+      if (client.status === 'ready') {
+        clearTimeout(timeout);
+        console.log(`✅ Redis ${name} already connected`);
+        resolve();
+      } else {
+        client.once('ready', () => {
+          clearTimeout(timeout);
+          console.log(`✅ Redis ${name} connected`);
+          resolve();
+        });
+        
+        client.once('error', (err) => {
+          clearTimeout(timeout);
+          console.error(`❌ Redis ${name} connection error:`, err.message);
+          reject(err);
+        });
+      }
+    });
+  }
+
+  /**
+   * Setup connection event handlers for health monitoring
+   */
+  setupSharedConnectionHandlers() {
+    const setupHandlers = (client, name) => {
+      client.on('error', (err) => {
+        console.error(`❌ [REDIS ${name}] Error:`, err.message);
+      });
+      
+      client.on('close', () => {
+        console.warn(`⚠️ [REDIS ${name}] Connection closed`);
+      });
+      
+      client.on('reconnecting', (delay) => {
+        console.log(`🔄 [REDIS ${name}] Reconnecting in ${delay}ms...`);
+      });
+      
+      client.on('connect', () => {
+        console.log(`🔌 [REDIS ${name}] Connected`);
+      });
+    };
+    
+    setupHandlers(this.sharedClient, 'CLIENT');
+    setupHandlers(this.sharedSubscriber, 'SUBSCRIBER');
+    setupHandlers(this.sharedBclient, 'BCLIENT');
+  }
+
+  /**
+   * Get Redis options for Bull (returns function to provide shared connections)
+   */
+  getRedisOptions() {
+    // Bull v3 accepts a createClient function to provide existing connections
+    // This prevents Bull from creating its own connections (3 per queue)
     return {
-      host: config.connection.host,
-      port: config.connection.port,
-      password: config.connection.password,
-      db: config.connection.db,
-      tls: config.connection.tls,
-      connectTimeout: 15000,
-      // Bull v3 / ioredis compatibility
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false
+      createClient: (type, redisOpts) => {
+        console.log(`♻️ [BULL] Reusing shared ${type} connection`);
+        
+        switch (type) {
+          case 'client':
+            return this.sharedClient;
+          case 'subscriber':
+            return this.sharedSubscriber;
+          case 'bclient':
+            return this.sharedBclient || this.sharedClient;
+          default:
+            console.warn(`⚠️ Unknown client type: ${type}, using main client`);
+            return this.sharedClient;
+        }
+      }
     };
   }
 
@@ -174,53 +306,61 @@ export class ProcessorRegistrationService {
 
     console.log('🚀 [PERMANENT FIX] Initializing all processors with proven working pattern...');
 
-    const processorConfigs = [
-      { queueName: 'ai-parsing', jobType: 'ai_parsing', concurrency: 2 },
-      { queueName: 'database-save', jobType: 'database_save', concurrency: 5 },
-      { queueName: 'product-draft-creation', jobType: 'product_draft_creation', concurrency: 3 },
-      { queueName: 'image-attachment', jobType: 'image_attachment', concurrency: 2 },
-      { queueName: 'background-image-processing', jobType: 'background_image_processing', concurrency: 1 },
-      { queueName: 'shopify-sync', jobType: 'shopify_sync', concurrency: 3 },
-      { queueName: 'status-update', jobType: 'status_update', concurrency: 10 },
-      // Refinement pipeline
-      { queueName: 'data-normalization', jobType: 'data_normalization', concurrency: 3 },
-      { queueName: 'merchant-config', jobType: 'merchant_config', concurrency: 2 },
-      { queueName: 'ai-enrichment', jobType: 'ai_enrichment', concurrency: 2 },
-      { queueName: 'shopify-payload', jobType: 'shopify_payload', concurrency: 3 }
-    ];
+    // 🔧 INITIALIZE SHARED CONNECTIONS FIRST (Fix #2)
+    // This must happen before creating any Bull queues
+    // Otherwise each queue will create its own 3 connections (33+ total)
+    this.initializationPromise = (async () => {
+      try {
+        await this.initializeSharedConnections();
+        console.log('✅ Shared Redis connection pool ready, proceeding with processor registration...');
+        
+        const processorConfigs = [
+          { queueName: 'ai-parsing', jobType: 'ai_parsing', concurrency: 2 },
+          { queueName: 'database-save', jobType: 'database_save', concurrency: 5 },
+          { queueName: 'product-draft-creation', jobType: 'product_draft_creation', concurrency: 3 },
+          { queueName: 'image-attachment', jobType: 'image_attachment', concurrency: 2 },
+          { queueName: 'background-image-processing', jobType: 'background_image_processing', concurrency: 1 },
+          { queueName: 'shopify-sync', jobType: 'shopify_sync', concurrency: 3 },
+          { queueName: 'status-update', jobType: 'status_update', concurrency: 10 },
+          // Refinement pipeline
+          { queueName: 'data-normalization', jobType: 'data_normalization', concurrency: 3 },
+          { queueName: 'merchant-config', jobType: 'merchant_config', concurrency: 2 },
+          { queueName: 'ai-enrichment', jobType: 'ai_enrichment', concurrency: 2 },
+          { queueName: 'shopify-payload', jobType: 'shopify_payload', concurrency: 3 }
+        ];
 
-    const tasks = processorConfigs.map((config) => {
-      const { queueName, concurrency, jobType } = config;
-      const processorFunction = async (job) => {
-        const startTime = Date.now();
-        try {
-          console.log(`🎯 [PERMANENT FIX] PROCESSOR TRIGGERED for ${jobType} job ${job.id}`);
-          console.log(`📋 Job details:`, {
-            workflowId: job.data?.workflowId,
-            stage: job.data?.stage,
-            attempts: job.attemptsMade,
-            name: job.name
-          });
+        const tasks = processorConfigs.map((config) => {
+          const { queueName, concurrency, jobType } = config;
+          const processorFunction = async (job) => {
+            const startTime = Date.now();
+            try {
+              console.log(`🎯 [PERMANENT FIX] PROCESSOR TRIGGERED for ${jobType} job ${job.id}`);
+              console.log(`📋 Job details:`, {
+                workflowId: job.data?.workflowId,
+                stage: job.data?.stage,
+                attempts: job.attemptsMade,
+                name: job.name
+              });
 
-          const result = await workflowOrchestrator.processJob(job, jobType);
+              const result = await workflowOrchestrator.processJob(job, jobType);
 
-          const duration = Date.now() - startTime;
-          console.log(`✅ [PERMANENT FIX] Completed ${jobType} job ${job.id} in ${duration}ms`);
-          return result;
-        } catch (err) {
-          const duration = Date.now() - startTime;
-          console.error(`💥 [PERMANENT FIX] PROCESSOR ERROR in ${jobType} job ${job.id} after ${duration}ms:`, err.message);
-          throw err;
-        }
-      };
+              const duration = Date.now() - startTime;
+              console.log(`✅ [PERMANENT FIX] Completed ${jobType} job ${job.id} in ${duration}ms`);
+              return result;
+            } catch (err) {
+              const duration = Date.now() - startTime;
+              console.error(`💥 [PERMANENT FIX] PROCESSOR ERROR in ${jobType} job ${job.id} after ${duration}ms:`, err.message);
+              throw err;
+            }
+          };
 
-      return this.registerProcessor(queueName, concurrency, processorFunction, jobType)
-        .then(() => ({ status: 'fulfilled', jobType }))
-        .catch((err) => ({ status: 'rejected', jobType, reason: err }));
-    });
+          return this.registerProcessor(queueName, concurrency, processorFunction, jobType)
+            .then(() => ({ status: 'fulfilled', jobType }))
+            .catch((err) => ({ status: 'rejected', jobType, reason: err }));
+        });
 
-    this.initializationPromise = Promise.all(tasks)
-      .then((results) => {
+        const results = await Promise.all(tasks);
+        
         const rejected = results.filter((r) => r.status === 'rejected');
         if (rejected.length > 0) {
           console.error(`❌ [PERMANENT FIX] ${rejected.length} processor(s) failed to initialize`);
@@ -233,12 +373,13 @@ export class ProcessorRegistrationService {
         console.log('🎉 [PERMANENT FIX] All processors initialized successfully');
         console.log('📋 [PERMANENT FIX] Registered processors:', Array.from(this.registeredProcessors.keys()));
         return results;
-      })
-      .catch((err) => {
+        
+      } catch (err) {
         console.error('❌ [PERMANENT FIX] Processor initialization encountered an error:', err.message || err);
         this.initializationPromise = null;
         throw err;
-      });
+      }
+    })();
 
     return this.initializationPromise;
   }
@@ -316,10 +457,12 @@ export class ProcessorRegistrationService {
   }
 
   /**
-   * Clean up queues
+   * Clean up queues and shared Redis connections
    */
   async cleanup() {
     console.log('🧹 [PERMANENT FIX] Cleaning up registered processors...');
+    
+    // Close all Bull queues
     for (const [jobType, queue] of this.registeredProcessors) {
       try {
         await queue.close();
@@ -330,13 +473,90 @@ export class ProcessorRegistrationService {
     }
     this.registeredProcessors.clear();
 
+    // Stop monitoring intervals
     for (const [jobType, intervalId] of this.monitorIntervals) {
       clearInterval(intervalId);
       console.log(`🛑 [PERMANENT FIX] Stopped monitoring interval for ${jobType}`);
     }
     this.monitorIntervals.clear();
+    
+    // 🔧 CLOSE SHARED REDIS CONNECTIONS (Fix #2)
+    // Graceful shutdown prevents leaked connections in serverless
+    console.log('🧹 Closing shared Redis connection pool...');
+    
+    if (this.sharedClient) {
+      try {
+        await this.sharedClient.quit();
+        console.log('✅ Closed shared Redis client');
+      } catch (err) {
+        console.error('⚠️ Error closing shared client:', err.message);
+      }
+      this.sharedClient = null;
+    }
+    
+    if (this.sharedSubscriber) {
+      try {
+        await this.sharedSubscriber.quit();
+        console.log('✅ Closed shared Redis subscriber');
+      } catch (err) {
+        console.error('⚠️ Error closing shared subscriber:', err.message);
+      }
+      this.sharedSubscriber = null;
+    }
+    
+    if (this.sharedBclient) {
+      try {
+        await this.sharedBclient.quit();
+        console.log('✅ Closed shared Redis bclient');
+      } catch (err) {
+        console.error('⚠️ Error closing shared bclient:', err.message);
+      }
+      this.sharedBclient = null;
+    }
+    
+    this.connectionInitialized = false;
+    this.initializationPromise = null;
+    
+    console.log('✅ Cleanup complete');
   }
 }
 
 export const processorRegistrationService = new ProcessorRegistrationService();
 export default processorRegistrationService;
+
+// 🔧 GRACEFUL SHUTDOWN HANDLERS (Fix #2)
+// Register cleanup on serverless function termination to prevent leaked connections
+if (typeof process !== 'undefined') {
+  process.on('SIGTERM', async () => {
+    console.log('⚠️ SIGTERM received, cleaning up Bull queues and Redis connections...');
+    try {
+      await processorRegistrationService.cleanup();
+      console.log('✅ Graceful shutdown complete');
+      process.exit(0);
+    } catch (error) {
+      console.error('❌ Error during graceful shutdown:', error);
+      process.exit(1);
+    }
+  });
+  
+  process.on('SIGINT', async () => {
+    console.log('⚠️ SIGINT received, cleaning up Bull queues and Redis connections...');
+    try {
+      await processorRegistrationService.cleanup();
+      console.log('✅ Graceful shutdown complete');
+      process.exit(0);
+    } catch (error) {
+      console.error('❌ Error during graceful shutdown:', error);
+      process.exit(1);
+    }
+  });
+  
+  process.on('beforeExit', async () => {
+    console.log('⚠️ Process beforeExit, cleaning up Bull queues and Redis connections...');
+    try {
+      await processorRegistrationService.cleanup();
+    } catch (error) {
+      console.error('❌ Error during beforeExit cleanup:', error);
+    }
+  });
+}
