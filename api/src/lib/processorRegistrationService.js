@@ -38,20 +38,29 @@ export class ProcessorRegistrationService {
       const config = getRedisConfig();
       const connectionOptions = config.connection;
       
-      // Use the connection config directly - it's already properly formatted
-      // Either a Redis URL string OR a complete config object with TLS, etc.
-      const redisConfig = connectionOptions;
+      // Clone the config to avoid mutating the original
+      let redisConfig;
       
-      // If it's an object, ensure critical Bull v3 compatibility fields are set
-      if (typeof redisConfig === 'object') {
-        redisConfig.maxRetriesPerRequest = null;
-        redisConfig.enableReadyCheck = false;
-        redisConfig.retryStrategy = (times) => {
-          const delay = Math.min(times * 50, 2000);
-          console.log(`🔄 Redis retry attempt ${times}, delay: ${delay}ms`);
-          return delay;
+      if (typeof connectionOptions === 'string') {
+        // Redis URL format - use directly
+        redisConfig = connectionOptions;
+      } else {
+        // Object format - clone and ensure Bull v3 compatibility
+        redisConfig = {
+          ...connectionOptions,
+          // Override critical settings for Bull v3 and immediate connection
+          lazyConnect: false,              // ❌ Remove lazy connect - connect immediately
+          maxRetriesPerRequest: null,      // Bull v3 requirement
+          enableReadyCheck: false,         // Bull v3 requirement
+          retryStrategy: (times) => {
+            const delay = Math.min(times * 50, 2000);
+            console.log(`🔄 Redis retry attempt ${times}, delay: ${delay}ms`);
+            return delay;
+          }
         };
       }
+      
+      console.log('📡 Connecting to Redis:', typeof redisConfig === 'string' ? 'URL format' : `${redisConfig.host}:${redisConfig.port}`);
       
       // Create 3 shared connections
       this.sharedClient = new Redis(redisConfig);
