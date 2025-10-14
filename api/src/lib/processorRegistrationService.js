@@ -38,24 +38,20 @@ export class ProcessorRegistrationService {
       const config = getRedisConfig();
       const connectionOptions = config.connection;
       
-      // Handle both URL string (Upstash) and object configuration
-      const redisConfig = typeof connectionOptions === 'string' 
-        ? connectionOptions 
-        : {
-            host: connectionOptions.host,
-            port: connectionOptions.port,
-            password: connectionOptions.password,
-            db: connectionOptions.db,
-            tls: connectionOptions.tls,
-            connectTimeout: 15000,
-            maxRetriesPerRequest: null,
-            enableReadyCheck: false,
-            retryStrategy: (times) => {
-              const delay = Math.min(times * 50, 2000);
-              console.log(`🔄 Redis retry attempt ${times}, delay: ${delay}ms`);
-              return delay;
-            }
-          };
+      // Use the connection config directly - it's already properly formatted
+      // Either a Redis URL string OR a complete config object with TLS, etc.
+      const redisConfig = connectionOptions;
+      
+      // If it's an object, ensure critical Bull v3 compatibility fields are set
+      if (typeof redisConfig === 'object') {
+        redisConfig.maxRetriesPerRequest = null;
+        redisConfig.enableReadyCheck = false;
+        redisConfig.retryStrategy = (times) => {
+          const delay = Math.min(times * 50, 2000);
+          console.log(`🔄 Redis retry attempt ${times}, delay: ${delay}ms`);
+          return delay;
+        };
+      }
       
       // Create 3 shared connections
       this.sharedClient = new Redis(redisConfig);
@@ -172,7 +168,10 @@ export class ProcessorRegistrationService {
       const redisOptions = this.getRedisOptions();
 
       const queue = new Bull(queueName, { 
-        redis: redisOptions,
+        // 🔧 SHARED CONNECTION POOL (Fix #2)
+        // Pass createClient directly (NOT wrapped in redis object)
+        // Bull will call createClient('client'), createClient('subscriber'), createClient('bclient')
+        createClient: redisOptions.createClient,
         
         // 🔧 SERVERLESS-OPTIMIZED SETTINGS (Fix for "Missing lock" and "job stalled" errors)
         // Default Bull settings assume long-running servers, but serverless functions:
