@@ -640,6 +640,9 @@ export default async function handler(req, res) {
         await prisma.$disconnect()
       } catch (disconnectError) {
         console.warn(`⚠️ Error while disconnecting Prisma client:`, disconnectError.message)
+      } finally {
+        // Prevent reusing a disconnected Prisma instance on the next cron run
+        cronPrisma = null
       }
     }
   }
