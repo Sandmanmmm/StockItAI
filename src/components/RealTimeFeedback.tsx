@@ -6,6 +6,7 @@ import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useRealtimePOData, type POProgress, type ActivityLog } from '@/hooks/useRealtimePOData'
+import { ProcessingLogStream } from './ProcessingLogStream'
 import { 
   Activity, 
   CheckCircle2, 
@@ -328,8 +329,8 @@ export function RealTimeFeedback() {
             </TabsContent>
 
             <TabsContent value="active" className="mt-0">
-              <ScrollArea className="h-[500px] pr-4">
-                <div className="space-y-3">
+              <ScrollArea className="h-[700px] pr-4">
+                <div className="space-y-4">
                   {activePOs.map((po, index) => (
                     <motion.div
                       key={po.id}
@@ -367,7 +368,7 @@ export function RealTimeFeedback() {
                       </div>
 
                       {/* Enhanced Progress Bar with Gradient */}
-                      <div className="space-y-2 mb-3">
+                      <div className="space-y-2 mb-4">
                         <div className="relative">
                           <Progress 
                             value={po.progress} 
@@ -401,6 +402,14 @@ export function RealTimeFeedback() {
                             {po.progress >= 100 && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />}
                           </div>
                         </div>
+                      </div>
+
+                      {/* NEW: Detailed Log Stream */}
+                      <div className="mb-4">
+                        <ProcessingLogStream 
+                          logs={po.logs || []} 
+                          autoScroll={true}
+                        />
                       </div>
 
                       {/* Detailed Status Footer */}

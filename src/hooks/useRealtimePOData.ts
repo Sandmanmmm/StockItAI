@@ -21,6 +21,16 @@ export interface ActivityLog {
   details?: string
 }
 
+export interface ProcessingLog {
+  id: string
+  timestamp: Date
+  message: string
+  stage: string
+  progress: number
+  metadata?: Record<string, any>
+  severity: 'info' | 'success' | 'warning' | 'error'
+}
+
 export interface POProgress {
   id: string
   poNumber: string
@@ -30,6 +40,7 @@ export interface POProgress {
   itemsProcessed: number
   totalItems: number
   uploadedAt: Date
+  logs: ProcessingLog[]
 }
 
 export function useRealtimePOData() {
@@ -46,6 +57,36 @@ export function useRealtimePOData() {
   const [isConnected, setIsConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Helper function to determine log severity from message and metadata
+  const determineSeverity = (data: any): ProcessingLog['severity'] => {
+    const message = data.message?.toLowerCase() || ''
+    
+    // Error indicators
+    if (message.includes('error') || message.includes('failed') || message.includes('invalid')) {
+      return 'error'
+    }
+    
+    // Warning indicators
+    if (message.includes('warning') || message.includes('retry') || message.includes('skipped')) {
+      return 'warning'
+    }
+    
+    // Success indicators
+    if (
+      message.includes('complete') || 
+      message.includes('success') || 
+      message.includes('saved') ||
+      message.includes('created') ||
+      message.includes('extracted') ||
+      message.includes('merged')
+    ) {
+      return 'success'
+    }
+    
+    // Default to info
+    return 'info'
+  }
+
   // 🚀 NEW: Use SSE for real-time updates
   const { 
     events: sseEvents, 
@@ -55,6 +96,24 @@ export function useRealtimePOData() {
     onProgress: (data) => {
       console.log('📊 SSE Progress received:', data)
       
+      // Create log entry from progress event
+      const logEntry: ProcessingLog = {
+        id: `${data.poId}-${Date.now()}`,
+        timestamp: data.timestamp ? new Date(data.timestamp) : new Date(),
+        message: data.message,
+        stage: data.stage,
+        progress: data.progress,
+        metadata: {
+          currentChunk: (data as any).currentChunk,
+          totalChunks: (data as any).totalChunks,
+          itemsExtracted: (data as any).itemsExtracted,
+          totalItems: (data as any).totalItems,
+          lineItems: (data as any).lineItems,
+          confidence: (data as any).confidence
+        },
+        severity: determineSeverity(data)
+      }
+      
       // Update active PO progress in real-time
       setActivePOs(prev => prev.map(po => {
         if (po.id === data.poId) {
@@ -62,7 +121,8 @@ export function useRealtimePOData() {
             ...po,
             progress: data.progress,
             stage: data.message,
-            status: 'processing'
+            status: 'processing',
+            logs: [...(po.logs || []), logEntry].slice(-100) // Keep last 100 logs
           }
         }
         return po
@@ -311,7 +371,8 @@ export function useRealtimePOData() {
             stage,
             itemsProcessed,
             totalItems,
-            uploadedAt: new Date(po.createdAt)
+            uploadedAt: new Date(po.createdAt),
+            logs: [] // Initialize with empty logs array
           }
         })
 
