@@ -1630,6 +1630,14 @@ export class WorkflowOrchestrator {
 
           // Apply refinement rules to pricing
           console.log(`🔧 Applying refinement rules for merchant ${merchantId}...`)
+          
+          // Lazy initialize refinementConfigService if not already initialized
+          if (!this.refinementConfigService) {
+            console.log('⚠️ RefinementConfigService not initialized, initializing now...')
+            const prisma = await db.getClient()
+            this.refinementConfigService = new RefinementConfigService(prisma)
+          }
+          
           const refinementResult = await this.refinementConfigService.testPricingRules(merchantId, {
             title: lineItem.productName || `Product from PO ${purchaseOrder.number}`,
             price: (lineItem.unitCost || 0).toString(),
