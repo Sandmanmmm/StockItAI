@@ -33,7 +33,10 @@ export default async function handler(req, res) {
   console.log(`📋 Workflow ID: ${workflowId}`)
 
   try {
+    // CRITICAL: Get Prisma client and ensure full warmup before any queries
+    console.log(`🔌 Initializing Prisma connection...`)
     const prisma = await db.getClient()
+    console.log(`✅ Prisma client obtained - connection ready`)
 
     // Fetch workflow execution record
     const workflow = await prisma.workflowExecution.findUnique({

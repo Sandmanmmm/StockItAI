@@ -193,9 +193,11 @@ async function initializePrisma(skipWarmupWait = false) {
     // If another request is already connecting, wait for it to complete
     if (isConnecting && connectionPromise) {
       console.log(`⏳ Another request is connecting, waiting...`)
-      await connectionPromise
-      console.log(`✅ Connection completed by other request, returning existing client`)
-      return prisma
+      const freshClient = await connectionPromise
+      console.log(`✅ Connection completed by other request, returning fresh client`)
+      // CRITICAL: Return the fresh client from the promise, not the global prisma
+      // The global prisma might be stale if there was a previous failed connection
+      return freshClient || prisma
     }
     
     // Only recreate if version changed (not on every call)
@@ -207,10 +209,11 @@ async function initializePrisma(skipWarmupWait = false) {
     // If another request is already reconnecting, wait for it
     if (isConnecting && connectionPromise) {
       console.log(`⏳ Another request is reconnecting, waiting...`)
-      await connectionPromise
+      const freshClient = await connectionPromise
       console.log(`✅ Reconnection completed by other request`)
-      // Recursively call to do health check on new client
-      return await initializePrisma(skipWarmupWait)
+      // CRITICAL: Return the fresh client directly, don't recurse
+      // Recursing might cause unnecessary health checks or reconnections
+      return freshClient || prisma
     }
     
     // WARMUP GATE: If client exists but warmup not complete, wait for it (unless skipping)
