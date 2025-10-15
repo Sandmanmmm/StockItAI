@@ -174,13 +174,13 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
         
         try {
           // 🎯 ADAPTIVE TIMEOUT: Scale based on file size
-          // Base: 60s for files under 100KB
-          // Add 10s per 100KB for larger files, cap at 120s
+          // Base: 90s for files under 100KB (increased from 60s based on production data)
+          // Add 15s per 100KB for larger files, cap at 180s (3 minutes)
           const fileSizeMB = fileContent.length / (1024 * 1024)
-          const baseTimeout = 60000 // 60 seconds base
+          const baseTimeout = 90000 // 90 seconds base (50% increase for API latency)
           const additionalTimeout = Math.min(
-            Math.floor(fileContent.length / (100 * 1024)) * 10000, // 10s per 100KB
-            60000 // Cap additional time at 60s (max total 120s)
+            Math.floor(fileContent.length / (100 * 1024)) * 15000, // 15s per 100KB (50% increase)
+            90000 // Cap additional time at 90s (max total 180s)
           )
           const adaptiveTimeout = baseTimeout + additionalTimeout
           

@@ -211,32 +211,63 @@ async function processWorkflow(workflow) {
   console.log(`📦 Queueing file: ${upload.fileName} (${fileType})`)
     console.log(`📥 File URL: ${upload.fileUrl}`)
 
-    // CRITICAL: Don't download/parse file in cron job - takes 40-100+ seconds!
-    // Instead, queue the AI parsing job which will download and process the file asynchronously
-    console.log(`🚀 Scheduling AI parsing job (file will be downloaded in queue worker)...`)
+    // ✅ SEQUENTIAL WORKFLOW: Check feature flag
+    const useSequentialMode = process.env.SEQUENTIAL_WORKFLOW === '1'
     
-    // Queue the AI parsing job - it will handle file download and parsing
-    await processorRegistrationService.addJob('ai-parsing', {
-      stage: 'ai_parsing',
-      workflowId: workflowId,
-      data: {
+    if (useSequentialMode) {
+      // ✅ NEW: Sequential execution (direct invocation, no Bull queues)
+      console.log(`🚀 Starting SEQUENTIAL workflow execution...`)
+      console.log(`   This will complete ALL 6 stages in ~3-5 minutes`)
+      
+      const { sequentialWorkflowRunner } = await import('./src/lib/sequentialWorkflowRunner.js')
+      await sequentialWorkflowRunner.initialize()
+      
+      const workflowData = {
         uploadId: upload.id,
         merchantId: upload.merchantId,
         fileUrl: upload.fileUrl,
         fileName: upload.fileName,
         fileSize: upload.fileSize,
         mimeType: upload.mimeType,
-  fileType,
+        fileType,
         supplierId: upload.supplierId,
         purchaseOrderId: workflow.purchaseOrderId,
-        source: 'cron-processing',
-        queuedAt: workflow.createdAt?.toISOString()
+        source: 'cron-sequential'
       }
-    })
-    
-    console.log(`✅ AI parsing job queued - will download and process file asynchronously`)
-    console.log(`� Workflow ID: ${workflowId}`)
-    console.log(`⏰ File download and processing will happen in background (~30-60 seconds)`)
+      
+      const result = await sequentialWorkflowRunner.executeWorkflow(workflowId, workflowData)
+      
+      console.log(`✅ Sequential workflow completed in ${Math.round(result.duration / 1000)}s`)
+      console.log(`📋 Workflow ID: ${workflowId}`)
+      console.log(`⏰ All 6 stages processed without waiting`)
+      
+    } else {
+      // ❌ LEGACY: Queue to Bull (existing code - causes 38-minute delays)
+      console.log(`🚀 Scheduling AI parsing job (LEGACY MODE - will take ~38 minutes)...`)
+      
+      // Queue the AI parsing job - it will handle file download and parsing
+      await processorRegistrationService.addJob('ai-parsing', {
+        stage: 'ai_parsing',
+        workflowId: workflowId,
+        data: {
+          uploadId: upload.id,
+          merchantId: upload.merchantId,
+          fileUrl: upload.fileUrl,
+          fileName: upload.fileName,
+          fileSize: upload.fileSize,
+          mimeType: upload.mimeType,
+  fileType,
+          supplierId: upload.supplierId,
+          purchaseOrderId: workflow.purchaseOrderId,
+          source: 'cron-processing',
+          queuedAt: workflow.createdAt?.toISOString()
+        }
+      })
+      
+      console.log(`✅ AI parsing job queued - will download and process file asynchronously`)
+      console.log(`📋 Workflow ID: ${workflowId}`)
+      console.log(`⏰ File download and processing will happen in background (~30-60 seconds)`)
+    }
 
     // Update upload status to "processing"
     await prisma.upload.update({

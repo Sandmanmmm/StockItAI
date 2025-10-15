@@ -1177,8 +1177,15 @@ export class WorkflowOrchestrator {
         // Update workflow metadata with AI result
         await this.updateWorkflowStage(workflowId, WORKFLOW_STAGES.AI_PARSING, 'completed')
         
-        // Schedule database save stage with enriched data
-        await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.DATABASE_SAVE, enrichedNextStageData)
+        // ✅ SEQUENTIAL WORKFLOW: Feature flag to skip queuing
+        const isSequentialMode = process.env.SEQUENTIAL_WORKFLOW === '1'
+        
+        if (!isSequentialMode) {
+          // Schedule database save stage with enriched data (LEGACY MODE)
+          await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.DATABASE_SAVE, enrichedNextStageData)
+        } else {
+          console.log('   ⚡ [SEQUENTIAL] Skipping queue - will invoke next stage directly')
+        }
         
         job.progress(100)
         
@@ -1203,7 +1210,11 @@ export class WorkflowOrchestrator {
           success: true,
           stage: WORKFLOW_STAGES.AI_PARSING,
           aiResult,
-          nextStage: WORKFLOW_STAGES.DATABASE_SAVE
+          nextStage: WORKFLOW_STAGES.DATABASE_SAVE,
+          // ✅ SEQUENTIAL WORKFLOW: Return data for direct invocation
+          nextStageData: enrichedNextStageData,
+          purchaseOrderId,
+          merchantId
         }
         
       } catch (error) {
@@ -1519,7 +1530,15 @@ export class WorkflowOrchestrator {
       
       // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
       
-      await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION, enrichedNextStageData)
+      // ✅ SEQUENTIAL WORKFLOW: Feature flag to skip queuing
+      const isSequentialMode = process.env.SEQUENTIAL_WORKFLOW === '1'
+      
+      if (!isSequentialMode) {
+        // Schedule product draft creation stage (LEGACY MODE)
+        await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION, enrichedNextStageData)
+      } else {
+        console.log('   ⚡ [SEQUENTIAL] Skipping queue - will invoke next stage directly')
+      }
       
       job.progress(100)
       
@@ -1544,7 +1563,11 @@ export class WorkflowOrchestrator {
         success: true,
         stage: WORKFLOW_STAGES.DATABASE_SAVE,
         dbResult,
-        nextStage: WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION // Changed from DATA_NORMALIZATION
+        nextStage: WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION, // Changed from DATA_NORMALIZATION
+        // ✅ SEQUENTIAL WORKFLOW: Return data for direct invocation
+        nextStageData: enrichedNextStageData,
+        purchaseOrderId: dbResult.purchaseOrder?.id,
+        merchantId
       }
       
     } catch (error) {
@@ -1826,8 +1849,15 @@ export class WorkflowOrchestrator {
       
       // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
       
-      // Schedule image search stage to find and attach product images
-      await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.IMAGE_ATTACHMENT, enrichedNextStageData)
+      // ✅ SEQUENTIAL WORKFLOW: Feature flag to skip queuing
+      const isSequentialMode = process.env.SEQUENTIAL_WORKFLOW === '1'
+      
+      if (!isSequentialMode) {
+        // Schedule image search stage to find and attach product images (LEGACY MODE)
+        await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.IMAGE_ATTACHMENT, enrichedNextStageData)
+      } else {
+        console.log('   ⚡ [SEQUENTIAL] Skipping queue - will invoke next stage directly')
+      }
 
       job.progress(90)
 
@@ -1836,7 +1866,11 @@ export class WorkflowOrchestrator {
         stage: WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION,
         productDrafts,
         productDraftCount: productDrafts.length,
-        nextStage: WORKFLOW_STAGES.IMAGE_ATTACHMENT // Fixed: was STATUS_UPDATE
+        nextStage: WORKFLOW_STAGES.IMAGE_ATTACHMENT, // Fixed: was STATUS_UPDATE
+        // ✅ SEQUENTIAL WORKFLOW: Return data for direct invocation
+        nextStageData: enrichedNextStageData,
+        purchaseOrderId,
+        merchantId
       }
 
     } catch (error) {
@@ -1912,8 +1946,15 @@ export class WorkflowOrchestrator {
         { ...data, imageAttachmentResult: stageResult }
       )
       
-      // Immediately proceed to next stage
-      await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.SHOPIFY_SYNC, enrichedNextStageData)
+      // ✅ SEQUENTIAL WORKFLOW: Feature flag to skip queuing
+      const isSequentialMode = process.env.SEQUENTIAL_WORKFLOW === '1'
+      
+      if (!isSequentialMode) {
+        // Immediately proceed to next stage (LEGACY MODE)
+        await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.SHOPIFY_SYNC, enrichedNextStageData)
+      } else {
+        console.log('   ⚡ [SEQUENTIAL] Skipping queue - will invoke next stage directly')
+      }
       
       job.progress(100)
       
@@ -1923,7 +1964,11 @@ export class WorkflowOrchestrator {
         stage: WORKFLOW_STAGES.IMAGE_ATTACHMENT,
         backgroundJobQueued: true,
         message: 'Image processing queued in background',
-        nextStage: WORKFLOW_STAGES.SHOPIFY_SYNC
+        nextStage: WORKFLOW_STAGES.SHOPIFY_SYNC,
+        // ✅ SEQUENTIAL WORKFLOW: Return data for direct invocation
+        nextStageData: enrichedNextStageData,
+        purchaseOrderId,
+        merchantId
       }
     }
     
@@ -1974,14 +2019,26 @@ export class WorkflowOrchestrator {
             data
           )
           
-          await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.SHOPIFY_SYNC, enrichedNextStageData)
+          // ✅ SEQUENTIAL WORKFLOW: Feature flag to skip queuing (error path)
+          const isSequentialMode = process.env.SEQUENTIAL_WORKFLOW === '1'
+          
+          if (!isSequentialMode) {
+            // Schedule next stage despite error (LEGACY MODE)
+            await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.SHOPIFY_SYNC, enrichedNextStageData)
+          } else {
+            console.log('   ⚡ [SEQUENTIAL] Skipping queue - will invoke next stage directly')
+          }
           
           return {
             success: true,
             stage: WORKFLOW_STAGES.IMAGE_ATTACHMENT,
             skipped: true,
             message: 'No product drafts available - skipped image attachment',
-            nextStage: WORKFLOW_STAGES.SHOPIFY_SYNC
+            nextStage: WORKFLOW_STAGES.SHOPIFY_SYNC,
+            // ✅ SEQUENTIAL WORKFLOW: Return data for direct invocation
+            nextStageData: enrichedNextStageData,
+            purchaseOrderId,
+            merchantId
           }
         }
         
@@ -2564,8 +2621,15 @@ export class WorkflowOrchestrator {
       // Update workflow metadata
       await this.updateWorkflowStage(workflowId, WORKFLOW_STAGES.SHOPIFY_SYNC, 'completed')
       
-      // Schedule final status update with enriched data
-      await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.STATUS_UPDATE, enrichedNextStageData)
+      // ✅ SEQUENTIAL WORKFLOW: Feature flag to skip queuing
+      const isSequentialMode = process.env.SEQUENTIAL_WORKFLOW === '1'
+      
+      if (!isSequentialMode) {
+        // Schedule final status update with enriched data (LEGACY MODE)
+        await this.scheduleNextStage(workflowId, WORKFLOW_STAGES.STATUS_UPDATE, enrichedNextStageData)
+      } else {
+        console.log('   ⚡ [SEQUENTIAL] Skipping queue - will invoke next stage directly')
+      }
       
       job.progress(100)
       
@@ -2583,7 +2647,11 @@ export class WorkflowOrchestrator {
         success: true,
         stage: WORKFLOW_STAGES.SHOPIFY_SYNC,
         shopifyResult,
-        nextStage: WORKFLOW_STAGES.STATUS_UPDATE
+        nextStage: WORKFLOW_STAGES.STATUS_UPDATE,
+        // ✅ SEQUENTIAL WORKFLOW: Return data for direct invocation
+        nextStageData: enrichedNextStageData,
+        purchaseOrderId,
+        merchantId
       }
       
     } catch (error) {
@@ -2860,12 +2928,23 @@ export class WorkflowOrchestrator {
       console.log('   Had DB Result:', !!enrichedData.dbResult) 
       console.log('   Had Shopify Result:', !!enrichedData.shopifyResult)
       
+      // ✅ SEQUENTIAL WORKFLOW: Log completion mode
+      const isSequentialMode = process.env.SEQUENTIAL_WORKFLOW === '1'
+      if (isSequentialMode) {
+        console.log('   🚀 [SEQUENTIAL] Workflow completed in sequential mode')
+      } else {
+        console.log('   📋 [LEGACY] Workflow completed in legacy queue mode')
+      }
+      
       job.progress(100)
       
       return {
         success: true,
         stage: WORKFLOW_STAGES.STATUS_UPDATE,
-        finalResult
+        finalResult,
+        // ✅ SEQUENTIAL WORKFLOW: Mark as final stage (no next stage)
+        nextStageData: null,
+        isComplete: true
       }
       
     } catch (error) {

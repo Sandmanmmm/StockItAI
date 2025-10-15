@@ -37,14 +37,16 @@ console.log(`⏱️ Adaptive timeout: ${adaptiveTimeout}ms for ${fileSizeMB.toFi
 ```
 
 **Logic**:
-- **Base timeout**: 60 seconds for files under 100KB
-- **Scaling**: +10 seconds per 100KB of file size
-- **Cap**: Maximum 120 seconds total (60s base + 60s additional)
+- **Base timeout**: 90 seconds for files under 100KB (increased from 60s based on production data showing 77KB file timeouts)
+- **Scaling**: +15 seconds per 100KB of file size (50% more generous than initial)
+- **Cap**: Maximum 180 seconds total (90s base + 90s additional = 3 minutes)
+- **Rationale**: OpenAI Vision API latency varies significantly based on service load, not just file size
 - **Examples**:
-  - 50KB image → 60s timeout
-  - 200KB image → 80s timeout (60 + 20)
-  - 500KB image → 110s timeout (60 + 50)
-  - 1MB+ image → 120s timeout (capped)
+  - 50KB image → 90s timeout (handles API latency)
+  - 100KB image → 105s timeout (90 + 15)
+  - 200KB image → 120s timeout (90 + 30)
+  - 500KB image → 165s timeout (90 + 75)
+  - 1MB+ image → 180s timeout (capped at 3 minutes)
 
 ---
 
