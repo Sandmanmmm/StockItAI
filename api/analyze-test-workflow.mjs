@@ -1,4 +1,4 @@
-import { db } from './src/lib/db.js'
+import db from './src/lib/db.js'
 
 /**
  * Analyze Test Workflow Results
@@ -19,34 +19,19 @@ async function analyzeTestWorkflow(workflowId) {
   console.log(`Analysis Time: ${new Date().toISOString()}\n`)
 
   try {
-    const workflow = await db.workflowExecution.findUnique({
+    // Get Prisma client
+    const prisma = await db.getClient()
+    
+    const workflow = await prisma.workflowExecution.findUnique({
       where: { id: workflowId },
       include: {
-        upload: {
+        stages: {
           select: {
-            fileName: true,
-            fileSize: true,
-            fileType: true,
-            mimeType: true,
-            createdAt: true
-          }
-        },
-        purchaseOrder: {
-          include: {
-            lineItems: {
-              select: {
-                id: true,
-                productName: true,
-                quantity: true,
-                unitCost: true
-              }
-            },
-            supplier: {
-              select: {
-                name: true,
-                email: true
-              }
-            }
+            stageName: true,
+            status: true,
+            startedAt: true,
+            completedAt: true,
+            duration: true
           }
         }
       }
@@ -113,55 +98,27 @@ async function analyzeTestWorkflow(workflowId) {
     // ============================================================
     // SECTION 2: FILE DETAILS
     // ============================================================
-    console.log(`\n📁 FILE DETAILS`)
-    console.log(`===============`)
-    if (workflow.upload) {
-      console.log(`File Name:        ${workflow.upload.fileName}`)
-      console.log(`File Size:        ${(workflow.upload.fileSize / 1024).toFixed(2)} KB`)
-      console.log(`File Type:        ${workflow.upload.fileType || 'N/A'}`)
-      console.log(`MIME Type:        ${workflow.upload.mimeType || 'N/A'}`)
-      console.log(`Uploaded:         ${workflow.upload.createdAt.toISOString()}`)
-    } else {
-      console.log(`⚠️  No upload record found`)
-    }
+    console.log(`\n📁 WORKFLOW DETAILS`)
+    console.log(`==================`)
+    console.log(`Upload ID:        ${workflow.uploadId || 'N/A'}`)
+    console.log(`PO ID:            ${workflow.purchaseOrderId || 'N/A'}`)
+    console.log(`Stages Complete:  ${workflow.stagesCompleted}/${workflow.stagesTotal}`)
+    console.log(`Progress:         ${workflow.progressPercent}%`)
 
     // ============================================================
-    // SECTION 3: PURCHASE ORDER DATA
+    // SECTION 3: STAGE BREAKDOWN
     // ============================================================
-    console.log(`\n📦 PURCHASE ORDER DATA`)
-    console.log(`======================`)
-    if (workflow.purchaseOrder) {
-      const po = workflow.purchaseOrder
-      console.log(`✅ PO Created Successfully`)
-      console.log(`PO Number:        ${po.poNumber || 'N/A'}`)
-      console.log(`Supplier:         ${po.supplier?.name || 'N/A'}`)
-      console.log(`Supplier Email:   ${po.supplier?.email || 'N/A'}`)
-      console.log(`Line Items:       ${po.lineItems.length}`)
-      console.log(`Total Amount:     $${po.totalAmount?.toFixed(2) || '0.00'}`)
-      console.log(`Currency:         ${po.currency || 'USD'}`)
-      console.log(`Status:           ${po.status}`)
-      console.log(`Shopify Order:    ${po.shopifyOrderId || 'Not synced yet'}`)
-      console.log(`Sync Status:      ${po.shopifySyncStatus || 'N/A'}`)
-      console.log(`Synced At:        ${po.shopifySyncedAt?.toISOString() || 'N/A'}`)
-
-      // Show line items summary
-      if (po.lineItems.length > 0) {
-        console.log(`\n   Line Items Summary:`)
-        po.lineItems.forEach((item, i) => {
-          console.log(`   ${i+1}. ${item.productName || 'Unknown'} - Qty: ${item.quantity || 0} @ $${item.unitCost?.toFixed(2) || '0.00'}`)
-        })
-      }
-
-      // Data quality checks
-      console.log(`\n   Data Quality Checks:`)
-      console.log(`   ${po.poNumber ? '✅' : '❌'} PO Number present`)
-      console.log(`   ${po.supplier ? '✅' : '❌'} Supplier linked`)
-      console.log(`   ${po.lineItems.length > 0 ? '✅' : '❌'} Line items extracted`)
-      console.log(`   ${po.totalAmount > 0 ? '✅' : '⚠️ '} Total amount calculated`)
-      console.log(`   ${po.shopifyOrderId ? '✅' : '⚠️ '} Shopify order created`)
-
+    console.log(`\n� STAGE BREAKDOWN`)
+    console.log(`==================`)
+    if (workflow.stages && workflow.stages.length > 0) {
+      workflow.stages.forEach(stage => {
+        const stageDuration = stage.duration 
+          ? `${Math.floor(stage.duration / 60000)}m ${Math.floor((stage.duration % 60000) / 1000)}s`
+          : 'N/A'
+        console.log(`${stage.stageName.padEnd(20)} | ${stage.status.padEnd(12)} | ${stageDuration}`)
+      })
     } else {
-      console.log(`❌ No PO created - workflow may have failed`)
+      console.log(`⚠️  No stage execution records found`)
     }
 
     // ============================================================
@@ -170,7 +127,7 @@ async function analyzeTestWorkflow(workflowId) {
     console.log(`\n📊 COMPARISON WITH LEGACY MODE`)
     console.log(`==============================`)
     
-    const legacyWorkflows = await db.workflowExecution.findMany({
+    const legacyWorkflows = await prisma.workflowExecution.findMany({
       where: {
         merchantId: workflow.merchantId,
         status: 'completed',
@@ -332,11 +289,8 @@ async function analyzeTestWorkflow(workflowId) {
       console.log(`5. ⚠️  FIX ISSUES: Address problems above before Phase 3`)
     }
 
-    await db.$disconnect()
-
   } catch (error) {
     console.error('❌ Error analyzing workflow:', error)
-    await db.$disconnect()
     throw error
   }
 }

@@ -1,4 +1,4 @@
-import { db } from './src/lib/db.js'
+import db from './src/lib/db.js'
 
 /**
  * Disable Sequential Workflow for Specific Merchant
@@ -13,10 +13,13 @@ async function disableSequentialForMerchant(merchantId) {
   console.log(`🔧 Disabling sequential workflow for merchant: ${merchantId}\n`)
 
   try {
+    // Get Prisma client
+    const prisma = await db.getClient()
+    
     // Verify merchant exists
-    const merchant = await db.merchant.findUnique({
+    const merchant = await prisma.merchant.findUnique({
       where: { id: merchantId },
-      select: { id: true, shopDomain: true }
+      select: { id: true, shopDomain: true, settings: true }
     })
 
     if (!merchant) {
@@ -26,37 +29,29 @@ async function disableSequentialForMerchant(merchantId) {
 
     console.log(`✅ Found merchant: ${merchant.shopDomain}`)
 
-    // Check current config
-    const currentConfig = await db.merchantConfig.findUnique({
-      where: { merchantId: merchantId }
-    })
+    // Check current settings
+    const currentSettings = typeof merchant.settings === 'object' ? merchant.settings : {}
 
-    if (!currentConfig) {
-      console.log(`⚠️  No configuration found for this merchant`)
-      console.log(`   Sequential workflow was not enabled`)
-      await db.$disconnect()
-      return
-    }
-
-    if (!currentConfig.enableSequentialWorkflow) {
+    if (!currentSettings.enableSequentialWorkflow) {
       console.log(`ℹ️  Sequential workflow is already disabled for this merchant`)
-      await db.$disconnect()
       return
     }
 
-    // Update config
-    const config = await db.merchantConfig.update({
-      where: { merchantId: merchantId },
+    // Update settings
+    const updatedMerchant = await prisma.merchant.update({
+      where: { id: merchantId },
       data: { 
-        enableSequentialWorkflow: false,
-        updatedAt: new Date()
+        settings: {
+          ...currentSettings,
+          enableSequentialWorkflow: false
+        }
       }
     })
 
     console.log(`\n✅ Sequential workflow DISABLED for ${merchant.shopDomain}`)
-    console.log(`   Config ID: ${config.id}`)
-    console.log(`   Sequential Enabled: ${config.enableSequentialWorkflow}`)
-    console.log(`   Updated: ${config.updatedAt.toISOString()}`)
+    console.log(`   Merchant ID: ${updatedMerchant.id}`)
+    console.log(`   Sequential Enabled: ${updatedMerchant.settings.enableSequentialWorkflow}`)
+    console.log(`   Updated: ${updatedMerchant.updatedAt.toISOString()}`)
     console.log(`\n🔄 Merchant will now use legacy Bull queue mode (38 min workflows)`)
 
     console.log('\n🔄 To Re-Enable Later:')
@@ -65,8 +60,6 @@ async function disableSequentialForMerchant(merchantId) {
   } catch (error) {
     console.error('❌ Error disabling sequential mode:', error)
     throw error
-  } finally {
-    await db.$disconnect()
   }
 }
 

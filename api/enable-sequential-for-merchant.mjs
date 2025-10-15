@@ -1,4 +1,4 @@
-import { db } from './src/lib/db.js'
+import db from './src/lib/db.js'
 
 /**
  * Enable Sequential Workflow for Specific Merchant
@@ -13,13 +13,16 @@ async function enableSequentialForMerchant(merchantId) {
   console.log(`🔧 Enabling sequential workflow for merchant: ${merchantId}\n`)
 
   try {
+    // Get Prisma client
+    const prisma = await db.getClient()
+    
     // Verify merchant exists
-    const merchant = await db.merchant.findUnique({
+    const merchant = await prisma.merchant.findUnique({
       where: { id: merchantId },
       select: { 
         id: true, 
         shopDomain: true,
-        isActive: true
+        status: true
       }
     })
 
@@ -29,69 +32,52 @@ async function enableSequentialForMerchant(merchantId) {
       process.exit(1)
     }
 
-    if (!merchant.isActive) {
+    if (merchant.status !== 'active') {
       console.warn(`⚠️  Warning: Merchant is not active: ${merchant.shopDomain}`)
+      console.warn(`   Status: ${merchant.status}`)
       console.warn(`   Sequential workflow will still be enabled, but merchant may not upload POs`)
     }
 
     console.log(`✅ Found merchant: ${merchant.shopDomain}`)
-    console.log(`   Status: ${merchant.isActive ? 'Active' : 'Inactive'}`)
+    console.log(`   Status: ${merchant.status}`)
 
-    // Check if MerchantConfig table exists
-    let tableExists = false
-    try {
-      await db.merchantConfig.findFirst()
-      tableExists = true
-    } catch (error) {
-      if (error.code === 'P2021' || error.message.includes('does not exist')) {
-        console.log('⚠️  MerchantConfig table does not exist yet')
-        console.log('📝 Creating table via Prisma schema...')
-        
-        // Table should exist from Prisma schema, but if not, guide user
-        console.error('❌ Please run: npx prisma migrate dev --name add-merchant-config')
-        console.error('   Or create the table manually in your database')
-        process.exit(1)
-      } else {
-        throw error
-      }
-    }
-
-    // Upsert merchant config
-    console.log('💾 Updating merchant configuration...')
+    // Get current settings
+    const currentSettings = typeof merchant.settings === 'object' ? merchant.settings : {}
     
-    const config = await db.merchantConfig.upsert({
-      where: { merchantId: merchantId },
-      update: { 
-        enableSequentialWorkflow: true,
-        updatedAt: new Date()
-      },
-      create: { 
-        merchantId: merchantId,
-        enableSequentialWorkflow: true
+    // Update settings with sequential workflow flag
+    console.log('\n� Updating merchant settings...')
+    
+    const updatedMerchant = await prisma.merchant.update({
+      where: { id: merchantId },
+      data: {
+        settings: {
+          ...currentSettings,
+          enableSequentialWorkflow: true
+        }
       }
     })
 
     console.log(`\n✅ Sequential workflow ENABLED for ${merchant.shopDomain}`)
-    console.log(`   Config ID: ${config.id}`)
-    console.log(`   Merchant ID: ${config.merchantId}`)
-    console.log(`   Sequential Enabled: ${config.enableSequentialWorkflow}`)
-    console.log(`   Updated: ${config.updatedAt.toISOString()}`)
+    console.log(`   Merchant ID: ${updatedMerchant.id}`)
+    console.log(`   Sequential Enabled: ${updatedMerchant.settings.enableSequentialWorkflow}`)
+    console.log(`   Updated: ${updatedMerchant.updatedAt.toISOString()}`)
 
     // Verify configuration was saved
-    const verification = await db.merchantConfig.findUnique({
-      where: { merchantId: merchantId }
+    const verification = await prisma.merchant.findUnique({
+      where: { id: merchantId },
+      select: { settings: true }
     })
 
-    if (verification?.enableSequentialWorkflow) {
+    if (verification?.settings?.enableSequentialWorkflow) {
       console.log(`\n🎉 Configuration verified in database!`)
     } else {
       console.error(`\n❌ Configuration verification failed!`)
-      console.error(`   The record was created but enableSequentialWorkflow is not true`)
+      console.error(`   The record was updated but enableSequentialWorkflow is not true`)
       process.exit(1)
     }
 
     // Check recent workflows
-    const recentWorkflows = await db.workflowExecution.findMany({
+    const recentWorkflows = await prisma.workflowExecution.findMany({
       where: { merchantId: merchantId },
       orderBy: { createdAt: 'desc' },
       take: 5,
@@ -131,8 +117,6 @@ async function enableSequentialForMerchant(merchantId) {
     console.error('   Error code:', error.code)
     console.error('   Error message:', error.message)
     throw error
-  } finally {
-    await db.$disconnect()
   }
 }
 

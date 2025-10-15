@@ -1,4 +1,4 @@
-import { db } from './src/lib/db.js'
+import db from './src/lib/db.js'
 
 /**
  * Identify Test Merchant for Sequential Workflow Pilot
@@ -14,10 +14,13 @@ async function identifyTestMerchant() {
   console.log('🔍 Analyzing merchants for pilot testing...\n')
 
   try {
+    // Get Prisma client
+    const prisma = await db.getClient()
+    
     // Query merchants with recent successful workflows
-    const candidates = await db.merchant.findMany({
+    const candidates = await prisma.merchant.findMany({
       where: {
-        isActive: true,
+        status: 'active',
         workflows: {
           some: {
             status: 'completed',
@@ -126,18 +129,16 @@ async function identifyTestMerchant() {
     console.log(`   ✅ Representative volume (${recommended.recentWorkflows} workflows/month)`)
     console.log(`   ${parseFloat(recommended.avgDurationMin) > 30 ? '⚠️' : '✅'}  Typical duration (${recommended.avgDurationMin} min)`)
 
-    console.log('\n🚀 Next Steps:')
+    console.log('\n� Next Steps:')
     console.log(`   1. Copy merchant ID: ${recommended.merchantId}`)
     console.log(`   2. Run: node enable-sequential-for-merchant.mjs ${recommended.merchantId}`)
     console.log(`   3. Run: node monitor-test-merchant.mjs ${recommended.merchantId}`)
     console.log(`   4. Wait for merchant to upload a PO`)
 
-    await db.$disconnect()
     return recommended.merchantId
 
   } catch (error) {
     console.error('❌ Error analyzing merchants:', error)
-    await db.$disconnect()
     throw error
   }
 }

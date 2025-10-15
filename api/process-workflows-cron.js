@@ -211,8 +211,23 @@ async function processWorkflow(workflow) {
   console.log(`📦 Queueing file: ${upload.fileName} (${fileType})`)
     console.log(`📥 File URL: ${upload.fileUrl}`)
 
-    // ✅ SEQUENTIAL WORKFLOW: Check feature flag
-    const useSequentialMode = process.env.SEQUENTIAL_WORKFLOW === '1'
+    // ✅ SEQUENTIAL WORKFLOW: Check global flag OR per-merchant flag
+    let useSequentialMode = process.env.SEQUENTIAL_WORKFLOW === '1'
+    
+    if (!useSequentialMode) {
+      // Check per-merchant override
+      const merchant = await prisma.merchant.findUnique({
+        where: { id: upload.merchantId },
+        select: { settings: true, shopDomain: true }
+      })
+      
+      const settings = typeof merchant?.settings === 'object' ? merchant.settings : {}
+      useSequentialMode = settings.enableSequentialWorkflow === true
+      
+      if (useSequentialMode) {
+        console.log(`✅ Sequential mode enabled for merchant: ${merchant.shopDomain}`)
+      }
+    }
     
     if (useSequentialMode) {
       // ✅ NEW: Sequential execution (direct invocation, no Bull queues)

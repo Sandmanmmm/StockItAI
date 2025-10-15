@@ -1,4 +1,4 @@
-import { db } from './src/lib/db.js'
+import db from './src/lib/db.js'
 
 /**
  * Real-Time Workflow Monitor for Test Merchant
@@ -14,9 +14,15 @@ async function monitorTestMerchant(merchantId) {
   console.log(`📊 Real-Time Workflow Monitor`)
   console.log(`==============================`)
   console.log(`Merchant ID: ${merchantId}`)
-  console.log(`Started:     ${new Date().toISOString()}`)
-  console.log(`Mode:        Watching for new workflows...`)
-  console.log(`Timeout:     15 minutes\n`)
+  
+  const monitorStartTime = new Date()
+  console.log(`Started:     ${monitorStartTime.toISOString()}`)
+  console.log(`Mode:        Watching for NEW workflows only...`)
+  console.log(`Timeout:     15 minutes`)
+  console.log(`\n⏳ Waiting for merchant to upload a PO...\n`)
+
+  // Get Prisma client once
+  const prisma = await db.getClient()
 
   let lastWorkflowId = null
   let checkCount = 0
@@ -26,19 +32,15 @@ async function monitorTestMerchant(merchantId) {
     checkCount++
     
     try {
-      // Find most recent workflow
-      const workflow = await db.workflowExecution.findFirst({
-        where: { merchantId: merchantId },
-        orderBy: { createdAt: 'desc' },
-        include: {
-          upload: {
-            select: { 
-              fileName: true,
-              fileSize: true,
-              fileType: true
-            }
+      // Find most recent workflow CREATED AFTER monitor started
+      const workflow = await prisma.workflowExecution.findFirst({
+        where: { 
+          merchantId: merchantId,
+          createdAt: {
+            gte: monitorStartTime  // Only workflows created after monitoring started
           }
-        }
+        },
+        orderBy: { createdAt: 'desc' }
       })
 
       if (!workflow) {
@@ -55,9 +57,7 @@ async function monitorTestMerchant(merchantId) {
         console.log(`\n🆕 NEW WORKFLOW DETECTED!`)
         console.log(`================================`)
         console.log(`   Workflow ID:  ${workflow.id}`)
-        console.log(`   File Name:    ${workflow.upload?.fileName || 'unknown'}`)
-        console.log(`   File Size:    ${workflow.upload?.fileSize ? (workflow.upload.fileSize / 1024).toFixed(2) + ' KB' : 'unknown'}`)
-        console.log(`   File Type:    ${workflow.upload?.fileType || 'unknown'}`)
+        console.log(`   Upload ID:    ${workflow.uploadId || 'unknown'}`)
         console.log(`   Started:      ${workflow.createdAt.toISOString()}`)
         console.log(`   Stage:        ${workflow.currentStage || 'not_started'}`)
         console.log(`   Status:       ${workflow.status}`)
@@ -121,7 +121,6 @@ async function monitorTestMerchant(merchantId) {
         console.log(`   4. Document results in PHASE_2_TEST_RESULTS.md`)
         
         clearInterval(interval)
-        await db.$disconnect()
         process.exit(0)
       }
 
@@ -145,7 +144,6 @@ async function monitorTestMerchant(merchantId) {
         console.log(`   4. Disable sequential mode: node disable-sequential-for-merchant.mjs ${merchantId}`)
         
         clearInterval(interval)
-        await db.$disconnect()
         process.exit(1)
       }
 
@@ -188,7 +186,7 @@ async function monitorTestMerchant(merchantId) {
       console.log(`   3. Continue monitoring: run this script again`)
     }
     clearInterval(interval)
-    db.$disconnect().then(() => process.exit(1))
+    process.exit(1)
   }, 900000) // 15 minutes
 }
 
