@@ -49,6 +49,21 @@ export class SequentialWorkflowRunner {
   }
 
   /**
+   * Helper to preserve core workflow identifiers during stage-to-stage data merges
+   * These IDs (merchantId, uploadId, workflowId, purchaseOrderId) must NEVER be lost
+   * @param {object} data - Current data object
+   * @returns {object} - Object with preserved core IDs
+   */
+  preserveCoreIds(data) {
+    return {
+      merchantId: data.merchantId,
+      uploadId: data.uploadId,
+      workflowId: data.workflowId,
+      purchaseOrderId: data.purchaseOrderId
+    }
+  }
+
+  /**
    * Initialize the workflow runner
    * Must be called before executing workflows
    */
@@ -150,9 +165,11 @@ export class SequentialWorkflowRunner {
       )
       
       // Merge results for next stage
+      // ⚠️ CRITICAL: Preserve core IDs explicitly to prevent loss through nested merges
       currentData = { 
         ...currentData, 
         ...stageResults.aiParsing.nextStageData,
+        ...this.preserveCoreIds(currentData),  // Explicitly preserve core IDs - must come last
         aiResult: stageResults.aiParsing.aiResult
       }
       
@@ -172,11 +189,18 @@ export class SequentialWorkflowRunner {
       )
       
       // Merge results for next stage
+      // ⚠️ CRITICAL: Preserve core IDs explicitly to prevent loss through nested merges
+      // PO ID might be created/updated in DB save, so use that if available
+      const preservedIds = {
+        ...this.preserveCoreIds(currentData),
+        purchaseOrderId: stageResults.databaseSave.purchaseOrderId || currentData.purchaseOrderId
+      }
+      
       currentData = { 
         ...currentData, 
         ...stageResults.databaseSave.nextStageData,
-        dbResult: stageResults.databaseSave.dbResult,
-        purchaseOrderId: stageResults.databaseSave.purchaseOrderId
+        ...preservedIds,  // Explicitly preserve core IDs - must come last
+        dbResult: stageResults.databaseSave.dbResult
       }
       
       this.checkTimeout()
@@ -195,15 +219,17 @@ export class SequentialWorkflowRunner {
       )
       
       // Merge results for next stage
+      // ⚠️ CRITICAL: Preserve core IDs explicitly to prevent loss through nested merges
       currentData = { 
         ...currentData, 
         ...stageResults.productDraft.nextStageData,
+        ...this.preserveCoreIds(currentData),  // Explicitly preserve core IDs - must come last
         draftResult: stageResults.productDraft.draftResult
       }
       
       this.checkTimeout()
 
-      // ========== Stage 4: Image Attachment (expected: 20-40s) ==========
+      // ========== Stage 4: IMAGE ATTACHMENT (expected: 20-40s) ==========
       console.log(`\n${'='.repeat(70)}`)
       console.log(`📊 Stage 4/6: IMAGE ATTACHMENT`)
       console.log(`${'='.repeat(70)}`)
@@ -217,9 +243,11 @@ export class SequentialWorkflowRunner {
       )
       
       // Merge results for next stage
+      // ⚠️ CRITICAL: Preserve core IDs explicitly to prevent loss through nested merges
       currentData = { 
         ...currentData, 
         ...stageResults.imageAttachment.nextStageData,
+        ...this.preserveCoreIds(currentData),  // Explicitly preserve core IDs - must come last
         imageResult: stageResults.imageAttachment.imageResult
       }
       
@@ -239,9 +267,11 @@ export class SequentialWorkflowRunner {
       )
       
       // Merge results for next stage
+      // ⚠️ CRITICAL: Preserve core IDs explicitly to prevent loss through nested merges
       currentData = { 
         ...currentData, 
         ...stageResults.shopifySync.nextStageData,
+        ...this.preserveCoreIds(currentData),  // Explicitly preserve core IDs - must come last
         shopifyResult: stageResults.shopifySync.shopifyResult
       }
       
