@@ -236,8 +236,10 @@ async function processWorkflow(workflow) {
       console.log(`   Running in dedicated serverless function to avoid timeout`)
       
       // Trigger dedicated sequential workflow endpoint (fire-and-forget)
-      const sequentialEndpoint = process.env.VERCEL_URL 
-        ? `https://${process.env.VERCEL_URL}/api/execute-sequential-workflow`
+      // Use production URL to ensure latest code is running
+      const productionUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL
+      const sequentialEndpoint = productionUrl
+        ? `https://${productionUrl}/api/execute-sequential-workflow`
         : 'http://localhost:3001/api/execute-sequential-workflow'
       
       console.log(`📡 Triggering endpoint: ${sequentialEndpoint}`)
