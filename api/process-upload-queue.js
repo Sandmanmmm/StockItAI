@@ -148,6 +148,73 @@ export default async function handler(req, res) {
     const purchaseOrderId = upload.metadata?.purchaseOrderId
     console.log(`📝 Purchase Order ID from upload metadata: ${purchaseOrderId}`)
 
+    // ✅ SEQUENTIAL WORKFLOW: Check global flag OR per-merchant flag
+    let useSequentialMode = process.env.SEQUENTIAL_WORKFLOW === '1'
+    
+    if (!useSequentialMode) {
+      // Check per-merchant override
+      const settings = typeof upload.merchant?.settings === 'object' ? upload.merchant.settings : {}
+      useSequentialMode = settings.enableSequentialWorkflow === true
+      
+      if (useSequentialMode) {
+        console.log(`✅ Sequential mode enabled for merchant: ${upload.merchant?.shopDomain}`)
+      }
+    }
+    
+    if (useSequentialMode) {
+      // ✅ NEW: Sequential execution (direct invocation, no Bull queues)
+      console.log(`🚀 Starting SEQUENTIAL workflow execution...`)
+      console.log(`   This will complete ALL 6 stages in ~3-5 minutes`)
+      
+      const { sequentialWorkflowRunner } = await import('./src/lib/sequentialWorkflowRunner.js')
+      await sequentialWorkflowRunner.initialize()
+      
+      const workflowData = {
+        uploadId: upload.id,
+        merchantId: upload.merchantId,
+        fileUrl: upload.fileUrl,
+        fileName: upload.fileName,
+        fileSize: upload.fileSize,
+        mimeType: upload.mimeType,
+        fileType,
+        supplierId: upload.supplierId,
+        purchaseOrderId: purchaseOrderId,
+        source: 'upload-sequential'
+      }
+      
+      const result = await sequentialWorkflowRunner.executeWorkflow(workflowId, workflowData)
+      
+      console.log(`✅ Sequential workflow completed in ${Math.round(result.duration / 1000)}s`)
+      console.log(`📋 Workflow ID: ${workflowId}`)
+      console.log(`⏰ All 6 stages processed without waiting`)
+      
+      // Update upload status to completed
+      await prisma.upload.update({
+        where: { id: uploadId },
+        data: {
+          status: 'completed',
+          workflowId: workflowId,
+          updatedAt: new Date()
+        }
+      })
+      
+      console.log(`📬 Sequential workflow handler completed`)
+      console.log(`⏱️ Total execution time: ${Date.now() - startTime}ms`)
+      console.log(`✅ ========== SEQUENTIAL WORKFLOW COMPLETE ==========`)
+      
+      return res.status(200).json({
+        success: true,
+        uploadId,
+        workflowId: workflowId,
+        message: 'Sequential workflow completed successfully',
+        duration: result.duration,
+        mode: 'sequential'
+      })
+    }
+    
+    // ❌ LEGACY: Queue to Bull (existing code - causes 30-60 minute delays)
+    console.log(`🚀 Using LEGACY Bull queue mode (will take ~30-60 minutes)...`)
+    
     // Initialize queue processors if not already done (required for workflow execution)
     if (!processorsInitialized) {
       console.log(`🚀 Initializing queue processors...`)
