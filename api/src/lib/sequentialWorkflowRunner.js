@@ -233,6 +233,14 @@ export class SequentialWorkflowRunner {
       console.log(`\n${'='.repeat(70)}`)
       console.log(`📊 Stage 4/6: IMAGE ATTACHMENT`)
       console.log(`${'='.repeat(70)}`)
+      console.log(`🔍 DEBUG - currentData before image_attachment:`, {
+        merchantId: currentData.merchantId,
+        uploadId: currentData.uploadId,
+        workflowId: currentData.workflowId,
+        purchaseOrderId: currentData.purchaseOrderId,
+        hasProductDrafts: !!currentData.productDrafts,
+        keys: Object.keys(currentData)
+      })
       this.currentStage = WORKFLOW_STAGES.IMAGE_ATTACHMENT
       
       stageResults.imageAttachment = await this.executeStage(
