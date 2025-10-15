@@ -246,14 +246,17 @@ export class WorkflowOrchestrator {
       const accumulatedData = await stageResultStore.getAccumulatedData(workflowId)
       
       // Merge with next stage data
+      // ⚠️ CRITICAL: Preserve essential IDs from nextStageData (merchantId, uploadId, etc)
+      // accumulatedData has stage results but might not have these core identifiers
       const enrichedData = {
-        ...nextStageData,
         ...accumulatedData,
+        ...nextStageData,  // nextStageData wins to preserve merchantId, uploadId, etc
         previousStages: accumulatedData?.stages || {}
       }
       
       console.log(`📊 Accumulated data for ${currentStage} -> next stage:`, {
         workflowId,
+        merchantId: enrichedData.merchantId,
         hasAiResult: !!enrichedData.aiResult,
         hasDbResult: !!enrichedData.dbResult,
         hasShopifyResult: !!enrichedData.shopifyResult,
