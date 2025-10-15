@@ -22,6 +22,21 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
+  // ✅ INTERNAL AUTH: Allow calls from Vercel internal network
+  const isInternalCall = req.headers['x-vercel-internal'] === 'true' ||
+                         req.headers['user-agent']?.includes('Vercel-Cron-Internal') ||
+                         req.headers['user-agent']?.includes('Vercel-Upload-Internal') ||
+                         req.headers['x-vercel-internal-bot-check'] === 'skip'
+
+  if (!isInternalCall) {
+    console.error(`❌ Unauthorized sequential workflow trigger attempt`)
+    console.error(`   User-Agent: ${req.headers['user-agent']}`)
+    console.error(`   x-vercel-internal: ${req.headers['x-vercel-internal']}`)
+    return res.status(401).json({ error: 'Unauthorized - Internal use only' })
+  }
+
+  console.log(`✅ Internal call authenticated`)
+
   const { workflowId } = req.body || {}
   
   if (!workflowId) {

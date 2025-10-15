@@ -246,7 +246,9 @@ async function processWorkflow(workflow) {
       fetch(sequentialEndpoint, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'x-vercel-internal': 'true',
+          'User-Agent': 'Vercel-Cron-Internal'
         },
         body: JSON.stringify({ workflowId })
       }).then(response => {

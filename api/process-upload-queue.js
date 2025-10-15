@@ -178,7 +178,9 @@ export default async function handler(req, res) {
       fetch(sequentialEndpoint, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'x-vercel-internal': 'true',
+          'User-Agent': 'Vercel-Upload-Internal'
         },
         body: JSON.stringify({ workflowId })
       }).then(response => {
