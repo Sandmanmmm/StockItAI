@@ -230,31 +230,37 @@ async function processWorkflow(workflow) {
     }
     
     if (useSequentialMode) {
-      // ✅ NEW: Sequential execution (direct invocation, no Bull queues)
-      console.log(`🚀 Starting SEQUENTIAL workflow execution...`)
+      // ✅ NEW: Sequential execution via dedicated endpoint (fire-and-forget)
+      console.log(`🚀 Triggering SEQUENTIAL workflow execution...`)
       console.log(`   This will complete ALL 6 stages in ~3-5 minutes`)
+      console.log(`   Running in dedicated serverless function to avoid timeout`)
       
-      const { sequentialWorkflowRunner } = await import('./src/lib/sequentialWorkflowRunner.js')
-      await sequentialWorkflowRunner.initialize()
+      // Trigger dedicated sequential workflow endpoint (fire-and-forget)
+      const sequentialEndpoint = process.env.VERCEL_URL 
+        ? `https://${process.env.VERCEL_URL}/api/execute-sequential-workflow`
+        : 'http://localhost:3001/api/execute-sequential-workflow'
       
-      const workflowData = {
-        uploadId: upload.id,
-        merchantId: upload.merchantId,
-        fileUrl: upload.fileUrl,
-        fileName: upload.fileName,
-        fileSize: upload.fileSize,
-        mimeType: upload.mimeType,
-        fileType,
-        supplierId: upload.supplierId,
-        purchaseOrderId: workflow.purchaseOrderId,
-        source: 'cron-sequential'
-      }
+      console.log(`📡 Triggering endpoint: ${sequentialEndpoint}`)
       
-      const result = await sequentialWorkflowRunner.executeWorkflow(workflowId, workflowData)
+      // Fire-and-forget HTTP call (don't await)
+      fetch(sequentialEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ workflowId })
+      }).then(response => {
+        if (response.ok) {
+          console.log(`✅ Sequential workflow triggered successfully: ${workflowId}`)
+        } else {
+          console.error(`❌ Failed to trigger sequential workflow: ${response.status}`)
+        }
+      }).catch(error => {
+        console.error(`❌ Error triggering sequential workflow:`, error.message)
+      })
       
-      console.log(`✅ Sequential workflow completed in ${Math.round(result.duration / 1000)}s`)
+      console.log(`✅ Sequential workflow trigger sent (processing in background)`)
       console.log(`📋 Workflow ID: ${workflowId}`)
-      console.log(`⏰ All 6 stages processed without waiting`)
       
     } else {
       // ❌ LEGACY: Queue to Bull (existing code - causes 38-minute delays)
