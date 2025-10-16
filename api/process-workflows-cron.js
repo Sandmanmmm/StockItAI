@@ -109,6 +109,38 @@ const selectPreferredWorkflow = (current, candidate) => {
   return getTime(candidate) < getTime(current) ? candidate : current
 }
 
+const SEQUENTIAL_LOCK_TIMEOUT_MS = 5 * 60 * 1000
+
+const toPlainObject = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {}
+  }
+  return { ...value }
+}
+
+const getSequentialRunnerState = (metadata) => {
+  const root = toPlainObject(metadata)
+  const runner = toPlainObject(root.sequentialRunner)
+
+  if (!runner.startedAt || !runner.status) {
+    return {
+      ...runner,
+      lockAgeMs: null,
+      isActive: false
+    }
+  }
+
+  const startedAtMs = Date.parse(runner.startedAt)
+  const lockAgeMs = Number.isNaN(startedAtMs) ? null : Date.now() - startedAtMs
+  const isActive = runner.status === 'running' && lockAgeMs !== null && lockAgeMs < SEQUENTIAL_LOCK_TIMEOUT_MS
+
+  return {
+    ...runner,
+    lockAgeMs,
+    isActive
+  }
+}
+
 // Track processor initialization state across cron invocations
 let processorsInitialized = false
 let processorInitializationPromise = null
@@ -178,6 +210,48 @@ async function processWorkflow(workflow) {
     console.log(`🔍 Prisma client type:`, typeof prisma)
     console.log(`🔍 Prisma has $connect:`, typeof prisma.$connect)
     console.log(`🔍 Prisma has workflowExecution:`, typeof prisma.workflowExecution)
+
+    const currentWorkflowRecord = await prisma.workflowExecution.findUnique({
+      where: { workflowId },
+      select: {
+        id: true,
+        status: true,
+        metadata: true,
+        progressPercent: true,
+        currentStage: true,
+        updatedAt: true
+      }
+    })
+
+    if (!currentWorkflowRecord) {
+      throw new Error(`Workflow execution not found for ID ${workflowId}`)
+    }
+
+    const sequentialState = getSequentialRunnerState(currentWorkflowRecord.metadata)
+
+    if (sequentialState.isActive) {
+      const lockAgeSeconds = sequentialState.lockAgeMs !== null
+        ? Math.round(sequentialState.lockAgeMs / 1000)
+        : null
+      console.log(
+        `⏭️ Sequential runner already active for ${workflowId} (lock ${sequentialState.lockId || 'unknown'}, ${lockAgeSeconds ?? 'unknown'}s old) - skipping re-trigger`
+      )
+      return {
+        success: true,
+        workflowId,
+        queued: false,
+        skipped: true,
+        reason: 'sequential_runner_active',
+        lockId: sequentialState.lockId || null,
+        lockAgeSeconds
+      }
+    }
+
+    if (sequentialState.status === 'running' && sequentialState.lockAgeMs !== null) {
+      console.warn(
+        `⚠️ Sequential lock ${sequentialState.lockId || 'unknown'} is stale for ${workflowId} (${Math.round(sequentialState.lockAgeMs / 1000)}s old) - re-triggering`
+      )
+    }
 
     // Mark workflow as processing
     await prisma.workflowExecution.update({

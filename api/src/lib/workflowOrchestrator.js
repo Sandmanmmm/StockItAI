@@ -2095,6 +2095,20 @@ export class WorkflowOrchestrator {
             console.log(`   ✅ Found ${images.length} images via scraping`)
             imagesFoundCount++
 
+            const draftStillExists = await prismaOperation(
+              (prisma) => prisma.productDraft.findUnique({
+                where: { id: draft.id },
+                select: { id: true }
+              }),
+              `Verify product draft ${draft.id} before attaching images`,
+              { skipWarmupWait: true }
+            )
+
+            if (!draftStillExists) {
+              console.warn(`⚠️ Draft ${draft.id} disappeared before saving images - skipping attachments`)
+              continue
+            }
+
             // Save images to database
             for (const [imgIndex, image] of images.slice(0, 3).entries()) {  // Top 3 images
               // Wrap in retry logic to handle engine warmup delays
@@ -2412,7 +2426,23 @@ export class WorkflowOrchestrator {
           if (images && images.length > 0) {
             console.log(`   ✅ Found ${images.length} images via scraping`)
             imagesFoundCount++
-            
+
+            const draftStillExists = await prismaOperation(
+              (prisma) => prisma.productDraft.findUnique({
+                where: { id: draft.id },
+                select: { id: true }
+              }),
+              `Verify draft ${draft.id} still exists before saving images`,
+              { skipWarmupWait: true }
+            )
+
+            if (!draftStillExists) {
+              console.warn(`⚠️ Draft ${draft.id} disappeared before saving images - skipping to next item`)
+              processedCount++
+              job.progress((processedCount / draftsToProcess.length) * 100)
+              continue
+            }
+
             // Save images to database (top 3 only)
             for (const [imgIndex, image] of images.slice(0, 3).entries()) {
               try {
@@ -2444,12 +2474,12 @@ export class WorkflowOrchestrator {
                 console.warn(`⚠️ Failed to save image ${imgIndex + 1}:`, error.message)
               }
             }
-            
+
             console.log(`   💾 Saved ${Math.min(3, images.length)} images to database`)
           } else {
             console.log(`   ⚠️ No images found for: ${draft.originalTitle}`)
           }
-          
+
           processedCount++
           job.progress((processedCount / draftsToProcess.length) * 100)
           
