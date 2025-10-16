@@ -999,6 +999,16 @@ Document Content (Chunk ${i + 1}/${chunks.length}):\n${chunks[i]}`
       // Replace line items with the complete merged set
       if (allLineItems.length > 0) {
         finalResult.lineItems = allLineItems
+
+        // Ensure nested extractedData structure reflects the full set
+        if (finalResult.extractedData && typeof finalResult.extractedData === 'object') {
+          // Ensure downstream consumers reading extractedData.lineItems see the merged list
+          finalResult.extractedData.lineItems = allLineItems
+
+          // Maintain legacy alias when some code paths expect extractedData.items
+          finalResult.extractedData.items = allLineItems
+        }
+
         console.log(`✅ Multi-chunk processing complete: merged ${allLineItems.length} total line items`)
         
         // 📊 Progress: Merging complete (90% of AI stage, 36% global)
