@@ -556,12 +556,44 @@ export default async function handler(req, res) {
     })
     
     // CRITICAL: Filter out workflows whose PO has completed data (auto-fix should handle those)
+    // EXCEPTION: Keep sequential workflows even if they have line items (they need to continue through stages 3-6)
     // Need to fetch PO data separately since WorkflowExecution doesn't have purchaseOrder relation
     const stuckWorkflows = []
     for (const workflow of potentiallyStuckWorkflows) {
       if (!workflow.purchaseOrderId) {
         stuckWorkflows.push(workflow)
         continue
+      }
+      
+      // Check if this workflow is using sequential mode
+      let isSequential = process.env.SEQUENTIAL_WORKFLOW === '1'
+      
+      if (!isSequential) {
+        // Check per-merchant sequential setting
+        const merchantQuery = await prisma.workflowExecution.findUnique({
+          where: { workflowId: workflow.workflowId },
+          select: {
+            upload: {
+              select: {
+                merchant: {
+                  select: { 
+                    settings: true,
+                    shopDomain: true
+                  }
+                }
+              }
+            }
+          }
+        })
+        
+        const merchant = merchantQuery?.upload?.merchant
+        if (merchant) {
+          const settings = typeof merchant.settings === 'object' ? merchant.settings : {}
+          isSequential = settings.enableSequentialWorkflow === true
+          if (isSequential) {
+            console.log(`✅ Stuck workflow ${workflow.workflowId} is sequential mode (${merchant.shopDomain}) - will process`)
+          }
+        }
       }
       
       // Check if PO has line items
@@ -583,13 +615,18 @@ export default async function handler(req, res) {
       
       const hasLineItems = po._count.lineItems > 0
       
-      if (hasLineItems) {
-        // PO has line items - auto-fix will handle it
+      if (hasLineItems && !isSequential) {
+        // PO has line items BUT not sequential mode - auto-fix will handle it
         console.log(`⏭️ Skipping workflow ${workflow.workflowId} - PO ${po.id} has ${po._count.lineItems} line items (auto-fix will handle)`)
         continue
       }
       
-      // PO exists but has no line items - workflow is truly stuck
+      if (hasLineItems && isSequential) {
+        // PO has line items AND sequential mode - keep for processing (needs to continue through remaining stages)
+        console.log(`✅ Keeping sequential workflow ${workflow.workflowId} - PO ${po.id} has ${po._count.lineItems} line items (needs to continue through stages 3-6)`)
+      }
+      
+      // PO exists but has no line items, OR has line items but is sequential - workflow needs processing
       stuckWorkflows.push(workflow)
     }
     
