@@ -65,6 +65,22 @@ export default async function handler(req, res) {
       })
     }
 
+    if (workflow.status === 'processing') {
+      console.log(`⚠️ Workflow already processing: ${workflowId}`)
+      console.log(`   Skipping to avoid concurrent execution`)
+      return res.status(200).json({
+        success: true,
+        message: 'Workflow already processing',
+        workflowId,
+        note: 'Skipped to avoid concurrent execution'
+      })
+    }
+
+    if (workflow.status === 'failed') {
+      console.log(`🔄 Workflow previously failed: ${workflowId}`)
+      console.log(`   Will retry execution`)
+    }
+
     // Fetch upload record for file details
     const upload = await prisma.upload.findUnique({
       where: { id: workflow.uploadId },
