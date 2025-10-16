@@ -1611,6 +1611,41 @@ export class WorkflowOrchestrator {
       hasDbResult: !!dbResult
     })
 
+    const progressFloor = 65
+    const progressCeiling = 75
+
+    const publishProgress = async (progress, message, extra = {}) => {
+      if (!merchantId || !purchaseOrderId) {
+        return
+      }
+
+      try {
+        await redisManagerInstance.publishMerchantProgress(merchantId, {
+          poId: purchaseOrderId,
+          workflowId,
+          stage: 'product_draft_creation',
+          progress,
+          message,
+          timestamp: Date.now(),
+          ...extra
+        })
+      } catch (progressError) {
+        console.warn('⚠️ Failed to publish product draft progress:', progressError.message)
+      }
+    }
+
+    if (merchantId && purchaseOrderId) {
+      await redisManagerInstance.publishMerchantStage(merchantId, {
+        stage: 'product_draft_creation',
+        poId: purchaseOrderId,
+        workflowId,
+        status: 'started',
+        message: 'Creating product drafts'
+      })
+
+      await publishProgress(progressFloor, 'Creating product drafts')
+    }
+
     try {
       job.progress(10)
 
@@ -1813,6 +1848,14 @@ export class WorkflowOrchestrator {
         
         // Update DB progress with item counts
         const currentProgress = Math.round(30 + (index / lineItemsFromDb.length) * 50)
+        const globalProgress = Math.min(
+          progressCeiling - 1,
+          progressFloor + Math.round(((index + 1) / lineItemsFromDb.length) * (progressCeiling - progressFloor - 1))
+        )
+        await publishProgress(globalProgress, `Drafted ${index + 1}/${lineItemsFromDb.length} items`, {
+          draftsCompleted: index + 1,
+          totalDrafts: lineItemsFromDb.length
+        })
         // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
       }
 
@@ -1864,6 +1907,22 @@ export class WorkflowOrchestrator {
 
       job.progress(90)
 
+      const completionProgress = Math.min(progressCeiling, progressFloor + (productDrafts.length ? (progressCeiling - progressFloor) : 0))
+
+      await publishProgress(completionProgress, `Product drafts ready (${productDrafts.length})`, {
+        draftsCreated: productDrafts.length,
+        completed: true
+      })
+
+      if (merchantId && purchaseOrderId) {
+        await redisManagerInstance.publishMerchantCompletion(merchantId, {
+          stage: 'product_draft_creation',
+          poId: purchaseOrderId,
+          workflowId,
+          draftsCreated: productDrafts.length
+        })
+      }
+
       return {
         success: true,
         stage: WORKFLOW_STAGES.PRODUCT_DRAFT_CREATION,
@@ -1892,7 +1951,7 @@ export class WorkflowOrchestrator {
     console.log('🖼️ processImageAttachment - Queueing background image processing...')
     
     const { workflowId, data } = job.data
-    const { purchaseOrderId, productDrafts } = data
+    const { purchaseOrderId, productDrafts, merchantId } = data
 
     const prisma = await db.getClient()
     
@@ -1901,6 +1960,41 @@ export class WorkflowOrchestrator {
       purchaseOrderId,
       productDraftCount: productDrafts?.length
     })
+
+    const progressFloor = 75
+    const progressCeiling = 85
+
+    const publishImageProgress = async (progress, message, extra = {}) => {
+      if (!merchantId || !purchaseOrderId) {
+        return
+      }
+
+      try {
+        await redisManagerInstance.publishMerchantProgress(merchantId, {
+          poId: purchaseOrderId,
+          workflowId,
+          stage: 'image_attachment',
+          progress,
+          message,
+          timestamp: Date.now(),
+          ...extra
+        })
+      } catch (progressError) {
+        console.warn('⚠️ Failed to publish image attachment progress:', progressError.message)
+      }
+    }
+
+    if (merchantId && purchaseOrderId) {
+      await redisManagerInstance.publishMerchantStage(merchantId, {
+        stage: 'image_attachment',
+        poId: purchaseOrderId,
+        workflowId,
+        status: 'started',
+        message: 'Searching for product images'
+      })
+
+      await publishImageProgress(progressFloor, 'Preparing image search')
+    }
     
     job.progress(10)
     
@@ -1960,6 +2054,20 @@ export class WorkflowOrchestrator {
       }
       
       job.progress(100)
+
+      await publishImageProgress(progressCeiling, 'Queued background image search', {
+        backgroundJobQueued: true,
+        completed: true
+      })
+
+      if (merchantId && purchaseOrderId) {
+        await redisManagerInstance.publishMerchantCompletion(merchantId, {
+          stage: 'image_attachment',
+          poId: purchaseOrderId,
+          workflowId,
+          backgroundJobQueued: true
+        })
+      }
       
       return {
         success: true,
@@ -2032,6 +2140,20 @@ export class WorkflowOrchestrator {
             console.log('   ⚡ [SEQUENTIAL] Skipping queue - will invoke next stage directly')
           }
           
+          await publishImageProgress(progressCeiling, 'Image search skipped - no drafts found', {
+            skipped: true,
+            completed: true
+          })
+
+          if (merchantId && purchaseOrderId) {
+            await redisManagerInstance.publishMerchantCompletion(merchantId, {
+              stage: 'image_attachment',
+              poId: purchaseOrderId,
+              workflowId,
+              skipped: true
+            })
+          }
+
           return {
             success: true,
             stage: WORKFLOW_STAGES.IMAGE_ATTACHMENT,
@@ -2053,6 +2175,9 @@ export class WorkflowOrchestrator {
       console.log(`🖼️ Found ${draftsToProcess.length} product drafts to process`)
       
       job.progress(20)
+      await publishImageProgress(progressFloor + 2, `Found ${draftsToProcess.length} drafts to scan`, {
+        drafts: draftsToProcess.length
+      })
       
       // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
 
@@ -2146,6 +2271,15 @@ export class WorkflowOrchestrator {
           
           // Update DB progress with item counts
           const currentProgress = Math.round(20 + (processedCount / draftsToProcess.length) * 60)
+          const globalProgress = Math.min(
+            progressCeiling - 1,
+            progressFloor + 2 + Math.round((processedCount / draftsToProcess.length) * (progressCeiling - progressFloor - 2))
+          )
+          await publishImageProgress(globalProgress, `Processed ${processedCount}/${draftsToProcess.length} drafts`, {
+            processedDrafts: processedCount,
+            totalDrafts: draftsToProcess.length,
+            imagesFound: imagesFoundCount
+          })
           // REMOVED: updatePurchaseOrderProgress - causes lock contention, redundant with publishProgress
 
         } catch (itemError) {
@@ -2276,6 +2410,22 @@ export class WorkflowOrchestrator {
 
       job.progress(100)
 
+      await publishImageProgress(progressCeiling, 'Image search complete', {
+        processedDrafts,
+        imagesFound: imagesFoundCount,
+        completed: true
+      })
+
+      if (merchantId && purchaseOrderId) {
+        await redisManagerInstance.publishMerchantCompletion(merchantId, {
+          stage: 'image_attachment',
+          poId: purchaseOrderId,
+          workflowId,
+          processedDrafts,
+          imagesFound: imagesFoundCount
+        })
+      }
+
       return {
         success: true,
         stage: WORKFLOW_STAGES.IMAGE_ATTACHMENT,
@@ -2310,6 +2460,19 @@ export class WorkflowOrchestrator {
         
         job.progress(100)
         
+        await publishImageProgress(progressFloor + 1, 'Image search failed - continuing to status update', {
+          error: error.message
+        })
+
+        if (merchantId && purchaseOrderId) {
+          await redisManagerInstance.publishMerchantCompletion(merchantId, {
+            stage: 'image_attachment',
+            poId: purchaseOrderId,
+            workflowId,
+            error: error.message
+          })
+        }
+
         return {
           success: false,
           stage: WORKFLOW_STAGES.IMAGE_ATTACHMENT,
