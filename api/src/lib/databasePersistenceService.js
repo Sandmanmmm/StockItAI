@@ -255,11 +255,24 @@ export class DatabasePersistenceService {
             console.log(`   Existing PO ID: ${options.purchaseOrderId}`)
             console.log(`   Conflicting number: ${error.conflictPoNumber}`)
             
-            // Clear the PO number from extracted data so UPDATE doesn't try to change it
-            delete aiResult.extractedData.poNumber
-            delete aiResult.extractedData.number
+            // CRITICAL FIX: Fetch the existing PO number from database to preserve it
+            const prisma = await db.getClient()
+            const existingPo = await prisma.purchaseOrder.findUnique({
+              where: { id: options.purchaseOrderId },
+              select: { number: true }
+            })
             
-            console.log(`✅ [UPDATE CONFLICT] Will retry UPDATE without changing PO number`)
+            if (existingPo && existingPo.number) {
+              // Set extracted data to use existing number (not the conflicting one)
+              aiResult.extractedData.poNumber = existingPo.number
+              aiResult.extractedData.number = existingPo.number
+              console.log(`✅ [UPDATE CONFLICT] Will retry UPDATE with existing PO number: ${existingPo.number}`)
+            } else {
+              // Clear the PO number from extracted data so UPDATE doesn't try to change it
+              delete aiResult.extractedData.poNumber
+              delete aiResult.extractedData.number
+              console.log(`⚠️ [UPDATE CONFLICT] Existing PO has no number, will skip number field`)
+            }
             
             // Continue to retry loop (don't count as retry attempt for conflict resolution)
             continue
