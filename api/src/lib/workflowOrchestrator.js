@@ -677,16 +677,85 @@ export class WorkflowOrchestrator {
   async completeWorkflow(workflowId, result) {
     console.log(`🎉 Completing workflow ${workflowId}`)
     
-    const metadata = await this.getWorkflowMetadata(workflowId)
-    if (!metadata) {
-      throw new Error(`Workflow ${workflowId} not found`)
+    const buildStageStatusMap = (statusValue = 'pending') => {
+      return Object.values(WORKFLOW_STAGES)
+        .filter(stage => stage !== WORKFLOW_STAGES.COMPLETED && stage !== WORKFLOW_STAGES.FAILED)
+        .reduce((acc, stageName) => {
+          acc[stageName] = { status: statusValue }
+          return acc
+        }, {})
     }
+
+    const ensureMetadataShape = (meta) => {
+      const safeMeta = { ...(meta || {}) }
+      safeMeta.workflowId = safeMeta.workflowId || workflowId
+      safeMeta.stages = safeMeta.stages && typeof safeMeta.stages === 'object'
+        ? { ...buildStageStatusMap(), ...safeMeta.stages }
+        : buildStageStatusMap()
+      return safeMeta
+    }
+
+    let metadata = await this.getWorkflowMetadata(workflowId)
+
+    if (!metadata) {
+      console.warn(`⚠️ Workflow metadata not found in Redis for ${workflowId} during completion, attempting rebuild from database...`)
+      try {
+        const prisma = await db.getClient()
+        const dbWorkflow = await prisma.workflowExecution.findUnique({
+          where: { workflowId },
+          select: {
+            status: true,
+            currentStage: true,
+            progressPercent: true,
+            startedAt: true,
+            inputData: true,
+            metadata: true
+          }
+        })
+
+        if (dbWorkflow?.metadata && typeof dbWorkflow.metadata === 'object') {
+          metadata = ensureMetadataShape(dbWorkflow.metadata)
+        } else if (dbWorkflow) {
+          metadata = ensureMetadataShape({
+            status: dbWorkflow.status || 'processing',
+            currentStage: dbWorkflow.currentStage || WORKFLOW_STAGES.AI_PARSING,
+            progress: dbWorkflow.progressPercent || 0,
+            startedAt: dbWorkflow.startedAt?.toISOString() || new Date().toISOString(),
+            data: dbWorkflow.inputData || {}
+          })
+        }
+      } catch (rebuildError) {
+        console.warn(`⚠️ Failed to rebuild workflow metadata for ${workflowId}: ${rebuildError.message}`)
+      }
+    }
+
+    if (!metadata) {
+      console.warn(`⚠️ Proceeding with minimal metadata for workflow ${workflowId}`)
+      metadata = ensureMetadataShape({
+        status: 'pending',
+        currentStage: WORKFLOW_STAGES.STATUS_UPDATE,
+        startedAt: new Date().toISOString()
+      })
+    } else {
+      metadata = ensureMetadataShape(metadata)
+    }
+
+    const completionTimestamp = new Date().toISOString()
+
+    Object.entries(metadata.stages).forEach(([stageName, stageData]) => {
+      metadata.stages[stageName] = {
+        ...(stageData || {}),
+        status: 'completed',
+        updatedAt: completionTimestamp
+      }
+    })
 
     metadata.status = 'completed'
     metadata.currentStage = WORKFLOW_STAGES.COMPLETED
-    metadata.completedAt = new Date().toISOString()
+    metadata.completedAt = completionTimestamp
     metadata.progress = 100
     metadata.result = result
+    metadata.updatedAt = completionTimestamp
 
     // Save to Redis
     await this.setWorkflowMetadata(workflowId, metadata)
@@ -694,13 +763,15 @@ export class WorkflowOrchestrator {
     // CRITICAL: Mark workflow as completed in database so cron doesn't reprocess it
     try {
       const prisma = await db.getClient()
+      const completedStages = Object.values(metadata.stages || {}).filter(stage => stage.status === 'completed').length
+      const totalStages = Object.values(WORKFLOW_STAGES).filter(stage => stage !== WORKFLOW_STAGES.COMPLETED && stage !== WORKFLOW_STAGES.FAILED).length
       await prisma.workflowExecution.update({
         where: { workflowId },
         data: {
           status: 'completed',
-          currentStage: 'completed',
+          currentStage: WORKFLOW_STAGES.COMPLETED,
           progressPercent: 100,
-          stagesCompleted: Object.keys(metadata.stages).length,
+          stagesCompleted: completedStages || totalStages,
           completedAt: new Date(),
           updatedAt: new Date()
         }

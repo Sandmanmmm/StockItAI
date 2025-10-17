@@ -833,11 +833,12 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
     // Process first chunk to get the structure
     console.log('🔍 Processing first chunk to establish document structure...')
     
-    const firstChunkPrompt = `${this.defaultPrompt}
+  const firstChunkPrompt = `${this.defaultPrompt}
     
 IMPORTANT: This is a large document that has been split into chunks. This is chunk 1 of ${chunks.length}.
 Extract as much information as possible from this chunk, but note that some information may be in subsequent chunks.
-Focus on identifying the document type, supplier information, and any line items present in this chunk.
+Focus on identifying the document type, supplier information, and every line item present in this chunk.
+There is no cap on the number of line items—include ALL items you find, even if there are more than five. Do not summarize or omit items.
 
 Document Content (Chunk 1/${chunks.length}):\n${chunks[0]}`
     
@@ -925,12 +926,13 @@ Document Content (Chunk 1/${chunks.length}):\n${chunks[0]}`
         )
       }
       
-      const chunkPrompt = `Extract ONLY the line items from this portion of a purchase order document.
+  const chunkPrompt = `Extract ONLY the line items from this portion of a purchase order document.
 This is chunk ${i + 1} of ${chunks.length} from a larger document.
-Return a JSON object with a "lineItems" array containing all products/items found in this chunk.
+Return a JSON object with a "lineItems" array containing every product/item found in this chunk.
+You must include every line item without any artificial limit—if 12 items exist, return all 12. Do not summarize, group, or omit items.
 DO NOT wrap the JSON in markdown code blocks - return ONLY the raw JSON object.
 
-Each line item should have: productCode, description, quantity, unitPrice, total
+Each line item should have: productCode, description, quantity, unitPrice, total. If a field is missing, set it to null instead of dropping the item.
 
 Document Content (Chunk ${i + 1}/${chunks.length}):\n${chunks[i]}`
       

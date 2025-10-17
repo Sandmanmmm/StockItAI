@@ -18,6 +18,60 @@ import { processorRegistrationService } from './src/lib/processorRegistrationSer
 let cronPrisma = null
 let cronPrismaInitializing = false
 
+const ENGINE_STARTUP_ERROR_PATTERNS = [
+  'Engine is not yet connected',
+  'Response from the Engine was empty'
+]
+
+const isEngineStartupError = (error) => {
+  if (!error) {
+    return false
+  }
+
+  const message = error.message || error.toString() || ''
+  return ENGINE_STARTUP_ERROR_PATTERNS.some((pattern) => message.includes(pattern))
+}
+
+async function resetCronPrismaClient() {
+  if (cronPrisma) {
+    try {
+      await cronPrisma.$disconnect()
+    } catch (disconnectError) {
+      console.warn(`⚠️ [CRON] Failed to disconnect cron Prisma client during reset: ${disconnectError.message}`)
+    }
+  }
+
+  cronPrisma = null
+  return getCronPrismaClient()
+}
+
+async function executeWithCronPrisma(prismaInstance, description, operation, attempts = 2) {
+  let client = prismaInstance
+  let lastError = null
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    if (!client) {
+      client = await getCronPrismaClient()
+    }
+
+    try {
+      const result = await operation(client)
+      return { result, prisma: client }
+    } catch (error) {
+      lastError = error
+
+      if (!isEngineStartupError(error) || attempt === attempts) {
+        throw error
+      }
+
+      console.warn(`⚠️ [CRON] Prisma engine not ready for ${description} (attempt ${attempt}/${attempts}). Resetting client...`)
+      client = await resetCronPrismaClient()
+    }
+  }
+
+  throw lastError
+}
+
 async function getCronPrismaClient() {
   if (cronPrisma) {
     return cronPrisma
@@ -554,6 +608,9 @@ async function autoFixStuckPOs(prisma) {
     return { checked: stuckPOs.length, fixed: fixedCount }
     
   } catch (error) {
+    if (isEngineStartupError(error)) {
+      throw error
+    }
     console.error('❌ Error in autoFixStuckPOs:', error)
     return { checked: 0, fixed: 0, error: error.message }
   }
@@ -597,13 +654,16 @@ export default async function handler(req, res) {
 
     // CRITICAL: Auto-fix stuck POs before processing new workflows
     // This handles POs that completed database save but got stuck before status_update
-    const autoFixResult = await autoFixStuckPOs(prisma)
+    const autoFixExecution = await executeWithCronPrisma(prisma, 'autoFixStuckPOs', autoFixStuckPOs)
+    prisma = autoFixExecution.prisma
+    const autoFixResult = autoFixExecution.result
     if (autoFixResult.fixed > 0) {
       console.log(`🎯 Auto-fixed ${autoFixResult.fixed} stuck PO(s) in this run`)
     }
 
     // Find all pending workflows
-    const pendingWorkflows = await prisma.workflowExecution.findMany({
+    const pendingExecution = await executeWithCronPrisma(prisma, 'fetchPendingWorkflows', (client) =>
+      client.workflowExecution.findMany({
       where: {
         status: 'pending'
       },
@@ -611,12 +671,16 @@ export default async function handler(req, res) {
         createdAt: 'asc'
       },
       take: 5 // Process up to 5 workflows per cron run to avoid timeout
-    })
+      })
+    )
+    prisma = pendingExecution.prisma
+    const pendingWorkflows = pendingExecution.result
 
     // Also find stuck "processing" workflows (processing for more than 5 minutes)
     // CRITICAL: Need to filter out workflows whose PO has completed data
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000)
-    const potentiallyStuckWorkflows = await prisma.workflowExecution.findMany({
+    const stuckExecution = await executeWithCronPrisma(prisma, 'fetchPotentiallyStuckWorkflows', (client) =>
+      client.workflowExecution.findMany({
       where: {
         status: 'processing',
         updatedAt: {
@@ -627,7 +691,10 @@ export default async function handler(req, res) {
         createdAt: 'asc'
       },
       take: 10 // Get more initially since we'll filter
-    })
+      })
+    )
+    prisma = stuckExecution.prisma
+    const potentiallyStuckWorkflows = stuckExecution.result
     
     // CRITICAL: Filter out workflows whose PO has completed data (auto-fix should handle those)
     // EXCEPTION: Keep sequential workflows even if they have line items (they need to continue through stages 3-6)
