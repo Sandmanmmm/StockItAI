@@ -1923,12 +1923,18 @@ export class EnhancedAIService {
     // Process remaining chunks to collect all line items
     console.log(`🔄 Processing remaining ${totalChunks - 1} chunks to collect all line items...`)
     
-    const allLineItems = []
+  const allLineItems = []
+  const debugChunks = String(process.env.DEBUG_CHUNK_LINE_ITEMS || '').toLowerCase() === 'true'
     
     // Extract line items from first chunk
     try {
       const firstResult = this._parseStructuredResponse(firstResponse)
-      const mergedChunkItems = this._dedupeLineItems(this._extractLineItemsFromChunk(firstResult))
+      const rawFirstChunkItems = this._extractLineItemsFromChunk(firstResult)
+      if (debugChunks) {
+        console.log('[DEBUG] Chunk 1 raw extract count:', rawFirstChunkItems.length)
+        console.log('[DEBUG] Chunk 1 sample descriptions:', rawFirstChunkItems.slice(0, 5).map(item => item?.description || '').filter(Boolean))
+      }
+      const mergedChunkItems = this._dedupeLineItems(rawFirstChunkItems)
 
       if (mergedChunkItems.length > 0) {
         allLineItems.push(...mergedChunkItems)
@@ -2002,6 +2008,10 @@ export class EnhancedAIService {
         
         const chunkResult = this._parseStructuredResponse(chunkResponse)
         const chunkItems = this._extractLineItemsFromChunk(chunkResult)
+        if (debugChunks) {
+          console.log(`[DEBUG] Chunk ${i + 1} raw extract count:`, chunkItems.length)
+          console.log(`[DEBUG] Chunk ${i + 1} sample descriptions:`, chunkItems.slice(0, 5).map(item => item?.description || '').filter(Boolean))
+        }
         
         if (chunkItems.length > 0) {
           allLineItems.push(...chunkItems)

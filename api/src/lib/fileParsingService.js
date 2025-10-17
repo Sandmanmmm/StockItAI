@@ -69,6 +69,24 @@ export class FileParsingService {
             const pages = pdfData.Pages || []
             const totalPages = pages.length
             
+            // DEBUG: Log page structure to diagnose missing content
+            if (process.env.DEBUG_PDF_STRUCTURE === 'true') {
+              console.log(`[DEBUG PDF] Total pages: ${totalPages}`)
+              pages.forEach((page, idx) => {
+                const textCount = page.Texts?.length || 0
+                const fillCount = page.Fills?.length || 0
+                console.log(`[DEBUG PDF] Page ${idx + 1}: ${textCount} text elements, ${fillCount} fills`)
+                if (idx < 2) { // Log first 2 pages in detail
+                  console.log(`[DEBUG PDF] Page ${idx + 1} Texts sample:`, page.Texts?.slice(0, 5).map(t => ({
+                    x: t.x,
+                    y: t.y,
+                    runs: t.R?.length,
+                    text: t.R?.map(r => decodeURIComponent(r.T || '')).join(' ')
+                  })))
+                }
+              })
+            }
+            
             // PDF parsing is 0-20% of AI Parsing stage (which is 0-40% of total)
             // So local 0-100% within parsePDF → 0-20% of AI stage → 0-8% global
             
@@ -77,11 +95,74 @@ export class FileParsingService {
             for (let i = 0; i < pages.length; i++) {
               const page = pages[i]
               const texts = page.Texts || []
-              const pageText = texts.map(text => {
-                return decodeURIComponent(text.R[0].T || '')
-              }).join(' ')
               
-              pageTexts.push(pageText)
+              // ENHANCED: Sort text elements by Y position (top to bottom), then X (left to right)
+              // This ensures table rows are read in correct order
+              const sortedTexts = texts.slice().sort((a, b) => {
+                // Sort by Y first (rows), with small tolerance for same-line text
+                const yDiff = Math.abs(a.y - b.y)
+                if (yDiff > 0.1) {
+                  return a.y - b.y // Top to bottom
+                }
+                // Same line: sort by X (left to right)
+                return a.x - b.x
+              })
+              
+              // Extract text with position-aware spacing
+              let currentY = -1
+              const textParts = []
+              let skippedCount = 0
+              let processedCount = 0
+              
+              sortedTexts.forEach((text, idx) => {
+                const runs = text.R || []
+                const textContent = runs.map(run => {
+                  const decoded = decodeURIComponent(run.T || '')
+                  // Keep the text even if it's just whitespace if it has actual characters
+                  return decoded
+                }).join(' ').trim()
+                
+                // Skip only completely empty text (but keep single characters, numbers, etc.)
+                if (!textContent || textContent.length === 0) {
+                  skippedCount++
+                  return
+                }
+                
+                processedCount++
+                
+                // Add newline if we moved to a new row (Y position changed significantly)
+                if (currentY >= 0 && Math.abs(text.y - currentY) > 0.1) {
+                  textParts.push('\n')
+                } else if (textParts.length > 0) {
+                  // Same line: add space between text elements
+                  textParts.push(' ')
+                }
+                
+                textParts.push(textContent)
+                currentY = text.y
+              })
+              
+              const pageText = textParts.join('')
+              
+              // CRITICAL FIX: Remove excessive single-character spacing (e.g., "I N V O I C E" -> "INVOICE")
+              // This occurs when PDF characters are positioned individually
+              const cleanedPageText = pageText.replace(/(\S)\s+(?=\S)/g, (match, char, offset, string) => {
+                // If the next character after the space(s) is also a single char followed by space,
+                // it's likely individual character positioning - remove the space
+                const nextPart = string.substring(offset + match.length, offset + match.length + 10)
+                if (/^\S\s/.test(nextPart)) {
+                  return char // Remove space between single chars
+                }
+                return match // Keep space between words
+              })
+              
+              if (process.env.DEBUG_PDF_STRUCTURE === 'true' && i < 2) {
+                console.log(`[DEBUG PDF] Page ${i + 1}: processed ${processedCount} / ${texts.length} text elements (skipped ${skippedCount} empty)`)
+                console.log(`[DEBUG PDF] Page ${i + 1} text length: ${pageText.length} chars (before cleanup), ${cleanedPageText.length} chars (after)`)
+                console.log(`[DEBUG PDF] Page ${i + 1} text preview (first 500 chars):`, cleanedPageText.substring(0, Math.min(500, cleanedPageText.length)))
+              }
+              
+              pageTexts.push(cleanedPageText)
               
               // Publish progress for each page (0-20% of AI stage, 0-8% global)
               if (progressHelper) {
