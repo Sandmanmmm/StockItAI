@@ -692,6 +692,67 @@ Be very conservative with confidence scores. Only give high confidence (>0.9) wh
   }
 
   /**
+   * Gather every line-item array the model may return on a chunk response.
+   * Keeps duplicates for now; caller decides if dedupe is needed.
+   */
+  _extractLineItemsFromChunk(result) {
+    if (!result || typeof result !== 'object') {
+      return []
+    }
+
+    const collected = []
+
+    const appendItems = items => {
+      if (!Array.isArray(items)) return
+      for (const item of items) {
+        if (item && typeof item === 'object') {
+          collected.push(item)
+        }
+      }
+    }
+
+    appendItems(result.lineItems)
+    appendItems(result.items)
+
+    if (result.extractedData && typeof result.extractedData === 'object') {
+      appendItems(result.extractedData.lineItems)
+      appendItems(result.extractedData.items)
+    }
+
+    return collected
+  }
+
+  /**
+   * Remove duplicates caused by the model echoing the same item list twice in a chunk.
+   */
+  _dedupeLineItems(items) {
+    if (!Array.isArray(items) || items.length === 0) {
+      return []
+    }
+
+    const deduped = []
+    const seen = new Set()
+
+    for (const item of items) {
+      if (!item || typeof item !== 'object') continue
+
+      const key = [
+        item.productCode ?? '',
+        item.description ?? '',
+        item.quantity ?? '',
+        item.unitPrice ?? '',
+        item.total ?? ''
+      ].join('|')
+
+      if (seen.has(key)) continue
+      seen.add(key)
+      deduped.push(item)
+    }
+
+    return deduped
+  }
+
+  /**
    * Process text with OpenAI API with enhanced timeout, retry logic, and chunking
    * @param {string} text - The text content to process
    * @returns {Promise<Object>} - OpenAI API response
@@ -884,9 +945,11 @@ Document Content (Chunk 1/${chunks.length}):\n${chunks[0]}`
       const rawContent = firstResponse.choices[0]?.message?.content || '{}'
       const cleanContent = this._stripMarkdownCodeBlocks(rawContent)
       const firstResult = JSON.parse(cleanContent)
-      if (firstResult.lineItems && Array.isArray(firstResult.lineItems)) {
-        allLineItems.push(...firstResult.lineItems)
-        console.log(`📋 First chunk: extracted ${firstResult.lineItems.length} line items`)
+      const mergedChunkItems = this._dedupeLineItems(this._extractLineItemsFromChunk(firstResult))
+
+      if (mergedChunkItems.length > 0) {
+        allLineItems.push(...mergedChunkItems)
+        console.log(`📋 First chunk: extracted ${mergedChunkItems.length} line items`)
         
         // 📊 Progress: First chunk complete
         if (this.progressHelper) {
@@ -895,11 +958,11 @@ Document Content (Chunk 1/${chunks.length}):\n${chunks[0]}`
             chunkProgress,
             20, // OpenAI processing is 20-80% of AI stage
             60, // 60% range
-            `Chunk 1/${chunks.length} complete: extracted ${firstResult.lineItems.length} items`,
+            `Chunk 1/${chunks.length} complete: extracted ${mergedChunkItems.length} items`,
             { 
               currentChunk: 1, 
               totalChunks: chunks.length, 
-              itemsExtracted: firstResult.lineItems.length,
+              itemsExtracted: mergedChunkItems.length,
               totalItems: allLineItems.length
             }
           )
@@ -947,10 +1010,11 @@ Document Content (Chunk ${i + 1}/${chunks.length}):\n${chunks[i]}`
         const rawChunkContent = chunkResponse.choices[0]?.message?.content || '{}'
         const cleanChunkContent = this._stripMarkdownCodeBlocks(rawChunkContent)
         const chunkResult = JSON.parse(cleanChunkContent)
+        const chunkItems = this._extractLineItemsFromChunk(chunkResult)
         
-        if (chunkResult.lineItems && Array.isArray(chunkResult.lineItems)) {
-          allLineItems.push(...chunkResult.lineItems)
-          console.log(`📋 Chunk ${i + 1}: extracted ${chunkResult.lineItems.length} line items (total: ${allLineItems.length})`)
+        if (chunkItems.length > 0) {
+          allLineItems.push(...chunkItems)
+          console.log(`📋 Chunk ${i + 1}: extracted ${chunkItems.length} line items (total: ${allLineItems.length})`)
           
           // 📊 Progress: Chunk complete
           if (this.progressHelper) {
@@ -959,11 +1023,11 @@ Document Content (Chunk ${i + 1}/${chunks.length}):\n${chunks[i]}`
               chunkProgress,
               20, // OpenAI processing is 20-80% of AI stage
               60, // 60% range
-              `Chunk ${i + 1}/${chunks.length} complete: extracted ${chunkResult.lineItems.length} items`,
+              `Chunk ${i + 1}/${chunks.length} complete: extracted ${chunkItems.length} items`,
               { 
                 currentChunk: i + 1, 
                 totalChunks: chunks.length, 
-                itemsExtracted: chunkResult.lineItems.length,
+                itemsExtracted: chunkItems.length,
                 totalItems: allLineItems.length
               }
             )
@@ -1000,18 +1064,19 @@ Document Content (Chunk ${i + 1}/${chunks.length}):\n${chunks[i]}`
       
       // Replace line items with the complete merged set
       if (allLineItems.length > 0) {
-        finalResult.lineItems = allLineItems
+        const mergedItems = this._dedupeLineItems(allLineItems)
+        finalResult.lineItems = mergedItems
 
         // Ensure nested extractedData structure reflects the full set
         if (finalResult.extractedData && typeof finalResult.extractedData === 'object') {
           // Ensure downstream consumers reading extractedData.lineItems see the merged list
-          finalResult.extractedData.lineItems = allLineItems
+          finalResult.extractedData.lineItems = mergedItems
 
           // Maintain legacy alias when some code paths expect extractedData.items
-          finalResult.extractedData.items = allLineItems
+          finalResult.extractedData.items = mergedItems
         }
 
-        console.log(`✅ Multi-chunk processing complete: merged ${allLineItems.length} total line items`)
+        console.log(`✅ Multi-chunk processing complete: merged ${mergedItems.length} total line items`)
         
         // 📊 Progress: Merging complete (90% of AI stage, 36% global)
         if (this.progressHelper) {
@@ -1019,8 +1084,8 @@ Document Content (Chunk ${i + 1}/${chunks.length}):\n${chunks[i]}`
             100,
             80, // Merging is 80-90% of AI stage
             10, // 10% range
-            `Merged ${allLineItems.length} items successfully`,
-            { totalItems: allLineItems.length, chunkCount: chunks.length }
+            `Merged ${mergedItems.length} items successfully`,
+            { totalItems: mergedItems.length, chunkCount: chunks.length }
           )
         }
       }
