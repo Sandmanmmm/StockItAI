@@ -99,21 +99,20 @@ describe('EnhancedAIService text preprocessing integration', () => {
     expect(parseFileMock).toHaveBeenCalled()
     expect(mockCreate).toHaveBeenCalledTimes(1)
 
-  const requestPayload = mockCreate.mock.calls[0][0]
-  const userMessage = requestPayload.messages.find(msg => msg.role === 'user')
+    const requestPayload = mockCreate.mock.calls[0][0]
+    const userMessages = requestPayload.messages.filter(msg => msg.role === 'user')
+    const documentMessage = userMessages[userMessages.length - 1]
 
-  expect(requestPayload.functions[0].name).toBe('extract_purchase_order')
-  expect(userMessage.content).toContain('PO#12345')
-  expect(userMessage.content).not.toContain('Page 1 of 2')
+    expect(requestPayload.functions[0].name).toBe('extract_purchase_order')
+    expect(documentMessage.content).toContain('PO#12345')
+    expect(documentMessage.content).not.toContain('Page 1 of 2')
 
     expect(result.metadata.preprocessing).toBeTruthy()
     expect(result.metadata.preprocessing.optimizedLength).toBeLessThan(result.metadata.preprocessing.originalLength)
     expect(Array.isArray(result.issues)).toBe(true)
     expect(result.metadata.preprocessing.reductionPercent).toBeGreaterThan(0)
-    expect(result.metadata.preprocessing.anchorExtraction).toEqual(expect.objectContaining({
-      applied: true,
-      snippetCount: expect.any(Number)
-    }))
+    expect(result.metadata.preprocessing.anchorExtraction.snippetCount).toBeGreaterThan(0)
+    expect(result.metadata.preprocessing.anchorExtraction.anchorsMatched).toBeDefined()
   })
 
   it('falls back to raw text when preprocessing throws and records issue', async () => {
@@ -126,9 +125,10 @@ describe('EnhancedAIService text preprocessing integration', () => {
     const result = await svc.parseDocument(pdfBuffer, 'wf-preprocess-fallback')
 
     expect(mockCreate).toHaveBeenCalledTimes(1)
-  const requestPayload = mockCreate.mock.calls[0][0]
-  const userMessage = requestPayload.messages.find(msg => msg.role === 'user')
-  expect(userMessage.content).toContain('Purchase    Order Number')
+    const requestPayload = mockCreate.mock.calls[0][0]
+    const userMessages = requestPayload.messages.filter(msg => msg.role === 'user')
+    const documentMessage = userMessages[userMessages.length - 1]
+    expect(documentMessage.content).toContain('Purchase    Order Number')
 
     expect(result.metadata.preprocessing).toMatchObject({
       failed: true,
@@ -278,5 +278,23 @@ describe('EnhancedAIService text preprocessing integration', () => {
     expect(actualCounts).toEqual(expectedCounts)
 
     chunkPlanSpy.mockRestore()
+  })
+
+  it('restores original text when cleanup would remove key purchase order signals', () => {
+    const rawText = [
+      'Purchase Order Number: 12345',
+      'Supplier Name: ExampleCo',
+      'Item Description Quantity Price',
+      'Widget 1 10.00',
+      'Grand Total: 10.00'
+    ].join('\n')
+
+    const result = textPreprocessor.preprocess(rawText, {
+      extraArtifacts: [/Purchase Order Number:[^\n]*/i]
+    })
+
+    expect(result.text).toContain('Purchase Order Number: 12345')
+    expect(result.metadata.fallbackApplied).toBe(true)
+    expect(result.metadata.fallbackReasons).toEqual(expect.arrayContaining(['lost_signals:poNumber']))
   })
 })

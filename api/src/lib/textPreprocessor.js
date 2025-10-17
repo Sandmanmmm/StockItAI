@@ -45,6 +45,14 @@ export class TextPreprocessor {
       supplier: /(?:Supplier|Vendor)\s+Name:?\s*([^\n]+)/gi,
       total: /(?:Total|Grand\s+Total|Amount\s+Due):?\s*\$?\s*([\d,]+\.?\d*)/gi
     }
+
+    this.keySignalPatterns = {
+      poNumber: /(?:purchase\s+order|po|p\.o\.)\s*(?:number|no\.?|#)/i,
+      invoice: /invoice\s*(?:number|no\.?|#)?/i,
+      supplier: /\b(supplier|vendor)\b/i,
+      totals: /\b(grand\s+)?total\b/i,
+      lineItems: /\b(qty|quantity|description|unit\s*price|amount)\b/i
+    }
   }
 
   /**
@@ -85,21 +93,52 @@ export class TextPreprocessor {
     if (options.compressTables !== false) {
       optimized = this.compressLineItemTables(optimized)
     }
-    
-    const optimizedLength = optimized.length
+
+    const optimizedCandidate = optimized
+    const trimmedOptimized = optimizedCandidate.trim()
+    const fallbackReasons = []
+    let optimizedResult = optimizedCandidate
+
+    if (trimmedOptimized.length === 0) {
+      console.warn('⚠️ Text preprocessing removed all content; returning original text to avoid empty AI payload')
+      fallbackReasons.push('empty_output')
+    } else {
+      const originalSignals = this.extractKeySignals(rawText)
+      const optimizedSignals = this.extractKeySignals(optimizedCandidate)
+      const lostSignals = Object.entries(originalSignals)
+        .filter(([key, count]) => count > 0 && (optimizedSignals[key] || 0) === 0)
+        .map(([key]) => key)
+
+      if (lostSignals.length > 0) {
+        console.warn(`⚠️ Text preprocessing removed key signals (${lostSignals.join(', ')}); restoring original text`)
+        fallbackReasons.push(`lost_signals:${lostSignals.join(',')}`)
+      }
+    }
+
+    if (fallbackReasons.length > 0) {
+      optimizedResult = rawText
+    }
+
+    const optimizedLength = optimizedResult.length
     const reductionPercent = ((1 - optimizedLength / originalLength) * 100).toFixed(1)
     const duration = Date.now() - startTime
     
+    if (fallbackReasons.length > 0) {
+      console.log(`↩️ Text preprocessing fallback applied (${fallbackReasons.join('; ')})`)
+    }
+
     console.log(`📉 Text preprocessing: ${originalLength} → ${optimizedLength} chars (${reductionPercent}% reduction) in ${duration}ms`)
     
     return {
-      text: optimized,
+      text: optimizedResult,
       metadata: {
         originalLength,
         optimizedLength,
         reductionPercent: parseFloat(reductionPercent),
         estimatedTokenSavings: Math.floor((originalLength - optimizedLength) / 4), // ~4 chars per token
-        duration
+        duration,
+        fallbackApplied: fallbackReasons.length > 0,
+        fallbackReasons
       }
     }
   }
@@ -322,6 +361,27 @@ export class TextPreprocessor {
 
     const existing = this.vendorArtifacts.get(vendorKey) || []
     this.vendorArtifacts.set(vendorKey, [...existing, ...normalized])
+  }
+
+  extractKeySignals(text) {
+    if (!text || typeof text !== 'string') {
+      return {
+        poNumber: 0,
+        invoice: 0,
+        supplier: 0,
+        totals: 0,
+        lineItems: 0
+      }
+    }
+
+    return Object.fromEntries(
+      Object.entries(this.keySignalPatterns).map(([key, pattern]) => {
+        const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`
+        const globalPattern = new RegExp(pattern.source, flags)
+        const matches = text.match(globalPattern)
+        return [key, matches ? matches.length : 0]
+      })
+    )
   }
 }
 
