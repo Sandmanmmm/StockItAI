@@ -27,9 +27,10 @@ describe('pg_trgm Supplier Matching Service', () => {
     // Create test merchant
     const client = await db.getClient()
     const merchant = await client.merchant.create({
-      data: { 
-        name: 'Test Merchant', 
-        shopifyDomain: 'test-pg-trgm.myshopify.com',
+      data: {
+        name: 'Test Merchant',
+        shopDomain: 'test-pg-trgm.myshopify.com',
+        email: 'pg-trgm-test@example.com',
         status: 'active'
       }
     })

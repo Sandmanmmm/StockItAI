@@ -18,9 +18,11 @@ describe('Hybrid Supplier Matching Service', () => {
     const client = await db.getClient()
     const merchant = await client.merchant.create({
       data: {
-        shop: `hybrid-test-${Date.now()}.myshopify.com`,
-        accessToken: 'test_token',
-        isActive: true
+        shopDomain: `hybrid-test-${Date.now()}.myshopify.com`,
+        name: 'Hybrid Test Merchant',
+        email: 'hybrid-test@example.com',
+        status: 'active',
+        accessToken: 'test_token'
       }
     })
     testMerchantId = merchant.id
@@ -73,9 +75,11 @@ describe('Hybrid Supplier Matching Service', () => {
       where: { merchantId: testMerchantId }
     })
     
-    await client.merchantConfig.deleteMany({
-      where: { merchantId: testMerchantId }
-    })
+    if (client.merchantConfig?.deleteMany) {
+      await client.merchantConfig.deleteMany({
+        where: { merchantId: testMerchantId }
+      })
+    }
     
     await client.merchant.delete({
       where: { id: testMerchantId }

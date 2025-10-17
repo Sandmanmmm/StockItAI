@@ -552,6 +552,13 @@ export class ProcessorRegistrationService {
       let recoveredCount = 0;
       for (const job of staleJobs) {
         try {
+          const state = await job.getState().catch(() => 'unknown');
+
+          if (!['waiting', 'delayed', 'paused'].includes(state)) {
+            console.warn(`⚠️ [BULL][RECOVERY] Skipping job ${job?.id} in ${queueName} - state is ${state}`);
+            continue;
+          }
+
           const jobClone = job.data;
           const jobOpts = {
             ...job.opts,

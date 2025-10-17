@@ -336,6 +336,23 @@ export async function findMatchingSuppliers(parsedSupplier, merchantId, options 
   
   const engineName = usePgTrgm ? 'pg_trgm' : 'javascript'
   console.log(`🚦 [Hybrid Router] Using ${engineName} engine for supplier matching`)
+
+  const finalizeResults = (list, defaultEngine, defaultExecutionTime) => {
+    const fallbackDuration = defaultExecutionTime ?? (Date.now() - startTime)
+    return (list || []).map(result => {
+      const metadata = { ...(result.metadata || {}) }
+      if (metadata.engine == null) {
+        metadata.engine = result.engine || defaultEngine
+      }
+      if (metadata.executionTime == null) {
+        metadata.executionTime = metadata.queryTimeMs ?? fallbackDuration
+      }
+      return {
+        ...result,
+        metadata
+      }
+    })
+  }
   
   try {
     let results
@@ -348,10 +365,10 @@ export async function findMatchingSuppliers(parsedSupplier, merchantId, options 
           merchantId,
           options
         )
-        
+
         const elapsedTime = Date.now() - startTime
         console.log(`✅ [pg_trgm] Completed in ${elapsedTime}ms`)
-        
+
         // Log performance metric to database
         await logPerformanceMetric({
           merchantId,
@@ -366,13 +383,13 @@ export async function findMatchingSuppliers(parsedSupplier, merchantId, options 
             supplierName: parsedSupplier.name
           }
         })
-        
-        return results
-        
+
+        return finalizeResults(results, 'pg_trgm', elapsedTime)
+
       } catch (pgTrgmError) {
         // Automatic fallback to JavaScript on error
         console.error('❌ [pg_trgm] Error, falling back to JavaScript:', pgTrgmError.message)
-        
+
         // Log failure to database
         await logPerformanceMetric({
           merchantId,
@@ -388,7 +405,7 @@ export async function findMatchingSuppliers(parsedSupplier, merchantId, options 
             supplierName: parsedSupplier.name
           }
         })
-        
+
         // Fall through to JavaScript implementation
       }
     }
@@ -417,8 +434,8 @@ export async function findMatchingSuppliers(parsedSupplier, merchantId, options 
         wasFallback: usePgTrgm // Indicates this was a fallback
       }
     })
-    
-    return results
+
+    return finalizeResults(results, 'javascript', elapsedTime)
     
   } catch (error) {
     console.error('❌ [Hybrid Router] Error in supplier matching:', error)
@@ -473,9 +490,7 @@ export async function autoMatchSupplier(purchaseOrderId, parsedSupplier, merchan
     minAutoLinkScore = 0.85,   // Minimum score for auto-linking
     createIfNoMatch = false    // Create new supplier if no match found
   } = options
-  
-  console.log('🤖 Auto-matching supplier for PO:', purchaseOrderId)
-  
+
   try {
     const client = await db.getClient()
     // Find matches
