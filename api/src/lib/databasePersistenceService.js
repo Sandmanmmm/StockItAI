@@ -137,7 +137,7 @@ export class DatabasePersistenceService {
           tx,
           aiResult.extractedData?.lineItems || aiResult.extractedData?.items || [],
           purchaseOrder.id,
-          aiResult.confidence?.lineItems || {},
+          aiResult.confidence?.itemBreakdown || [], // FIX: Use itemBreakdown (array) not lineItems (average)
           null // 📊 Do NOT pass progress helper inside transaction
         )
         console.log(`⏱️ [${txId}] Step 3 (CREATE ${lineItems.length} line items) took ${Date.now() - step3Start}ms`)
@@ -847,11 +847,18 @@ export class DatabasePersistenceService {
       // Final fallback to 1 if still no quantity
       quantity = quantity || 1
       
-      const unitCost = this.parseCurrency(item.unitPrice || item.price || item.cost || item.unitCost)
+      // 💰 SMART UNIT PRICE CALCULATION
+      // When AI extracts expanded quantity (e.g., 24 units from "Case of 24"), 
+      // the invoice's "unit price" column shows price per CASE, not per UNIT.
+      // Calculate: unitCost = totalCost / quantity
+      const invoiceUnitPrice = this.parseCurrency(item.unitPrice || item.price || item.cost || item.unitCost)
       const totalCost = this.parseCurrency(item.totalPrice || item.total || item.lineTotal) 
-        || (quantity * unitCost)
+        || (quantity * invoiceUnitPrice)
       
-      console.log(`  💰 Line item ${i + 1} pricing: quantity=${quantity}, unitCost=${unitCost}, totalCost=${totalCost}`)
+      // Calculate true per-unit cost when quantity was expanded from pack size
+      const unitCost = totalCost / quantity
+      
+      console.log(`  💰 Line item ${i + 1} pricing: quantity=${quantity}, invoiceUnitPrice=${invoiceUnitPrice}, totalCost=${totalCost}, calculatedUnitCost=${unitCost.toFixed(4)}`)
       
       return {
         sku: item.sku || item.productCode || item.itemNumber || `AUTO-${i + 1}`,
