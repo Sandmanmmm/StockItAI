@@ -2488,32 +2488,21 @@ Document chunk:\n${chunkPlan[i].text}`
       if (allLineItems.length > 0) {
         const mergedItems = this._dedupeLineItems(allLineItems)
         
-        // 📦 Consolidate SKU variants into parent products for cleaner UI display
-        // Example: "Laffy Taffy Rope Strawberry", "Laffy Taffy Rope Sour Apple" → "Laffy Taffy Rope" with 2 variants
-        let finalItems = mergedItems
-        const enableConsolidation = process.env.ENABLE_PRODUCT_CONSOLIDATION !== 'false' // Default: enabled
+        // ⚠️ CRITICAL FIX: Do NOT consolidate before database save!
+        // Consolidation creates nested structures that don't match the database schema.
+        // Instead, always save unconsolidated items to DB, and apply consolidation
+        // in the API layer when responding to frontend.
         
-        if (enableConsolidation && productConsolidationService.shouldConsolidate(mergedItems)) {
-          const consolidatedItems = productConsolidationService.consolidateLineItems(mergedItems)
-          console.log(`📦 Product consolidation: ${mergedItems.length} items → ${consolidatedItems.length} products`)
-          finalItems = consolidatedItems
-          
-          // Store both versions for flexibility
-          finalResult._unconsolidatedLineItems = mergedItems // Keep original for reference
-        }
+        // Store unconsolidated items for database save
+        finalResult.lineItems = mergedItems
         
-        finalResult.lineItems = finalItems
-
-        // Ensure nested extractedData structure reflects the full set
+        // Ensure nested extractedData structure has unconsolidated items
         if (finalResult.extractedData && typeof finalResult.extractedData === 'object') {
-          // Ensure downstream consumers reading extractedData.lineItems see the merged list
-          finalResult.extractedData.lineItems = finalItems
-
-          // Maintain legacy alias when some code paths expect extractedData.items
-          finalResult.extractedData.items = finalItems
+          finalResult.extractedData.lineItems = mergedItems
+          finalResult.extractedData.items = mergedItems // Legacy alias
         }
 
-        console.log(`✅ Multi-chunk processing complete: merged ${finalItems.length} total line items`)
+        console.log(`✅ Multi-chunk processing complete: merged ${mergedItems.length} total line items`)
         
         // 📊 Progress: Merging complete (90% of AI stage, 36% global)
         if (progressHelper) {

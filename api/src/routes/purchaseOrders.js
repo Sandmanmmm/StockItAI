@@ -213,6 +213,9 @@ router.get('/:id', async (req, res) => {
       })
     }
 
+    // ⚠️ IMPORTANT: Don't consolidate line items in the PO detail endpoint
+    // The frontend should use /api/line-items/purchase-order/:poId for line items
+    // This endpoint is for PO metadata only
     res.json({
       success: true,
       data: order

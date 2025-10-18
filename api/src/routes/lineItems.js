@@ -4,6 +4,7 @@
 
 import express from 'express'
 import { db } from '../lib/db.js'
+import { productConsolidationService } from '../lib/productConsolidationService.js'
 
 const router = express.Router()
 
@@ -40,9 +41,50 @@ router.get('/purchase-order/:poId', async (req, res) => {
       orderBy: { createdAt: 'asc' }
     })
 
+    // Transform database fields to match frontend expectations
+    const transformedItems = lineItems.map(item => ({
+      id: item.id,
+      sku: item.sku,
+      productName: item.productName,
+      name: item.productName, // Alias for compatibility
+      description: item.description || item.productName,
+      item_description: item.description, // Alias
+      quantity: item.quantity,
+      qty: item.quantity, // Alias
+      unitPrice: item.unitCost,
+      unit_price: item.unitCost, // Alias
+      price: item.unitCost, // Alias
+      totalPrice: item.totalCost,
+      total_price: item.totalCost, // Alias
+      total: item.totalCost, // Alias
+      confidence: Math.round(item.confidence * 100), // Convert 0-1 to 0-100
+      status: item.status,
+      shopifyProductId: item.shopifyProductId,
+      shopifyVariantId: item.shopifyVariantId,
+      aiNotes: item.aiNotes,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt
+    }))
+
+    // Check if consolidation is requested (default: enabled for UI display)
+    const consolidate = req.query.consolidate !== 'false'
+    const enableConsolidation = process.env.ENABLE_PRODUCT_CONSOLIDATION !== 'false'
+    
+    let responseData = transformedItems
+    
+    if (consolidate && enableConsolidation && productConsolidationService.shouldConsolidate(transformedItems)) {
+      responseData = productConsolidationService.consolidateLineItems(transformedItems)
+      console.log(`📦 API consolidation: ${transformedItems.length} items → ${responseData.length} products`)
+    }
+
     res.json({
       success: true,
-      data: lineItems
+      data: responseData,
+      meta: {
+        totalItems: lineItems.length,
+        consolidated: responseData.length !== transformedItems.length,
+        consolidatedCount: responseData.length
+      }
     })
   } catch (error) {
     console.error('Get line items error:', error)

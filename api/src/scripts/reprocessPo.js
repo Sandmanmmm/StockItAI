@@ -7,23 +7,25 @@
 
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { config } from 'dotenv'
-import { WorkflowOrchestrator } from '../lib/workflowOrchestrator.js'
 
-// Load environment variables from .env or .env.production.vercel
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
-const rootDir = path.resolve(__dirname, '../../..')
 
-// Try loading production env first, then fallback to standard .env
-const prodEnvPath = path.join(rootDir, '.env.production.vercel')
-const envPath = path.join(rootDir, '.env')
-config({ path: prodEnvPath })
-config({ path: envPath })
+// ⚠️ CRITICAL: Set REDIS_URL directly BEFORE importing WorkflowOrchestrator
+// This must happen before any module that calls dotenv.config() loads
+// Hardcoded from .env.production.vercel to avoid dotenv loading issues
+process.env.REDIS_URL = "rediss://default:AUuiAAIncDJmMGE0NThlZGM1MTc0ZDczYmRlYmFkYjVlNDMxY2I0ZHAyMTkzNjI@enormous-burro-19362.upstash.io:6379"
 
-console.log('🔧 Environment loaded:')
-console.log('   - REDIS_URL:', process.env.REDIS_URL ? 'configured (Upstash)' : 'not set')
-console.log('   - DATABASE_URL:', process.env.DATABASE_URL ? 'configured' : 'not set')
+// Also ensure DATABASE_URLs are set
+process.env.DATABASE_URL = process.env.DATABASE_URL || "postgresql://postgres:v2uGCTx7xIDTAB5o@po-sync-db-pooler.flycast:5432/po_sync_db?sslmode=disable&pgbouncer=true&connection_limit=5&connect_timeout=10&pool_timeout=10&statement_timeout=180000"
+process.env.DIRECT_URL = process.env.DIRECT_URL || "postgresql://postgres:v2uGCTx7xIDTAB5o@po-sync-db.flycast:5432/po_sync_db?sslmode=disable"
+
+console.log('🔧 Upstash Redis URL set directly in script')
+console.log('   - REDIS_URL:', process.env.REDIS_URL.substring(0, 30) + '...')
+
+// ⚠️ CRITICAL: Use dynamic import to load WorkflowOrchestrator AFTER setting env vars
+// Static imports are hoisted and run before our process.env assignments!
+const { WorkflowOrchestrator } = await import('../lib/workflowOrchestrator.js')
 
 function parseArgs(argv) {
   const out = {}

@@ -173,7 +173,7 @@ export class ProductConsolidationService {
       id: `consolidated-${items[0].id || items[0].sku || Date.now()}`,
       sku: primarySKU,
       name: baseName,
-      description: `${baseName} (${items.length} variants)`,
+      description: baseName, // Don't add "(# variants)" here - handle in UI layer
       quantity: totalQuantity,
       unitPrice: totalPrice / totalQuantity, // Average unit price
       totalPrice: totalPrice,
