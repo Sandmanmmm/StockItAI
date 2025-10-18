@@ -32,6 +32,52 @@ export class ImageProcessingService {
     
     // Initialize the reference-based image service
     this.productImageReferenceService = new ProductImageReferenceService()
+    
+    // Intelligent supplier search configuration
+    this.supplierSearchTimeoutMs = 15000 // 15s per supplier website
+    this.supplierSearchCache = new Map() // In-memory cache for scraped products
+    this.supplierRateLimits = new Map() // Rate limiting per domain
+    
+    // Industry-specific distributor database
+    this.industryDistributors = {
+      candy: [
+        { domain: 'candywarehouse.com', name: 'Candy Warehouse', searchPattern: '/search?q={query}', platform: 'custom' },
+        { domain: 'nassaucandy.com', name: 'Nassau Candy', searchPattern: '/search?q={query}', platform: 'shopify' },
+        { domain: 'candyville.ca', name: 'Candyville', searchPattern: '/search?q={query}', platform: 'shopify' },
+        { domain: 'allcitycandy.com', name: 'All City Candy', searchPattern: '/search?q={query}', platform: 'bigcommerce' }
+      ],
+      electronics: [
+        { domain: 'digikey.com', name: 'Digi-Key', searchPattern: '/products/en?keywords={query}', platform: 'custom' },
+        { domain: 'mouser.com', name: 'Mouser', searchPattern: '/Search/Refine?Keyword={query}', platform: 'custom' },
+        { domain: 'arrow.com', name: 'Arrow', searchPattern: '/en/products/search?q={query}', platform: 'custom' }
+      ],
+      office_supplies: [
+        { domain: 'uline.com', name: 'Uline', searchPattern: '/Product/Detail?model={sku}', platform: 'custom' },
+        { domain: 'globalindustrial.com', name: 'Global Industrial', searchPattern: '/search?query={query}', platform: 'custom' }
+      ],
+      automotive: [
+        { domain: 'autozone.com', name: 'AutoZone', searchPattern: '/search?searchText={query}', platform: 'custom' },
+        { domain: 'advanceautoparts.com', name: 'Advance Auto Parts', searchPattern: '/s?q={query}', platform: 'custom' }
+      ],
+      hardware: [
+        { domain: 'homedepot.com', name: 'Home Depot', searchPattern: '/s/{query}', platform: 'custom' },
+        { domain: 'lowes.com', name: "Lowe's", searchPattern: '/search?query={query}', platform: 'custom' },
+        { domain: 'mcmaster.com', name: 'McMaster-Carr', searchPattern: '/search?query={query}', platform: 'custom' }
+      ],
+      generic: [
+        { domain: 'amazon.com', name: 'Amazon', searchPattern: '/s?k={query}', platform: 'custom' },
+        { domain: 'alibaba.com', name: 'Alibaba', searchPattern: '/trade/search?SearchText={query}', platform: 'custom' }
+      ]
+    }
+    
+    // Industry detection keywords
+    this.industryKeywords = {
+      candy: ['candy', 'chocolate', 'gummy', 'gum', 'sweet', 'confection', 'lollipop', 'taffy', 'mint', 'caramel', 'truffle', 'fudge'],
+      electronics: ['electronic', 'resistor', 'capacitor', 'circuit', 'pcb', 'chip', 'diode', 'transistor', 'sensor', 'module', 'led'],
+      office_supplies: ['paper', 'pen', 'pencil', 'stapler', 'folder', 'notebook', 'binder', 'desk', 'chair', 'filing', 'envelope'],
+      automotive: ['auto', 'car', 'vehicle', 'engine', 'brake', 'tire', 'filter', 'oil', 'spark plug', 'battery', 'alternator'],
+      hardware: ['screw', 'bolt', 'nut', 'washer', 'nail', 'hammer', 'drill', 'saw', 'wrench', 'pliers', 'lumber', 'paint']
+    }
   }
 
   // ==========================================
@@ -159,27 +205,38 @@ export class ImageProcessingService {
   }
 
   /**
-   * Scrape images from vendor catalog URL
+   * Intelligent supplier website scraping with product matching
+   * Replaces basic scrapeVendorCatalog with smart multi-supplier search
    */
-  async scrapeVendorCatalog(catalogUrl) {
+  async scrapeVendorCatalog(catalogUrl, item = null, supplierInfo = null) {
+    // If we have item context, use intelligent supplier search
+    if (item && supplierInfo) {
+      console.log(`🎯 Intelligent supplier search enabled for: ${item.productName}`)
+      return this.intelligentSupplierSearch(item, supplierInfo)
+    }
+    
+    // Fallback to basic scraping if no item context
+    return this.basicCatalogScrape(catalogUrl)
+  }
+
+  /**
+   * Basic catalog scraping (legacy fallback)
+   */
+  async basicCatalogScrape(catalogUrl) {
     const vendorImages = []
     
     try {
-      console.log(`🔍 Scraping vendor catalog: ${catalogUrl}`)
+      console.log(`🔍 Basic scraping vendor catalog: ${catalogUrl}`)
       
-      const response = await fetch(catalogUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      })
+      const response = await this.fetchWithTimeout(catalogUrl, 10000)
       
       if (!response.ok) {
-        throw new Error(`Failed to fetch catalog: ${response.status}`)
+        throw new Error(`HTTP ${response.status}`)
       }
       
       const html = await response.text()
       
-      // Extract image URLs from HTML
+      // Extract image URLs from HTML (basic regex)
       const imgRegex = /<img[^>]+src="([^"]+)"/gi
       let match
       
@@ -189,16 +246,896 @@ export class ImageProcessingService {
           vendorImages.push({
             type: 'catalog',
             url: imageUrl,
-            source: catalogUrl
+            source: catalogUrl,
+            confidence: 0.3 // Low confidence for basic scraping
           })
         }
       }
 
-      return vendorImages.slice(0, 5) // Limit to 5 images per catalog
+      console.log(`   ✅ Extracted ${vendorImages.length} images via basic scraping`)
+      return vendorImages.slice(0, 5) // Limit to 5 images
     } catch (error) {
-      console.error(`❌ Failed to scrape vendor catalog ${catalogUrl}:`, error)
+      console.error(`   ❌ Basic scraping failed: ${error.message}`)
       return []
     }
+  }
+
+  /**
+   * Intelligent supplier search - finds product-specific images across multiple suppliers
+   */
+  async intelligentSupplierSearch(item, supplierInfo) {
+    console.log(`\n🔍 ===== INTELLIGENT SUPPLIER SEARCH =====`)
+    console.log(`   Product: ${item.productName}`)
+    console.log(`   SKU: ${item.sku || 'N/A'}`)
+    console.log(`   Supplier: ${supplierInfo?.name || supplierInfo?.website || 'Unknown'}`)
+    
+    try {
+      // STAGE 1: Build search targets
+      const searchTargets = this.buildSupplierSearchTargets(item, supplierInfo)
+      
+      if (searchTargets.length === 0) {
+        console.log(`   ⚠️ No search targets found`)
+        return []
+      }
+      
+      console.log(`   📋 ${searchTargets.length} search targets identified`)
+      
+      // STAGE 2: Execute parallel searches with timeout
+      const results = await this.executeParallelSupplierSearch(searchTargets, item)
+      
+      // STAGE 3: Extract & score product images
+      const allImages = []
+      for (const result of results) {
+        if (result.success && result.images) {
+          allImages.push(...result.images)
+        }
+      }
+      
+      if (allImages.length === 0) {
+        console.log(`   ❌ No images found from any supplier`)
+        return []
+      }
+      
+      // STAGE 4: Deduplicate & rank by confidence
+      const uniqueImages = this.deduplicateImages(allImages)
+      const rankedImages = uniqueImages.sort((a, b) => b.confidence - a.confidence)
+      
+      console.log(`   ✅ Found ${rankedImages.length} unique product images`)
+      console.log(`   🎯 Top confidence: ${(rankedImages[0].confidence * 100).toFixed(1)}%`)
+      console.log(`\n==========================================\n`)
+      
+      return rankedImages.slice(0, 10) // Return top 10 images
+      
+    } catch (error) {
+      console.error(`   ❌ Intelligent supplier search failed:`, error)
+      return []
+    }
+  }
+
+  /**
+   * Build list of supplier websites to search
+   */
+  buildSupplierSearchTargets(item, supplierInfo) {
+    const targets = []
+    
+    // 1. Direct supplier website (highest priority)
+    if (supplierInfo?.website) {
+      const platform = this.detectEcommercePlatform(supplierInfo.website)
+      const searchUrls = this.buildPlatformSearchUrls(supplierInfo.website, item, platform)
+      
+      for (const url of searchUrls) {
+        targets.push({
+          url,
+          domain: supplierInfo.website,
+          name: supplierInfo.name || supplierInfo.website,
+          platform,
+          priority: 1,
+          type: 'direct_supplier'
+        })
+      }
+    }
+    
+    // 2. Industry-specific distributors (medium priority)
+    const industry = this.detectIndustry(item.productName)
+    const distributors = this.getIndustryDistributors(industry)
+    
+    for (const distributor of distributors) {
+      // Skip if it's the same as direct supplier
+      if (supplierInfo?.website && supplierInfo.website.includes(distributor.domain)) {
+        continue
+      }
+      
+      const searchUrls = this.buildDistributorSearchUrls(distributor, item)
+      for (const url of searchUrls) {
+        targets.push({
+          url,
+          domain: distributor.domain,
+          name: distributor.name,
+          platform: distributor.platform,
+          priority: 2,
+          type: 'distributor'
+        })
+      }
+    }
+    
+    // 3. Manufacturer website (low priority)
+    const brand = this.extractBrand(item.productName)
+    if (brand) {
+      const manufacturerUrls = this.buildManufacturerSearchUrls(brand, item)
+      for (const url of manufacturerUrls) {
+        targets.push({
+          url,
+          domain: url.match(/https?:\/\/([^/]+)/)?.[1],
+          name: brand,
+          platform: 'unknown',
+          priority: 3,
+          type: 'manufacturer'
+        })
+      }
+    }
+    
+    // Sort by priority and limit to top 5 targets
+    return targets
+      .sort((a, b) => a.priority - b.priority)
+      .slice(0, 5)
+  }
+
+  /**
+   * Detect e-commerce platform from URL or HTML
+   */
+  detectEcommercePlatform(websiteUrl) {
+    const urlLower = websiteUrl.toLowerCase()
+    
+    // Platform detection patterns
+    if (urlLower.includes('shopify') || urlLower.includes('myshopify.com')) {
+      return 'shopify'
+    }
+    if (urlLower.includes('bigcommerce')) {
+      return 'bigcommerce'
+    }
+    if (urlLower.includes('woocommerce') || urlLower.includes('wordpress')) {
+      return 'woocommerce'
+    }
+    if (urlLower.includes('squarespace')) {
+      return 'squarespace'
+    }
+    
+    return 'generic'
+  }
+
+  /**
+   * Build platform-specific search URLs
+   */
+  buildPlatformSearchUrls(website, item, platform) {
+    const urls = []
+    const baseUrl = website.replace(/\/$/, '') // Remove trailing slash
+    
+    // Build search query from product name
+    const query = this.buildSearchQuery(item)
+    const slug = this.productNameToSlug(item.productName)
+    
+    switch (platform) {
+      case 'shopify':
+        // Shopify patterns
+        urls.push(`${baseUrl}/search?q=${encodeURIComponent(query)}`)
+        if (item.sku) {
+          urls.push(`${baseUrl}/search?q=${encodeURIComponent(item.sku)}`)
+        }
+        // Try direct product URL
+        urls.push(`${baseUrl}/products/${slug}`)
+        break
+        
+      case 'woocommerce':
+        // WooCommerce patterns
+        urls.push(`${baseUrl}/?s=${encodeURIComponent(query)}`)
+        urls.push(`${baseUrl}/product/${slug}`)
+        break
+        
+      case 'bigcommerce':
+        // BigCommerce patterns
+        urls.push(`${baseUrl}/search.php?search_query=${encodeURIComponent(query)}`)
+        break
+        
+      default:
+        // Generic patterns
+        urls.push(`${baseUrl}/search?q=${encodeURIComponent(query)}`)
+        urls.push(`${baseUrl}/products/${slug}`)
+    }
+    
+    return urls
+  }
+
+  /**
+   * Build distributor search URLs
+   */
+  buildDistributorSearchUrls(distributor, item) {
+    const urls = []
+    const baseUrl = `https://${distributor.domain}`
+    const query = this.buildSearchQuery(item)
+    
+    // Replace placeholders in search pattern
+    let searchUrl = distributor.searchPattern
+      .replace('{query}', encodeURIComponent(query))
+      .replace('{sku}', encodeURIComponent(item.sku || query))
+      .replace('{slug}', this.productNameToSlug(item.productName))
+    
+    urls.push(`${baseUrl}${searchUrl}`)
+    
+    return urls
+  }
+
+  /**
+   * Build manufacturer search URLs
+   */
+  buildManufacturerSearchUrls(brand, item) {
+    const urls = []
+    const brandDomain = brand.toLowerCase().replace(/[^a-z0-9]/g, '')
+    const query = this.buildSearchQuery(item)
+    
+    // Try common domain patterns
+    const possibleDomains = [
+      `${brandDomain}.com`,
+      `${brandDomain}.ca`,
+      `${brandDomain}.co`
+    ]
+    
+    for (const domain of possibleDomains.slice(0, 1)) { // Only try .com for now
+      urls.push(`https://${domain}/search?q=${encodeURIComponent(query)}`)
+    }
+    
+    return urls
+  }
+
+  /**
+   * Detect industry from product name
+   */
+  detectIndustry(productName) {
+    const nameLower = productName.toLowerCase()
+    
+    for (const [industry, keywords] of Object.entries(this.industryKeywords)) {
+      if (keywords.some(keyword => nameLower.includes(keyword))) {
+        return industry
+      }
+    }
+    
+    return 'generic'
+  }
+
+  /**
+   * Get distributors for industry
+   */
+  getIndustryDistributors(industry) {
+    // Return industry-specific distributors, fallback to generic
+    const distributors = this.industryDistributors[industry] || []
+    const generic = this.industryDistributors.generic || []
+    
+    // Combine and limit to 3 distributors
+    return [...distributors, ...generic].slice(0, 3)
+  }
+
+  /**
+   * Extract brand from product name
+   */
+  extractBrand(productName) {
+    // Common brand patterns (first word or word before specific keywords)
+    const words = productName.split(/\s+/)
+    
+    // If first word is capitalized and not a descriptor, likely a brand
+    const firstWord = words[0]
+    if (firstWord && firstWord[0] === firstWord[0].toUpperCase() && firstWord.length > 2) {
+      return firstWord
+    }
+    
+    return null
+  }
+
+  /**
+   * Build optimized search query from item
+   */
+  buildSearchQuery(item) {
+    // Prioritize SKU if available
+    if (item.sku) {
+      return item.sku
+    }
+    
+    // Otherwise use product name
+    // Remove common noise words
+    const noiseWords = ['x', 'unit', 'units', 'case', 'pack', 'box', 'ct', 'count']
+    const cleanName = item.productName
+      .split(/\s+/)
+      .filter(word => !noiseWords.includes(word.toLowerCase()))
+      .join(' ')
+    
+    return cleanName || item.productName
+  }
+
+  /**
+   * Convert product name to URL slug
+   */
+  productNameToSlug(productName) {
+    return productName
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '') // Remove special characters
+      .replace(/\s+/g, '-') // Replace spaces with hyphens
+      .replace(/-+/g, '-') // Replace multiple hyphens with single
+      .replace(/^-|-$/g, '') // Remove leading/trailing hyphens
+  }
+
+  /**
+   * Execute parallel supplier searches with timeout
+   */
+  async executeParallelSupplierSearch(searchTargets, item) {
+    console.log(`   🚀 Executing ${searchTargets.length} parallel searches...`)
+    
+    const searchPromises = searchTargets.map(async (target) => {
+      try {
+        console.log(`      🔍 Searching ${target.name} (${target.platform})...`)
+        
+        const result = await this.scrapeSupplierWebsite(target, item)
+        
+        if (result.images && result.images.length > 0) {
+          console.log(`         ✅ Found ${result.images.length} images (confidence: ${(result.images[0].confidence * 100).toFixed(1)}%)`)
+        } else {
+          console.log(`         ⚠️ No images found`)
+        }
+        
+        return {
+          success: true,
+          target,
+          ...result
+        }
+      } catch (error) {
+        console.log(`         ❌ Failed: ${error.message}`)
+        return {
+          success: false,
+          target,
+          error: error.message
+        }
+      }
+    })
+    
+    // Execute all searches in parallel
+    const results = await Promise.all(searchPromises)
+    
+    const successful = results.filter(r => r.success).length
+    console.log(`   📊 ${successful}/${results.length} searches successful`)
+    
+    return results
+  }
+
+  /**
+   * Scrape specific supplier website based on platform
+   */
+  async scrapeSupplierWebsite(target, item) {
+    // Check cache first
+    const cacheKey = `${target.domain}:${item.sku || item.productName}`
+    const cached = this.getFromCache(cacheKey)
+    if (cached) {
+      console.log(`         💾 Using cached result`)
+      return cached
+    }
+    
+    // Check rate limit
+    if (!this.checkRateLimit(target.domain)) {
+      throw new Error('Rate limit exceeded')
+    }
+    
+    // Platform-specific scraping
+    let result
+    switch (target.platform) {
+      case 'shopify':
+        result = await this.scrapeShopifyProduct(target.url, item)
+        break
+      case 'woocommerce':
+        result = await this.scrapeWooCommerceProduct(target.url, item)
+        break
+      case 'bigcommerce':
+        result = await this.scrapeBigCommerceProduct(target.url, item)
+        break
+      default:
+        result = await this.scrapeGenericEcommerce(target.url, item)
+    }
+    
+    // Cache result for 24 hours
+    this.addToCache(cacheKey, result, 24 * 60 * 60 * 1000)
+    
+    return result
+  }
+
+  /**
+   * Scrape Shopify product page
+   */
+  async scrapeShopifyProduct(url, item) {
+    try {
+      // Try JSON endpoint first (much faster and more reliable)
+      const jsonUrl = url.replace(/\?.*$/, '').replace(/\/$/, '') + '.json'
+      
+      const response = await this.fetchWithTimeout(jsonUrl, this.supplierSearchTimeoutMs)
+      
+      if (response.ok) {
+        const data = await response.json()
+        
+        // Check if it's a product page or search results
+        if (data.product) {
+          // Single product page
+          const product = data.product
+          const matchScore = this.calculateProductMatchScore(product, item)
+          
+          if (matchScore > 0.5) { // Only return if reasonable match
+            return {
+              images: product.images.map(img => ({
+                url: img.src,
+                alt: img.alt || product.title,
+                width: img.width,
+                height: img.height,
+                source: url,
+                confidence: matchScore * 0.9, // High confidence for direct match
+                platform: 'shopify'
+              })),
+              product: {
+                title: product.title,
+                vendor: product.vendor,
+                sku: product.variants[0]?.sku,
+                price: product.variants[0]?.price
+              }
+            }
+          }
+        } else if (data.products) {
+          // Search results page
+          const products = data.products
+          let bestMatch = null
+          let bestScore = 0
+          
+          for (const product of products) {
+            const score = this.calculateProductMatchScore(product, item)
+            if (score > bestScore) {
+              bestScore = score
+              bestMatch = product
+            }
+          }
+          
+          if (bestMatch && bestScore > 0.5) {
+            return {
+              images: bestMatch.images.map(img => ({
+                url: img.src,
+                alt: img.alt || bestMatch.title,
+                source: url,
+                confidence: bestScore * 0.85,
+                platform: 'shopify'
+              }))
+            }
+          }
+        }
+      }
+    } catch (error) {
+      // Fallback to HTML scraping if JSON fails
+      console.log(`         ⚠️ JSON endpoint failed, trying HTML scraping`)
+    }
+    
+    // Fallback: HTML scraping
+    return this.scrapeGenericEcommerce(url, item)
+  }
+
+  /**
+   * Scrape WooCommerce product page
+   */
+  async scrapeWooCommerceProduct(url, item) {
+    try {
+      const response = await this.fetchWithTimeout(url, this.supplierSearchTimeoutMs)
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+      
+      const html = await response.text()
+      
+      // Extract JSON-LD structured data
+      const jsonLd = this.extractJsonLd(html)
+      
+      if (jsonLd && jsonLd['@type'] === 'Product') {
+        const matchScore = this.calculateProductMatchScore(jsonLd, item)
+        
+        if (matchScore > 0.5) {
+          const images = [jsonLd.image].flat().map(imgUrl => ({
+            url: imgUrl,
+            source: url,
+            confidence: matchScore * 0.85,
+            platform: 'woocommerce'
+          }))
+          
+          return { images }
+        }
+      }
+    } catch (error) {
+      console.log(`         ⚠️ WooCommerce scraping failed: ${error.message}`)
+    }
+    
+    // Fallback to generic scraping
+    return this.scrapeGenericEcommerce(url, item)
+  }
+
+  /**
+   * Scrape BigCommerce product page
+   */
+  async scrapeBigCommerceProduct(url, item) {
+    // BigCommerce doesn't have a public JSON API, use generic scraping
+    return this.scrapeGenericEcommerce(url, item)
+  }
+
+  /**
+   * Generic e-commerce scraping with multi-strategy extraction
+   */
+  async scrapeGenericEcommerce(url, item) {
+    try {
+      const response = await this.fetchWithTimeout(url, this.supplierSearchTimeoutMs)
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+      
+      const html = await response.text()
+      const images = []
+      
+      // Strategy 1: Open Graph meta tags
+      images.push(...this.extractOpenGraphImages(html, url))
+      
+      // Strategy 2: JSON-LD structured data
+      images.push(...this.extractJsonLdImages(html, url))
+      
+      // Strategy 3: Common CSS patterns
+      images.push(...this.extractCssImages(html, url))
+      
+      // Strategy 4: Lazy-loaded images
+      images.push(...this.extractLazyImages(html, url))
+      
+      // Deduplicate and add confidence scores
+      const uniqueImages = this.deduplicateImages(images)
+      
+      // Calculate confidence based on image source quality
+      return {
+        images: uniqueImages.map(img => ({
+          ...img,
+          confidence: img.confidence || 0.5 // Medium confidence for generic scraping
+        }))
+      }
+      
+    } catch (error) {
+      console.log(`         ❌ Generic scraping failed: ${error.message}`)
+      return { images: [] }
+    }
+  }
+
+  /**
+   * Calculate product match score (0.0-1.0)
+   */
+  calculateProductMatchScore(scrapedProduct, targetItem) {
+    let score = 0
+    let maxScore = 100
+    
+    // SKU matching (50 points - strongest signal)
+    if (scrapedProduct.sku && targetItem.sku) {
+      const scrapedSku = String(scrapedProduct.sku).toLowerCase()
+      const targetSku = String(targetItem.sku).toLowerCase()
+      
+      if (scrapedSku === targetSku) {
+        score += 50
+      } else if (scrapedSku.includes(targetSku) || targetSku.includes(scrapedSku)) {
+        score += 30
+      }
+    }
+    
+    // Product name matching (30 points)
+    if (scrapedProduct.title || scrapedProduct.name) {
+      const scrapedName = (scrapedProduct.title || scrapedProduct.name).toLowerCase()
+      const targetName = targetItem.productName.toLowerCase()
+      const matchRatio = this.fuzzyMatch(scrapedName, targetName)
+      score += matchRatio * 30
+    }
+    
+    // Brand matching (10 points)
+    const targetBrand = this.extractBrand(targetItem.productName)
+    if (targetBrand) {
+      const scrapedBrand = scrapedProduct.vendor || this.extractBrand(scrapedProduct.title || scrapedProduct.name || '')
+      if (scrapedBrand && targetBrand.toLowerCase() === scrapedBrand.toLowerCase()) {
+        score += 10
+      }
+    }
+    
+    // Price matching (10 points - if available)
+    if (scrapedProduct.price && targetItem.unitPrice) {
+      const scrapedPrice = parseFloat(scrapedProduct.price)
+      const targetPrice = parseFloat(targetItem.unitPrice)
+      
+      if (!isNaN(scrapedPrice) && !isNaN(targetPrice)) {
+        const priceDiff = Math.abs(scrapedPrice - targetPrice) / targetPrice
+        if (priceDiff < 0.2) { // Within 20%
+          score += 10
+        } else if (priceDiff < 0.5) { // Within 50%
+          score += 5
+        }
+      }
+    }
+    
+    return Math.min(score / maxScore, 1.0) // Return 0.0-1.0
+  }
+
+  /**
+   * Fuzzy string matching (returns 0.0-1.0)
+   */
+  fuzzyMatch(str1, str2) {
+    const s1 = str1.toLowerCase().replace(/[^a-z0-9]/g, '')
+    const s2 = str2.toLowerCase().replace(/[^a-z0-9]/g, '')
+    
+    if (s1 === s2) return 1.0
+    
+    // Count matching words
+    const words1 = str1.toLowerCase().split(/\s+/)
+    const words2 = str2.toLowerCase().split(/\s+/)
+    
+    let matches = 0
+    for (const word1 of words1) {
+      if (words2.some(word2 => word2.includes(word1) || word1.includes(word2))) {
+        matches++
+      }
+    }
+    
+    return matches / Math.max(words1.length, words2.length)
+  }
+
+  /**
+   * Extract Open Graph images
+   */
+  extractOpenGraphImages(html, sourceUrl) {
+    const images = []
+    const ogImageRegex = /<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/gi
+    let match
+    
+    while ((match = ogImageRegex.exec(html)) !== null) {
+      images.push({
+        url: this.resolveUrl(match[1], sourceUrl),
+        source: sourceUrl,
+        type: 'og:image',
+        confidence: 0.8 // High confidence for OG images
+      })
+    }
+    
+    return images
+  }
+
+  /**
+   * Extract JSON-LD structured data images
+   */
+  extractJsonLdImages(html, sourceUrl) {
+    const images = []
+    
+    try {
+      const jsonLd = this.extractJsonLd(html)
+      
+      if (jsonLd) {
+        // Handle single image or array
+        const imageUrls = [jsonLd.image].flat().filter(Boolean)
+        
+        for (const imgUrl of imageUrls) {
+          images.push({
+            url: this.resolveUrl(imgUrl, sourceUrl),
+            source: sourceUrl,
+            type: 'json-ld',
+            confidence: 0.85 // Very high confidence for structured data
+          })
+        }
+      }
+    } catch (error) {
+      // Silently fail if JSON-LD parsing fails
+    }
+    
+    return images
+  }
+
+  /**
+   * Extract images from common CSS patterns
+   */
+  extractCssImages(html, sourceUrl) {
+    const images = []
+    
+    // Common product image CSS selectors
+    const selectors = [
+      /<img[^>]*class="[^"]*product-image[^"]*"[^>]*src="([^"]+)"/gi,
+      /<img[^>]*class="[^"]*product-photo[^"]*"[^>]*src="([^"]+)"/gi,
+      /<img[^>]*class="[^"]*gallery[^"]*"[^>]*src="([^"]+)"/gi,
+      /<img[^>]*itemprop="image"[^>]*src="([^"]+)"/gi
+    ]
+    
+    for (const regex of selectors) {
+      let match
+      while ((match = regex.exec(html)) !== null) {
+        const imgUrl = this.resolveUrl(match[1], sourceUrl)
+        if (this.isValidImageUrl(imgUrl)) {
+          images.push({
+            url: imgUrl,
+            source: sourceUrl,
+            type: 'css-pattern',
+            confidence: 0.6
+          })
+        }
+      }
+    }
+    
+    return images
+  }
+
+  /**
+   * Extract lazy-loaded images
+   */
+  extractLazyImages(html, sourceUrl) {
+    const images = []
+    
+    // Lazy loading patterns (data-src, data-lazy, etc.)
+    const lazyRegex = /<img[^>]*data-(?:src|lazy|original)="([^"]+)"/gi
+    let match
+    
+    while ((match = lazyRegex.exec(html)) !== null) {
+      const imgUrl = this.resolveUrl(match[1], sourceUrl)
+      if (this.isValidImageUrl(imgUrl)) {
+        images.push({
+          url: imgUrl,
+          source: sourceUrl,
+          type: 'lazy-load',
+          confidence: 0.5
+        })
+      }
+    }
+    
+    return images
+  }
+
+  /**
+   * Extract JSON-LD structured data
+   */
+  extractJsonLd(html) {
+    try {
+      const jsonLdRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>(.*?)<\/script>/gis
+      const match = jsonLdRegex.exec(html)
+      
+      if (match && match[1]) {
+        const data = JSON.parse(match[1])
+        
+        // Handle both single object and array
+        if (Array.isArray(data)) {
+          return data.find(item => item['@type'] === 'Product') || data[0]
+        }
+        
+        return data
+      }
+    } catch (error) {
+      // Silently fail
+    }
+    
+    return null
+  }
+
+  /**
+   * Deduplicate images by URL
+   */
+  deduplicateImages(images) {
+    const seen = new Set()
+    const unique = []
+    
+    for (const img of images) {
+      // Normalize URL for comparison
+      const normalizedUrl = img.url.split('?')[0].toLowerCase()
+      
+      if (!seen.has(normalizedUrl)) {
+        seen.add(normalizedUrl)
+        unique.push(img)
+      }
+    }
+    
+    return unique
+  }
+
+  /**
+   * Fetch with timeout and retry
+   */
+  async fetchWithTimeout(url, timeoutMs = 15000, retries = 1) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+        
+        const response = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            'User-Agent': this.getRandomUserAgent(),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+          }
+        })
+        
+        clearTimeout(timeoutId)
+        return response
+        
+      } catch (error) {
+        if (attempt === retries) throw error
+        await this.delay(1000 * (attempt + 1)) // Exponential backoff
+      }
+    }
+  }
+
+  /**
+   * Get random user agent
+   */
+  getRandomUserAgent() {
+    const userAgents = [
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15'
+    ]
+    
+    return userAgents[Math.floor(Math.random() * userAgents.length)]
+  }
+
+  /**
+   * Delay helper
+   */
+  delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms))
+  }
+
+  /**
+   * Cache management
+   */
+  getFromCache(key) {
+    const cached = this.supplierSearchCache.get(key)
+    if (!cached) return null
+    
+    // Check if expired
+    if (Date.now() > cached.expiresAt) {
+      this.supplierSearchCache.delete(key)
+      return null
+    }
+    
+    return cached.data
+  }
+
+  addToCache(key, data, ttlMs) {
+    this.supplierSearchCache.set(key, {
+      data,
+      expiresAt: Date.now() + ttlMs
+    })
+    
+    // Clean up old cache entries (keep max 100)
+    if (this.supplierSearchCache.size > 100) {
+      const oldestKey = this.supplierSearchCache.keys().next().value
+      this.supplierSearchCache.delete(oldestKey)
+    }
+  }
+
+  /**
+   * Rate limiting
+   */
+  checkRateLimit(domain) {
+    const now = Date.now()
+    const limit = this.supplierRateLimits.get(domain) || { count: 0, resetAt: now + 60000 }
+    
+    // Reset if window expired
+    if (now > limit.resetAt) {
+      limit.count = 0
+      limit.resetAt = now + 60000
+    }
+    
+    // Check limit (10 requests per minute)
+    if (limit.count >= 10) {
+      return false
+    }
+    
+    limit.count++
+    this.supplierRateLimits.set(domain, limit)
+    
+    return true
   }
 
   // ==========================================
