@@ -44,10 +44,11 @@ const DEFAULT_PATTERNS = [
   {
     id: 'line_items',
     label: 'Line Items',
-      pattern: String.raw`(?:qty|description|unit\s*price|extended\s*price)`,
+      pattern: String.raw`(?:qty|description|unit\s*price|extended\s*price|item|product)`,
     contextBefore: 80,
-    contextAfter: 200,
-    maxMatches: 5
+    contextAfter: Infinity, // Changed to Infinity - capture ALL line items until terminator
+    maxMatches: 1, // Changed from 5 to 1 - we want ONE large section, not 5 small snippets
+    terminatorPattern: String.raw`(?:subtotal|sub-total|sub\s+total|total\s*(?:amount)?|grand\s*total|payment\s*terms|notes|comments|thank\s*you|signature)` // Stop when we hit totals/footer section
   }
 ]
 
@@ -58,7 +59,7 @@ const DEFAULT_OPTIONS = {
   maxMatchesPerPattern: 3,
   minReductionPercent: 10,
   minSnippets: 1,
-  globalMaxSnippets: 24
+  globalMaxSnippets: 50 // Increased from 24 to allow more snippets for large POs
 }
 
 const ensureGlobal = (regexSource, flags = 'gi') => new RegExp(regexSource, flags.includes('g') ? flags : `${flags}g`)
@@ -132,6 +133,11 @@ export function extractAnchors(text, userOptions = {}) {
 
   const maxSnippets = options.globalMaxSnippets > 0 ? options.globalMaxSnippets : null
 
+  if (process.env.DEBUG_ANCHOR_EXTRACTION) {
+    console.log(`[DEBUG_ANCHOR] Starting anchor extraction on ${text.length} chars with ${normalizedPatterns.length} patterns`)
+    console.log(`[DEBUG_ANCHOR] maxSnippets: ${maxSnippets}`)
+  }
+
   for (const pattern of normalizedPatterns) {
     let matches = 0
     let match
@@ -143,8 +149,36 @@ export function extractAnchors(text, userOptions = {}) {
       matches += 1
       anchorsMatched[pattern.id] = (anchorsMatched[pattern.id] || 0) + 1
 
+      if (process.env.DEBUG_ANCHOR_EXTRACTION && pattern.id === 'line_items') {
+        console.log(`[DEBUG_ANCHOR] Pattern '${pattern.id}' matched: "${match[0]}" at position ${match.index}`)
+      }
+
       const start = Math.max(0, match.index - pattern.contextBefore)
-      const end = Math.min(text.length, match.index + match[0].length + pattern.contextAfter)
+      
+      // Dynamic end calculation: if captureUntilEnd is true, search for terminator
+      let end
+      if (pattern.captureUntilEnd && pattern.terminatorPattern) {
+        const terminatorRegex = new RegExp(pattern.terminatorPattern, 'i')
+        const searchStart = match.index + match[0].length
+        const terminatorMatch = terminatorRegex.exec(text.substring(searchStart))
+        if (terminatorMatch) {
+          end = searchStart + terminatorMatch.index
+          if (process.env.DEBUG_ANCHOR_EXTRACTION) {
+            console.log(`[DEBUG_ANCHOR] Pattern '${pattern.id}' - Terminator found: "${terminatorMatch[0]}" at position ${terminatorMatch.index}`)
+            console.log(`[DEBUG_ANCHOR] Capturing from ${start} to ${end} (${end - start} chars)`)
+          }
+        } else {
+          // If no terminator found, capture to end of document
+          end = text.length
+          if (process.env.DEBUG_ANCHOR_EXTRACTION) {
+            console.log(`[DEBUG_ANCHOR] Pattern '${pattern.id}' - No terminator found, capturing to end of document`)
+            console.log(`[DEBUG_ANCHOR] Capturing from ${start} to ${end} (${end - start} chars)`)
+          }
+        }
+      } else {
+        end = Math.min(text.length, match.index + match[0].length + pattern.contextAfter)
+      }
+      
       const rangeKey = `${start}:${end}`
       if (seenRanges.has(rangeKey)) {
         continue

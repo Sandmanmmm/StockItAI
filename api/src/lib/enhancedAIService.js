@@ -7,6 +7,7 @@
 import OpenAI from 'openai'
 import { errorHandlingService, CONFIDENCE_THRESHOLDS } from './errorHandlingService.js'
 import { extractAnchors } from './anchorExtractor.js'
+import { productConsolidationService } from './productConsolidationService.js'
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -16,8 +17,8 @@ const openai = new OpenAI({
 
 export class EnhancedAIService {
   constructor() {
-    this.optimizedPrompt = 'You are StockIt AI, a purchase-order extraction engine. Always respond by calling the extract_purchase_order function. Populate every field you can find, use null when data is missing, and include every line item without truncation.'
-    this.chunkLineItemPrompt = 'You extract purchase-order line items. Always call extract_po_line_items with every row you discover. Never summarize or drop items; use null when a value is missing.'
+    this.optimizedPrompt = 'You are StockIt AI, a purchase-order extraction engine. Always respond by calling the extract_purchase_order function. Populate every field you can find, use null when data is missing, and include every line item without truncation. IMPORTANT: Products may span multiple text lines (description on one line, SKU on next line, pricing on another). Group these lines into a single line item. Each product should have ONE entry with description, SKU, quantity, and prices combined.'
+    this.chunkLineItemPrompt = 'You extract purchase-order line items. Each product may span 2-4 text lines (e.g., product name, then SKU line, then quantity/price line). Combine these lines into ONE line item entry. Only call extract_po_line_items once per distinct product, not once per text line. A product is complete when it has description, SKU (if present), quantity, unit price, and total. Never create separate entries for SKU lines or price lines alone.'
     this.defaultPrompt = this.optimizedPrompt
     this.chunkingConfig = {
       maxChunkChars: 4200,
@@ -489,6 +490,13 @@ export class EnhancedAIService {
 
       const adaptiveOverlap = this._calculateAdaptiveOverlap(chunkText, baseOverlap)
 
+      if (process.env.DEBUG_CHUNK_LINE_ITEMS === 'true') {
+        const lastLines = chunkText.trim().split('\n').slice(-3)
+        console.log(`[DEBUG CHUNKING] Chunk ${plan.length}:`)
+        console.log(`  Ends with: "${lastLines.join(' | ')}"`)
+        console.log(`  Overlap: ${adaptiveOverlap} (base: ${baseOverlap})${adaptiveOverlap !== baseOverlap ? ' ✓ REDUCED' : ''}`)
+      }
+
       plan.push({
         index: plan.length,
         start,
@@ -566,18 +574,27 @@ export class EnhancedAIService {
     const searchEnd = targetEnd
     let bestBreak = start
 
+    // First, try to find a product boundary
+    const productBreak = this._findProductBoundary(text, searchStart, searchEnd)
+    if (productBreak > searchStart) {
+      return productBreak
+    }
+
+    // Fallback to line break
     const newlineBreak = text.lastIndexOf('\n', searchEnd - 1)
     if (newlineBreak >= searchStart) {
       bestBreak = newlineBreak + 1
       return bestBreak
     }
 
+    // Fallback to space break
     const spaceBreak = text.lastIndexOf(' ', searchEnd - 1)
     if (spaceBreak >= searchStart) {
       bestBreak = spaceBreak + 1
       return bestBreak
     }
 
+    // Fallback to pipe break
     const pipeBreak = text.lastIndexOf('|', searchEnd - 1)
     if (pipeBreak >= searchStart) {
       bestBreak = pipeBreak + 1
@@ -586,31 +603,290 @@ export class EnhancedAIService {
     return bestBreak > start ? bestBreak : targetEnd
   }
 
+  /**
+   * Find a natural product boundary to split chunks
+   * COMPREHENSIVE: Handles various receipt/PO formats, multi-line products, and international formats
+   * 
+   * Looks for patterns that indicate the end of a product line item:
+   * - Lines ending with price totals (multiple currency formats)
+   * - Blank lines
+   * - SKU/product code patterns (various formats)
+   * - Table headers/footers
+   * - Multi-line product boundaries (description → SKU → price)
+   */
+  _findProductBoundary(text, searchStart, searchEnd) {
+    const searchText = text.substring(searchStart, searchEnd)
+    const lines = searchText.split('\n')
+    
+    const debugBoundary = String(process.env.DEBUG_CHUNK_LINE_ITEMS || '').toLowerCase() === 'true'
+    
+    // Comprehensive price patterns for international formats
+    // IMPORTANT: Handles both normalized ($25.99) and spaced ($ 25 . 99) formats
+    const pricePatterns = {
+      // US/Canada: $ 25.99, $25.99, $ 1,234.56, $ 25 . 99 (with spaces from normalization)
+      usd: /(?:\$|USD)\s*[\d\s,]+[.\s]+\d+\s*$/,
+      // Europe: 25,99 €, 25.99 EUR, €25,99, 25 , 99 €
+      eur: /(?:[\d\s.,]+\s*(?:€|EUR|eur)|(?:€|EUR)\s*[\d\s.,]+)\s*$/,
+      // UK: £ 25.99, £25.99, £ 25 . 99, 25.99 GBP
+      gbp: /(?:£|GBP)\s*[\d\s,]+[.\s]+\d+\s*$/,
+      // Generic: just numbers 25.99, 1,234.56, 25 . 99
+      generic: /[\d\s,]+[.,\s]+\d+\s*$/,
+      // With decimals only: 25.00, 1234.56, 25 . 00
+      decimal: /\d+\s*[.\s]+\s*\d+\s*$/
+    }
+    
+    // Comprehensive product identifier patterns
+    const identifierPatterns = {
+      sku: /(?:SKU|sku|Sku)[\s:]*[\dA-Z-]+/,
+      upc: /(?:UPC|upc|barcode|Barcode)[\s:]*\d{8,14}/,
+      ean: /(?:EAN|ean)[\s:]*\d{8,13}/,
+      itemCode: /(?:Item|item|Code|code|Product|product)[\s:#]*[\dA-Z-]+/,
+      generic: /^[\s]*(?:SKU|UPC|EAN|Item|Code|Product|Barcode)[\s:#]/i
+    }
+    
+    // Table header/footer patterns that indicate section boundaries
+    const sectionPatterns = {
+      header: /(?:items?|qty|quantity|price|total|subtotal|description|product).*(?:price|total|subtotal)/i,
+      footer: /(?:subtotal|total|grand\s*total|tax|shipping|payment)/i,
+      separator: /^[\s]*[-=_|*]{3,}\s*$/
+    }
+    
+    // Search backwards through lines to find best boundary
+    let cumulativePos = searchText.length
+    let bestBoundary = null
+    let bestScore = 0
+    
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim()
+      const prevLine = i > 0 ? lines[i - 1].trim() : ''
+      const nextLine = i < lines.length - 1 ? lines[i + 1].trim() : ''
+      const next2Line = i < lines.length - 2 ? lines[i + 2].trim() : ''
+      
+      cumulativePos -= (lines[i].length + 1) // +1 for newline
+      
+      // Skip if we're too close to the end or invalid position
+      if (cumulativePos < 0 || cumulativePos > searchText.length - 30) {
+        continue
+      }
+      
+      let score = 0
+      let boundaryType = ''
+      
+      // === PRIORITY 1: Complete Multi-Line Product Boundary ===
+      // Pattern: Description line → SKU line → Price line (break AFTER price)
+      const hasPricePattern = Object.values(pricePatterns).some(p => p.test(line))
+      const prevHasIdentifier = Object.values(identifierPatterns).some(p => p.test(prevLine))
+      
+      if (hasPricePattern && prevHasIdentifier) {
+        // This looks like: [Description] → [SKU: 123] → [1 $25.99] ← BREAK HERE
+        score = 100
+        boundaryType = 'multi-line-complete'
+        
+        // Extra points if next line is blank or starts new product
+        if (!nextLine || /^[A-Z\d]/.test(nextLine)) {
+          score += 20
+        }
+      }
+      
+      // === PRIORITY 2: Blank Lines (Universal Separator) ===
+      else if (!line && prevLine && i > 0) {
+        score = 90
+        boundaryType = 'blank-line'
+      }
+      
+      // === PRIORITY 3: Section Headers/Footers ===
+      else if (sectionPatterns.header.test(line) || sectionPatterns.footer.test(line)) {
+        // Break BEFORE headers, AFTER footers
+        const isHeader = sectionPatterns.header.test(line)
+        score = 80
+        boundaryType = isHeader ? 'section-header' : 'section-footer'
+      }
+      
+      // === PRIORITY 4: Separator Lines ===
+      else if (sectionPatterns.separator.test(line)) {
+        score = 75
+        boundaryType = 'separator-line'
+      }
+      
+      // === PRIORITY 5: Price Line Endings ===
+      else if (hasPricePattern) {
+        // Line ends with price - likely end of product
+        score = 70
+        boundaryType = 'price-ending'
+        
+        // Boost score if followed by identifier or blank line
+        if (!nextLine || Object.values(identifierPatterns).some(p => p.test(nextLine))) {
+          score += 10
+        }
+        
+        // Boost if followed by capital letter (new product name)
+        if (/^[A-Z]/.test(nextLine)) {
+          score += 5
+        }
+      }
+      
+      // === PRIORITY 6: Identifier Lines (might be mid-product) ===
+      else if (Object.values(identifierPatterns).some(p => p.test(line))) {
+        // SKU line - could break AFTER if followed by price
+        if (Object.values(pricePatterns).some(p => p.test(nextLine))) {
+          // Wait for next iteration to catch the price line
+          score = 0
+        } else if (!nextLine) {
+          // End of text after SKU
+          score = 50
+          boundaryType = 'identifier-eof'
+        } else {
+          score = 30
+          boundaryType = 'identifier-line'
+        }
+      }
+      
+      // === PRIORITY 7: Quantity-Price Pattern (new product starting) ===
+      else if (/^\s*\d+\s+(?:\$|€|£|USD|EUR|GBP)/.test(line)) {
+        // Line starts with "1 $25.99" - break BEFORE this (previous product ended)
+        score = 60
+        boundaryType = 'qty-price-start'
+        cumulativePos -= 0 // Break before this line, not after
+      }
+      
+      // === PRIORITY 8: Double Newlines ===
+      else if (!line && !prevLine && i > 1) {
+        score = 85
+        boundaryType = 'double-blank'
+      }
+      
+      // If this boundary is better than our current best, save it
+      if (score > bestScore && score >= 50) {
+        const breakPos = searchStart + cumulativePos + lines[i].length + 1
+        bestBoundary = {
+          position: breakPos,
+          score,
+          type: boundaryType,
+          line: line.substring(0, 60)
+        }
+        bestScore = score
+        
+        // If we found a perfect boundary (score >= 100), stop searching
+        if (score >= 100) {
+          if (debugBoundary) {
+            console.log(`[DEBUG BOUNDARY] Found perfect boundary (score ${score}): ${boundaryType}`)
+          }
+          break
+        }
+      }
+    }
+    
+    if (bestBoundary && debugBoundary) {
+      console.log(`[DEBUG BOUNDARY] Best: ${bestBoundary.type} (score: ${bestBoundary.score}) | "${bestBoundary.line}"`)
+    }
+    
+    return bestBoundary ? bestBoundary.position : -1
+  }
+
+  /**
+   * Calculate adaptive overlap based on chunk ending quality
+   * SMART: Reduces overlap when we end at clean boundaries, increases when mid-product
+   */
   _calculateAdaptiveOverlap(chunkText, baseOverlap) {
     const trimmed = chunkText.trimEnd()
     if (!trimmed.length) {
       return baseOverlap
     }
 
-    const trailingLineBreak = trimmed.lastIndexOf('\n')
-    if (trailingLineBreak === -1) {
+    const lines = trimmed.split('\n')
+    if (lines.length < 2) {
       return baseOverlap
     }
 
-    const trailingLine = trimmed.slice(trailingLineBreak + 1)
-    const containsTableChars = /[|,\t]/.test(trailingLine)
-    const likelySplitRow = containsTableChars && trailingLine.length > 0 && !/total|subtotal|tax/i.test(trailingLine)
-
-    if (likelySplitRow) {
-      const adaptive = Math.max(baseOverlap, Math.floor(trailingLine.length * 1.5))
-      return Math.min(adaptive, Math.floor(chunkText.length * 0.5))
+    const lastLine = lines[lines.length - 1].trim()
+    const secondLastLine = lines.length >= 2 ? lines[lines.length - 2].trim() : ''
+    const thirdLastLine = lines.length >= 3 ? lines[lines.length - 3].trim() : ''
+    
+    const debugOverlap = String(process.env.DEBUG_CHUNK_LINE_ITEMS || '').toLowerCase() === 'true'
+    
+    // === MINIMAL OVERLAP (30-50 chars) - Clean boundaries ===
+    
+    // Blank line ending
+    if (!lastLine) {
+      if (debugOverlap) console.log(`[OVERLAP] Blank line → 30 chars (minimal)`)
+      return 30
     }
-
-    if (trailingLine.length < 40) {
-      return Math.min(Math.floor(baseOverlap * 0.6), Math.floor(chunkText.length * 0.5))
+    
+    // Price patterns (international) - handles both compact and spaced formats
+    const pricePatterns = [
+      /(?:\$|USD)\s*[\d\s,]+[.\s]+\d+\s*$/,                    // $25.99, $ 25 . 99, $ 1,234.56
+      /(?:[\d\s.,]+\s*(?:€|EUR)|(?:€|EUR)\s*[\d\s.,]+)\s*$/,  // 25,99 €, 25 . 99 €, €25.99
+      /(?:£|GBP)\s*[\d\s,]+[.\s]+\d+\s*$/,                     // £25.99, £ 25 . 99
+      /[\d\s,]+[.,\s]+\d+\s*$/                                 // 25.99, 25 . 99, 1.234,56
+    ]
+    
+    const endsWithPrice = pricePatterns.some(p => p.test(lastLine))
+    
+    // Complete multi-line product (Description → SKU → Price)
+    const hasIdentifierPrev = /(?:SKU|UPC|EAN|Item|Code|Product)[\s:#]/i.test(secondLastLine)
+    if (endsWithPrice && hasIdentifierPrev) {
+      if (debugOverlap) console.log(`[OVERLAP] Multi-line product complete → 30 chars`)
+      return 30
     }
-
-    return Math.min(baseOverlap, Math.floor(chunkText.length * 0.5))
+    
+    // Simple price ending
+    if (endsWithPrice) {
+      if (debugOverlap) console.log(`[OVERLAP] Price ending → 40 chars`)
+      return 40
+    }
+    
+    // Section headers/footers
+    const isSectionBoundary = /(?:items?|qty|quantity|price|total|subtotal|description|product).*(?:price|total|subtotal)/i.test(lastLine)
+      || /(?:subtotal|total|grand\s*total|tax|shipping|payment)/i.test(lastLine)
+    
+    if (isSectionBoundary) {
+      if (debugOverlap) console.log(`[OVERLAP] Section boundary → 40 chars`)
+      return 40
+    }
+    
+    // Separator lines
+    if (/^[\s]*[-=_|*]{3,}\s*$/.test(lastLine)) {
+      if (debugOverlap) console.log(`[OVERLAP] Separator line → 30 chars`)
+      return 30
+    }
+    
+    // === MODERATE OVERLAP (100-120 chars) - Uncertain boundaries ===
+    
+    // Identifier lines (might be mid-product)
+    const hasIdentifier = /(?:SKU|UPC|EAN|Item|Code|Product)[\s:#]/i.test(lastLine)
+    if (hasIdentifier) {
+      // Next chunk might start with price, need moderate overlap
+      if (debugOverlap) console.log(`[OVERLAP] Identifier line → 100 chars (moderate)`)
+      return 100
+    }
+    
+    // Short lines (might be partial)
+    if (lastLine.length < 30) {
+      if (debugOverlap) console.log(`[OVERLAP] Short line (${lastLine.length} chars) → 120 chars`)
+      return 120
+    }
+    
+    // === MAXIMUM OVERLAP (180+ chars) - Mid-product splits ===
+    
+    // Contains table separators mid-line
+    const hasTableChars = /[|,\t]/.test(lastLine)
+    const notFooter = !/(?:total|subtotal|tax|shipping)/i.test(lastLine)
+    if (hasTableChars && notFooter && lastLine.length > 30) {
+      // Likely split mid-table-row
+      const overlap = Math.min(baseOverlap * 1.5, 250)
+      if (debugOverlap) console.log(`[OVERLAP] Mid-table split → ${overlap} chars (high)`)
+      return overlap
+    }
+    
+    // Long line without clear ending pattern (might be description mid-line)
+    if (lastLine.length > 60 && !endsWithPrice && !hasIdentifier) {
+      if (debugOverlap) console.log(`[OVERLAP] Long line, unclear boundary → ${baseOverlap} chars (standard)`)
+      return baseOverlap
+    }
+    
+    // === DEFAULT: Standard overlap ===
+    if (debugOverlap) console.log(`[OVERLAP] Default → ${baseOverlap} chars`)
+    return baseOverlap
   }
 
   _estimateTokenCount(charCount) {
@@ -1663,9 +1939,21 @@ export class EnhancedAIService {
 
     const deduped = []
     const seen = new Set()
+    const debugDedupe = String(process.env.DEBUG_CHUNK_LINE_ITEMS || '').toLowerCase() === 'true'
 
+    // First pass: Remove exact duplicates and filter out invalid entries
+    const validItems = []
     for (const item of items) {
       if (!item || typeof item !== 'object') continue
+
+      // Filter out truncated/incomplete descriptions
+      const desc = (item.description ?? '').trim()
+      if (desc.length > 0 && desc.length < 10) {
+        if (debugDedupe) {
+          console.log(`[DEBUG DEDUPE] Filtering out truncated description: "${desc}"`)
+        }
+        continue
+      }
 
       const key = [
         item.productCode ?? '',
@@ -1675,12 +1963,104 @@ export class EnhancedAIService {
         item.total ?? ''
       ].join('|')
 
-      if (seen.has(key)) continue
+      if (seen.has(key)) {
+        if (debugDedupe) {
+          console.log(`[DEBUG DEDUPE] Exact duplicate: "${desc.substring(0, 50)}"`)
+        }
+        continue
+      }
+      
       seen.add(key)
-      deduped.push(item)
+      validItems.push(item)
+    }
+
+    // Second pass: Fuzzy matching for similar descriptions with same price
+    for (const item of validItems) {
+      let isDuplicate = false
+      
+      for (const existing of deduped) {
+        // Check if this is a fuzzy match
+        if (this._areSimilarLineItems(item, existing)) {
+          if (debugDedupe) {
+            console.log(`[DEBUG DEDUPE] Fuzzy match found:`)
+            console.log(`  Item 1: "${(item.description ?? '').substring(0, 60)}"`)
+            console.log(`  Item 2: "${(existing.description ?? '').substring(0, 60)}"`)
+          }
+          
+          // Keep the item with the longer/more complete description
+          if ((item.description ?? '').length > (existing.description ?? '').length) {
+            // Replace existing with this better one
+            const idx = deduped.indexOf(existing)
+            deduped[idx] = item
+            if (debugDedupe) {
+              console.log(`  → Replaced with longer description`)
+            }
+          }
+          isDuplicate = true
+          break
+        }
+      }
+      
+      if (!isDuplicate) {
+        deduped.push(item)
+      }
+    }
+
+    if (debugDedupe) {
+      console.log(`[DEBUG DEDUPE] Summary: ${items.length} → ${validItems.length} valid → ${deduped.length} final (removed ${items.length - deduped.length} duplicates)`)
     }
 
     return deduped
+  }
+
+  /**
+   * Check if two line items are similar enough to be considered duplicates
+   * Uses fuzzy matching on description and exact matching on price/quantity
+   */
+  _areSimilarLineItems(item1, item2) {
+    // Must have same quantity and price to be considered similar
+    if ((item1.quantity ?? '') !== (item2.quantity ?? '')) return false
+    if ((item1.unitPrice ?? '') !== (item2.unitPrice ?? '')) return false
+    if ((item1.total ?? '') !== (item2.total ?? '')) return false
+    
+    const desc1 = (item1.description ?? '').toLowerCase().trim()
+    const desc2 = (item2.description ?? '').toLowerCase().trim()
+    
+    // Exact match
+    if (desc1 === desc2) return true
+    
+    // Check if one is a substring of the other (truncated description)
+    if (desc1.length >= 10 && desc2.length >= 10) {
+      if (desc1.includes(desc2) || desc2.includes(desc1)) {
+        return true
+      }
+    }
+    
+    // Check for high similarity using simple word overlap
+    const similarity = this._calculateDescriptionSimilarity(desc1, desc2)
+    return similarity > 0.85 // 85% similarity threshold
+  }
+
+  /**
+   * Calculate similarity between two descriptions based on word overlap
+   */
+  _calculateDescriptionSimilarity(desc1, desc2) {
+    if (!desc1 || !desc2) return 0
+    
+    // Tokenize into words (alphanumeric sequences)
+    const words1 = desc1.match(/\w+/g) || []
+    const words2 = desc2.match(/\w+/g) || []
+    
+    if (words1.length === 0 || words2.length === 0) return 0
+    
+    // Calculate Jaccard similarity (intersection / union)
+    const set1 = new Set(words1)
+    const set2 = new Set(words2)
+    
+    const intersection = new Set([...set1].filter(w => set2.has(w)))
+    const union = new Set([...set1, ...set2])
+    
+    return intersection.size / union.size
   }
 
   /**
@@ -1894,7 +2274,16 @@ export class EnhancedAIService {
         ...this._buildFewShotMessages(),
         {
           role: 'user',
-          content: `This is chunk 1 of ${totalChunks} for a large purchase order. Extract every possible field and line item from just this chunk. Document chunk:\n${chunkPlan[0].text}`
+          content: `This is chunk 1 of ${totalChunks} for a large purchase order. Extract every possible field and line item from just this chunk.
+
+IMPORTANT: Products may span multiple text lines:
+- Product description (with size/packaging)
+- SKU: [number]  
+- Quantity UnitPrice Total
+
+Combine these into ONE line item entry per product. Do not create separate entries for SKU lines or price lines.
+
+Document chunk:\n${chunkPlan[0].text}`
         }
       ]
 
@@ -1991,7 +2380,28 @@ export class EnhancedAIService {
         )
       }
       
-      const chunkInstructions = `Chunk ${i + 1} of ${totalChunks}. Return every line item that appears in this chunk. Document chunk:\n${chunkPlan[i].text}`
+      const chunkInstructions = `Chunk ${i + 1} of ${totalChunks}. Extract line items from this chunk.
+
+CRITICAL: Each product typically spans multiple lines:
+- Line 1: Product description with size/packaging
+- Line 2: SKU: [number]
+- Line 3: Quantity Price Total
+
+Example:
+"Warheads Wedgies 127g Peg Bag - Case of 12
+SKU: 03213428503
+1 $17.88 $17.88"
+
+This is ONE product, not three. Combine into one entry with:
+- description: "Warheads Wedgies 127g Peg Bag - Case of 12"
+- productCode: "03213428503"
+- quantity: "1"
+- unitPrice: "17.88"
+- total: "17.88"
+
+Only call extract_po_line_items once per complete product.
+
+Document chunk:\n${chunkPlan[i].text}`
       
       try {
         const chunkResponse = await openai.chat.completions.create({
@@ -2077,18 +2487,33 @@ export class EnhancedAIService {
       // Replace line items with the complete merged set
       if (allLineItems.length > 0) {
         const mergedItems = this._dedupeLineItems(allLineItems)
-        finalResult.lineItems = mergedItems
+        
+        // 📦 Consolidate SKU variants into parent products for cleaner UI display
+        // Example: "Laffy Taffy Rope Strawberry", "Laffy Taffy Rope Sour Apple" → "Laffy Taffy Rope" with 2 variants
+        let finalItems = mergedItems
+        const enableConsolidation = process.env.ENABLE_PRODUCT_CONSOLIDATION !== 'false' // Default: enabled
+        
+        if (enableConsolidation && productConsolidationService.shouldConsolidate(mergedItems)) {
+          const consolidatedItems = productConsolidationService.consolidateLineItems(mergedItems)
+          console.log(`📦 Product consolidation: ${mergedItems.length} items → ${consolidatedItems.length} products`)
+          finalItems = consolidatedItems
+          
+          // Store both versions for flexibility
+          finalResult._unconsolidatedLineItems = mergedItems // Keep original for reference
+        }
+        
+        finalResult.lineItems = finalItems
 
         // Ensure nested extractedData structure reflects the full set
         if (finalResult.extractedData && typeof finalResult.extractedData === 'object') {
           // Ensure downstream consumers reading extractedData.lineItems see the merged list
-          finalResult.extractedData.lineItems = mergedItems
+          finalResult.extractedData.lineItems = finalItems
 
           // Maintain legacy alias when some code paths expect extractedData.items
-          finalResult.extractedData.items = mergedItems
+          finalResult.extractedData.items = finalItems
         }
 
-        console.log(`✅ Multi-chunk processing complete: merged ${mergedItems.length} total line items`)
+        console.log(`✅ Multi-chunk processing complete: merged ${finalItems.length} total line items`)
         
         // 📊 Progress: Merging complete (90% of AI stage, 36% global)
         if (progressHelper) {
@@ -2096,8 +2521,8 @@ export class EnhancedAIService {
             100,
             80, // Merging is 80-90% of AI stage
             10, // 10% range
-            `Merged ${mergedItems.length} items successfully`,
-            { totalItems: mergedItems.length, chunkCount: totalChunks }
+            `Merged ${finalItems.length} items successfully`,
+            { totalItems: finalItems.length, chunkCount: totalChunks }
           )
         }
       }

@@ -28,6 +28,7 @@ export class ImageProcessingService {
     this.imagesBucket = 'product-images-staging'
     this.maxImageSize = 2048 // Shopify optimal size
     this.supportedFormats = ['jpg', 'jpeg', 'png', 'webp']
+    this.googleImageSearchTimeoutMs = 12000
     
     // Initialize the reference-based image service
     this.productImageReferenceService = new ProductImageReferenceService()
@@ -224,56 +225,73 @@ export class ImageProcessingService {
       // Build Google Images search URL
       const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&tbm=isch&hl=en`
       
-      // Fetch with proper headers to mimic browser
-      const response = await fetch(searchUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'DNT': '1',
-          'Connection': 'keep-alive',
-          'Upgrade-Insecure-Requests': '1'
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), this.googleImageSearchTimeoutMs)
+      let html = ''
+      let scrapingSucceeded = false
+
+      try {
+        // Fetch with proper headers to mimic browser
+        const response = await fetch(searchUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+          },
+          signal: controller.signal
+        })
+
+        if (!response.ok) {
+          console.log(`      ❌ HTTP ${response.status}: ${response.statusText}`)
+        } else {
+          html = await response.text()
+          scrapingSucceeded = true
         }
-      })
-      
-      if (!response.ok) {
-        console.log(`      ❌ HTTP ${response.status}: ${response.statusText}`)
-        return []
+      } catch (error) {
+        if (error.name === 'AbortError') {
+          console.log(`      ⚠️ Google image scraping aborted after ${this.googleImageSearchTimeoutMs}ms`)
+        } else {
+          console.log(`      ❌ Google image scraping failed: ${error.message}`)
+        }
+      } finally {
+        clearTimeout(timeoutId)
       }
-      
-      const html = await response.text()
-      
-      // Extract image data from Google Images HTML
-      const imageData = this.extractGoogleImageData(html, item)
-      
-      if (imageData.length > 0) {
-        console.log(`      ✅ Found ${imageData.length} images via scraping`)
+
+      if (scrapingSucceeded) {
+        // Extract image data from Google Images HTML
+        const imageData = this.extractGoogleImageData(html, item)
         
-        for (const imgData of imageData) {
-          googleImages.push({
-            url: imgData.url,
-            title: imgData.title || item.productName,
-            snippet: imgData.snippet || '',
-            contextLink: imgData.source || '',
-            thumbnailUrl: imgData.thumbnail || imgData.url,
-            width: imgData.width || 800,
-            height: imgData.height || 600,
-            source: 'google_images_scraping',
-            type: 'product_photo',
-            confidence: this.calculateImageConfidenceFromUrl(imgData.url, item),
-            searchQuery: query
-          })
+        if (imageData.length > 0) {
+          console.log(`      ✅ Found ${imageData.length} images via scraping`)
+          
+          for (const imgData of imageData) {
+            googleImages.push({
+              url: imgData.url,
+              title: imgData.title || item.productName,
+              snippet: imgData.snippet || '',
+              contextLink: imgData.source || '',
+              thumbnailUrl: imgData.thumbnail || imgData.url,
+              width: imgData.width || 800,
+              height: imgData.height || 600,
+              source: 'google_images_scraping',
+              type: 'product_photo',
+              confidence: this.calculateImageConfidenceFromUrl(imgData.url, item),
+              searchQuery: query
+            })
+          }
+        } else {
+          console.log(`      ❌ No images found`)
         }
-      } else {
-        console.log(`      ❌ No images found`)
       }
-      
-      // Sort by confidence and return top results
-      const sortedImages = googleImages
+
+      let sortedImages = googleImages
         .sort((a, b) => b.confidence - a.confidence)
         .slice(0, 3) // Top 3 most relevant images
-      
+
       if (sortedImages.length > 0) {
         console.log(`   ✅ Found ${sortedImages.length} relevant product images`)
         for (const img of sortedImages) {
@@ -282,11 +300,60 @@ export class ImageProcessingService {
         }
       } else {
         console.log(`   ❌ No relevant product images found`)
+
+        // Fallback: Use Google Custom Search API if scraping failed or yielded nothing
+        try {
+          console.log('   🔄 Falling back to Google Custom Search API...')
+          const fallbackResults = await this.productImageReferenceService.executeImageSearch(query, { maxResults: 6 })
+          if (fallbackResults && fallbackResults.length) {
+            let scoredResults = []
+
+            if (typeof this.productImageReferenceService.scoreAndValidateResults === 'function') {
+              scoredResults = await this.productImageReferenceService.scoreAndValidateResults(fallbackResults, {
+                productName: item.productName,
+                sku: item.sku || '',
+                description: item.productName
+              })
+            } else {
+              scoredResults = fallbackResults.map(result => ({
+                ...result,
+                confidence: this.calculateImageConfidenceFromUrl(result.url, item)
+              }))
+            }
+
+            sortedImages = scoredResults
+              .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
+              .slice(0, 3)
+              .map(result => ({
+                url: result.url,
+                title: result.title || result.name || item.productName,
+                snippet: result.snippet || '',
+                contextLink: result.contextLink || '',
+                thumbnailUrl: result.thumbnailUrl || result.url,
+                width: result.width || result.image?.width || 800,
+                height: result.height || result.image?.height || 600,
+                source: result.source || 'google_custom_search',
+                type: 'product_photo',
+                confidence: result.confidence || this.calculateImageConfidenceFromUrl(result.url, item),
+                searchQuery: query
+              }))
+
+            if (sortedImages.length > 0) {
+              console.log(`   ✅ Fallback search returned ${sortedImages.length} images`)
+            } else {
+              console.log('   ⚠️ Fallback search did not return usable images')
+            }
+          } else {
+            console.log('   ⚠️ Fallback search returned no results')
+          }
+        } catch (fallbackError) {
+          console.log(`   ⚠️ Fallback search failed: ${fallbackError.message}`)
+        }
       }
-      
+
       // Rate limiting: Add delay to avoid being blocked
       await new Promise(resolve => setTimeout(resolve, 500))
-      
+
       return sortedImages
       
     } catch (error) {

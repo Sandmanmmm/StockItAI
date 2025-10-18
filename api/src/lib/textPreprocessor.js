@@ -40,7 +40,9 @@ export class TextPreprocessor {
 
     // Common PO field patterns for compression
     this.poPatterns = {
-      poNumber: /(?:Purchase\s+Order|PO|P\.O\.)\s*(?:Number|No|#)?:?\s*(\S+)/gi,
+      // Fixed: Add word boundary before "PO" to avoid matching "LOLLIPOP" → "LolliPO#"
+      // Must have "Purchase Order", "P.O.", or standalone "PO" followed by "Number", "No", "#", or ":"
+      poNumber: /(?:Purchase\s+Order|P\.O\.|(?:\b|^)PO(?:\b|$))\s*(?:Number|No|#|:)+\s*(\S+)/gi,
       invoiceDate: /(?:Invoice|Order|PO)\s+Date:?\s*(\w+\s+\d+,?\s+\d{4})/gi,
       supplier: /(?:Supplier|Vendor)\s+Name:?\s*([^\n]+)/gi,
       total: /(?:Total|Grand\s+Total|Amount\s+Due):?\s*\$?\s*([\d,]+\.?\d*)/gi
@@ -65,6 +67,13 @@ export class TextPreprocessor {
     const originalLength = rawText.length
     
     let optimized = rawText
+    
+    // Step 0: Fix character spacing issues (CRITICAL for OCR/PDF text)
+    // NOTE: Disabled by default - character spacing should be fixed at PDF extraction level
+    // to preserve anchor extraction patterns. Enable only if needed.
+    if (options.fixCharacterSpacing === true) {
+      optimized = this.normalizeCharacterSpacing(optimized)
+    }
     
     // Step 1: Remove OCR artifacts
     if (options.removeArtifacts !== false) {
@@ -141,6 +150,173 @@ export class TextPreprocessor {
         fallbackReasons
       }
     }
+  }
+
+  /**
+   * Normalize artificial character spacing from OCR/PDF extraction
+   * Handles patterns like "I N V O I C E" → "INVOICE"
+   * Uses statistical analysis and context-aware reconstruction
+   */
+  normalizeCharacterSpacing(text) {
+    if (!text || text.length === 0) return text
+    
+    // Step 1: Analyze text to detect artificial spacing patterns
+    const spacingAnalysis = this._analyzeCharacterSpacing(text)
+    
+    // If no artificial spacing detected, return original text
+    if (!spacingAnalysis.hasArtificialSpacing) {
+      return text
+    }
+    
+    if (process.env.DEBUG_PREPROCESSING) {
+      console.log('[PREPROCESSING] Detected artificial character spacing:',{
+        ratio: spacingAnalysis.ratio.toFixed(3),
+        sampleMatches: spacingAnalysis.sampleMatches
+      })
+    }
+    
+    // Step 2: Apply intelligent character spacing normalization
+    let normalized = text
+    
+    // Strategy: Process line by line to preserve document structure
+    const lines = normalized.split('\n')
+    const processedLines = lines.map(line => {
+      return this._normalizeLineSpacing(line, spacingAnalysis)
+    })
+    
+    normalized = processedLines.join('\n')
+    
+    // Step 3: Fix common artifacts from spacing normalization
+    normalized = this._postProcessSpacingFixes(normalized)
+    
+    return normalized
+  }
+
+  /**
+   * Analyze text to detect artificial single-character spacing patterns
+   * Returns statistical analysis of spacing characteristics
+   */
+  _analyzeCharacterSpacing(text) {
+    // Sample first 1000 chars for performance
+    const sampleSize = Math.min(1000, text.length)
+    const sample = text.substring(0, sampleSize)
+    
+    // Count patterns of "single_char space single_char"
+    const singleCharSpaceMatches = sample.match(/\b\w \w\b/g) || []
+    const totalWordChars = (sample.match(/\w/g) || []).length
+    
+    // Calculate ratio of single-char spacing
+    const ratio = totalWordChars > 0 ? singleCharSpaceMatches.length / totalWordChars : 0
+    
+    // Threshold: >30% indicates artificial spacing
+    const hasArtificialSpacing = ratio > 0.30
+    
+    return {
+      hasArtificialSpacing,
+      ratio,
+      sampleSize,
+      singleCharSpaceCount: singleCharSpaceMatches.length,
+      totalWordChars,
+      sampleMatches: singleCharSpaceMatches.slice(0, 5) // First 5 examples
+    }
+  }
+
+  /**
+   * Normalize character spacing in a single line using token reconstruction
+   */
+  _normalizeLineSpacing(line, analysis) {
+    if (!line || line.trim().length === 0) return line
+    
+    // For lines with high artificial spacing, use aggressive normalization
+    if (analysis.ratio > 0.40) {
+      // Very high ratio - likely entire document has spacing issues
+      return this._aggressiveSpacingNormalization(line)
+    } else if (analysis.ratio > 0.30) {
+      // Moderate ratio - mix of good and bad spacing
+      return this._conservativeSpacingNormalization(line)
+    }
+    
+    return line
+  }
+
+  /**
+   * Aggressive normalization for heavily spaced text
+   * Removes most single-char spacing but preserves structural elements
+   */
+  _aggressiveSpacingNormalization(line) {
+    let normalized = line
+    
+    // Phase 1: Collapse sequences of 3+ single chars with spaces
+    // "I N V O I C E" → "INVOICE"
+    let prevNormalized
+    do {
+      prevNormalized = normalized
+      normalized = normalized.replace(/(\w) (\w) (\w)/g, (match) => {
+        return match.replace(/ /g, '')
+      })
+    } while (normalized !== prevNormalized && normalized.match(/(\w) (\w) (\w)/))
+    
+    // Phase 2: Collapse remaining pairs of single chars
+    // "I N" → "IN" (but only if pattern continues)
+    normalized = normalized.replace(/\b(\w) (\w)\b(?= |$)/g, '$1$2')
+    
+    return normalized
+  }
+
+  /**
+   * Conservative normalization for mixed spacing
+   * Only fixes clear artificial spacing patterns
+   */
+  _conservativeSpacingNormalization(line) {
+    let normalized = line
+    
+    // Only collapse when we see 4+ chars in sequence with spaces
+    // This is almost certainly artificial
+    let prevNormalized
+    do {
+      prevNormalized = normalized
+      normalized = normalized.replace(/(\w) (\w) (\w) (\w)/g, (match) => {
+        return match.replace(/ /g, '')
+      })
+    } while (normalized !== prevNormalized && normalized.match(/(\w) (\w) (\w) (\w)/))
+    
+    return normalized
+  }
+
+  /**
+   * Post-process to fix common artifacts from spacing normalization
+   * Restores necessary spaces that were incorrectly removed
+   */
+  _postProcessSpacingFixes(text) {
+    let fixed = text
+    
+    // Fix number-letter boundaries: "123abc" → "123 abc"
+    fixed = fixed.replace(/(\d{2,})([a-zA-Z])/g, '$1 $2')
+    
+    // Fix camelCase boundaries: "camelCase" → "camel Case"  
+    fixed = fixed.replace(/([a-z])([A-Z])/g, '$1 $2')
+    
+    // Fix common word boundaries that got merged
+    fixed = fixed.replace(/([a-z])(of)(\d)/gi, '$1 $2 $3') // "12of3" → "12 of 3"
+    fixed = fixed.replace(/(Case)(of)/gi, '$1 $2') // "Caseof" → "Case of"
+    fixed = fixed.replace(/(Pack)(of)/gi, '$1 $2') // "Packof" → "Pack of"
+    fixed = fixed.replace(/(Box)(of)/gi, '$1 $2') // "Boxof" → "Box of"
+    
+    // Fix punctuation spacing: ")word" → ") word", "(word" → "( word"
+    fixed = fixed.replace(/(\))([a-zA-Z])/g, '$1 $2')
+    fixed = fixed.replace(/([a-zA-Z])(\()/g, '$1 $2')
+    
+    // Fix currency symbols: "word$" → "word $", "$word" → "$ word"
+    fixed = fixed.replace(/([a-zA-Z])([$€£¥])/g, '$1 $2')
+    fixed = fixed.replace(/([$€£¥])([a-zA-Z])/g, '$1 $2')
+    
+    // Fix common units: "123ml" → "123 ml", "456g" → "456 g"
+    fixed = fixed.replace(/(\d+)(ml|g|kg|oz|lb|ct|pcs|ea)\b/gi, '$1 $2')
+    
+    // Fix hyphenated compounds that got merged: "3Pack" → "3 Pack", "12Case" → "12 Case"
+    fixed = fixed.replace(/(\d+)(Pack|Case|Box|Unit|Item)\b/g, '$1 $2')
+    
+    return fixed
   }
 
   /**

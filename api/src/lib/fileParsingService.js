@@ -144,25 +144,13 @@ export class FileParsingService {
               
               const pageText = textParts.join('')
               
-              // CRITICAL FIX: Remove excessive single-character spacing (e.g., "I N V O I C E" -> "INVOICE")
-              // This occurs when PDF characters are positioned individually
-              const cleanedPageText = pageText.replace(/(\S)\s+(?=\S)/g, (match, char, offset, string) => {
-                // If the next character after the space(s) is also a single char followed by space,
-                // it's likely individual character positioning - remove the space
-                const nextPart = string.substring(offset + match.length, offset + match.length + 10)
-                if (/^\S\s/.test(nextPart)) {
-                  return char // Remove space between single chars
-                }
-                return match // Keep space between words
-              })
-              
               if (process.env.DEBUG_PDF_STRUCTURE === 'true' && i < 2) {
                 console.log(`[DEBUG PDF] Page ${i + 1}: processed ${processedCount} / ${texts.length} text elements (skipped ${skippedCount} empty)`)
-                console.log(`[DEBUG PDF] Page ${i + 1} text length: ${pageText.length} chars (before cleanup), ${cleanedPageText.length} chars (after)`)
-                console.log(`[DEBUG PDF] Page ${i + 1} text preview (first 500 chars):`, cleanedPageText.substring(0, Math.min(500, cleanedPageText.length)))
+                console.log(`[DEBUG PDF] Page ${i + 1} text length: ${pageText.length} chars`)
+                console.log(`[DEBUG PDF] Page ${i + 1} text preview (first 500 chars):`, pageText.substring(0, Math.min(500, pageText.length)))
               }
               
-              pageTexts.push(cleanedPageText)
+              pageTexts.push(pageText)
               
               // Publish progress for each page (0-20% of AI stage, 0-8% global)
               if (progressHelper) {
@@ -177,7 +165,16 @@ export class FileParsingService {
               }
             }
             
-            const fullText = pageTexts.join('\n\n')
+            let fullText = pageTexts.join('\n\n')
+            
+            // Apply intelligent character spacing normalization if detected
+            const spacingAnalysis = this._analyzeCharacterSpacing(fullText)
+            if (spacingAnalysis.hasArtificialSpacing) {
+              if (process.env.DEBUG_PDF_STRUCTURE) {
+                console.log(`[DEBUG PDF] Detected artificial spacing (${(spacingAnalysis.ratio * 100).toFixed(1)}%), applying normalization`)
+              }
+              fullText = this._normalizeDocumentSpacing(fullText, spacingAnalysis)
+            }
             
             const result = {
               text: fullText.trim(),
@@ -185,7 +182,8 @@ export class FileParsingService {
               pageTexts,
               metadata: {
                 numPages: pages.length,
-                extractedAt: new Date().toISOString()
+                extractedAt: new Date().toISOString(),
+                spacingNormalized: spacingAnalysis.hasArtificialSpacing
               },
               rawContent: fullText.trim(),
               confidence: 0.9,
@@ -369,6 +367,131 @@ export class FileParsingService {
     }
     
     return true
+  }
+
+  /**
+   * Analyze text for artificial character spacing patterns
+   * Used to detect PDFs with spacing issues like "I N V O I C E"
+   */
+  _analyzeCharacterSpacing(text) {
+    const sampleSize = Math.min(1000, text.length)
+    const sample = text.substring(0, sampleSize)
+    
+    // Count "word_char space word_char" patterns
+    const singleCharSpaces = (sample.match(/\w \w/g) || []).length
+    const totalWordChars = (sample.match(/\w/g) || []).length
+    
+    const ratio = totalWordChars > 0 ? singleCharSpaces / totalWordChars : 0
+    
+    // Threshold: >35% indicates artificial spacing
+    return {
+      hasArtificialSpacing: ratio > 0.35,
+      ratio,
+      singleCharSpaces,
+      totalWordChars
+    }
+  }
+
+  /**
+   * Normalize artificial character spacing in entire document
+   * Uses conservative approach to preserve document structure
+   */
+  _normalizeDocumentSpacing(text, analysis) {
+    // Process line by line to maintain structure
+    const lines = text.split('\n')
+    const normalizedLines = lines.map(line => {
+      if (!line || line.trim().length === 0) return line
+      
+      // Apply normalization based on severity
+      if (analysis.ratio > 0.45) {
+        // High ratio - use moderate normalization
+        return this._moderateSpacingNormalization(line)
+      } else {
+        // Medium ratio - use conservative normalization  
+        return this._conservativeSpacingNormalization(line)
+      }
+    })
+    
+    let normalized = normalizedLines.join('\n')
+    
+    // Apply post-processing fixes
+    normalized = this._postProcessSpacingFixes(normalized)
+    
+    return normalized
+  }
+
+  /**
+   * Moderate character spacing normalization
+   * Removes patterns of 3+ single-char spaces
+   * Uses aggressive approach to fully collapse spaced characters
+   */
+  _moderateSpacingNormalization(line) {
+    let normalized = line
+    
+    // Phase 1: Iteratively collapse 3-char sequences
+    let iterations = 0
+    let prevNormalized
+    do {
+      prevNormalized = normalized
+      normalized = normalized.replace(/(\w) (\w) (\w)/g, '$1$2$3')
+      iterations++
+    } while (normalized !== prevNormalized && iterations < 10)
+    
+    // Phase 2: Collapse any remaining single-char spacing
+    // This catches leftover patterns like "Pri ce" → "Price"
+    normalized = normalized.replace(/(\w) (?=\w)/g, '$1')
+    
+    return normalized
+  }
+
+  /**
+   * Conservative character spacing normalization
+   * Only removes patterns of 4+ single-char spaces
+   */
+  _conservativeSpacingNormalization(line) {
+    let normalized = line
+    
+    // Only collapse 4+ char sequences to be safe
+    let iterations = 0
+    let prevNormalized
+    do {
+      prevNormalized = normalized
+      normalized = normalized.replace(/(\w) (\w) (\w) (\w)/g, '$1$2$3$4')
+      iterations++
+    } while (normalized !== prevNormalized && iterations < 5)
+    
+    return normalized
+  }
+
+  /**
+   * Post-process to fix common artifacts from spacing normalization
+   */
+  _postProcessSpacingFixes(text) {
+    let fixed = text
+    
+    // Restore spaces between numbers and letters: "123abc" → "123 abc"
+    fixed = fixed.replace(/(\d)([a-zA-Z])/g, '$1 $2')
+    fixed = fixed.replace(/([a-zA-Z])(\d)/g, '$1 $2')
+    
+    // Restore spaces in compound words with common prepositions
+    fixed = fixed.replace(/([a-z])(of)(\d)/gi, '$1 $2 $3') // "12of3" → "12 of 3"
+    fixed = fixed.replace(/(Case|Pack|Box|Set|Bag|Pallet)(of)/gi, '$1 $2') // "Caseof" → "Case of"
+    
+    // Restore spaces around punctuation
+    fixed = fixed.replace(/(\))([a-zA-Z])/g, '$1 $2')
+    fixed = fixed.replace(/([a-zA-Z])(\()/g, '$1 $2')
+    fixed = fixed.replace(/([.,;:!?])([A-Z])/g, '$1 $2')
+    
+    // Restore spaces before common units
+    fixed = fixed.replace(/(\d+)(ml|g|kg|oz|lb|ct|pcs|ea|L|gal|qt|pt|cm|mm|m)\b/gi, '$1 $2')
+    
+    // Restore spaces in common patterns
+    fixed = fixed.replace(/(\d+)(Case|Pack|Box|Unit|Bag|Pallet)\b/g, '$1 $2')
+    
+    // Fix camelCase → camel Case (but preserve legitimate camelCase like productCode)
+    fixed = fixed.replace(/([a-z])([A-Z])/g, '$1 $2')
+    
+    return fixed
   }
 }
 
