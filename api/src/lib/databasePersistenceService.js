@@ -826,7 +826,27 @@ export class DatabasePersistenceService {
     // Prepare all line item data
     const lineItemsToCreate = lineItemsData.map((item, i) => {
       const itemConfidence = lineItemsConfidence[i] || lineItemsConfidence.overall || 50
-      const quantity = parseInt(item.quantity) || 1
+      
+      // 📦 SMART QUANTITY EXTRACTION: Try to get quantity from AI, then fallback to parsing product name
+      let quantity = parseInt(item.quantity)
+      
+      // If AI didn't extract quantity or extracted default value of 1, try to parse from product name
+      if (!quantity || quantity === 1) {
+        const productName = item.productName || item.description || item.name || ''
+        const packMatch = productName.match(/Case\s+of\s+(\d+)|[-(\s](\d+)\s*ct\b|[-(\s](\d+)\s*-?\s*(Pack|pcs|count)\b/i)
+        
+        if (packMatch) {
+          const extractedQty = parseInt(packMatch[1] || packMatch[2] || packMatch[3])
+          if (extractedQty && extractedQty > 1) {
+            quantity = extractedQty
+            console.log(`  📦 Extracted pack quantity ${quantity} from: "${productName.substring(0, 60)}..."`)
+          }
+        }
+      }
+      
+      // Final fallback to 1 if still no quantity
+      quantity = quantity || 1
+      
       const unitCost = this.parseCurrency(item.unitPrice || item.price || item.cost || item.unitCost)
       const totalCost = this.parseCurrency(item.totalPrice || item.total || item.lineTotal) 
         || (quantity * unitCost)

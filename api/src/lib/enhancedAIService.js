@@ -17,8 +17,8 @@ const openai = new OpenAI({
 
 export class EnhancedAIService {
   constructor() {
-    this.optimizedPrompt = 'You are StockIt AI, a purchase-order extraction engine. Always respond by calling the extract_purchase_order function. Populate every field you can find, use null when data is missing, and include every line item without truncation. IMPORTANT: Products may span multiple text lines (description on one line, SKU on next line, pricing on another). Group these lines into a single line item. Each product should have ONE entry with description, SKU, quantity, and prices combined.'
-    this.chunkLineItemPrompt = 'You extract purchase-order line items. Each product may span 2-4 text lines (e.g., product name, then SKU line, then quantity/price line). Combine these lines into ONE line item entry. Only call extract_po_line_items once per distinct product, not once per text line. A product is complete when it has description, SKU (if present), quantity, unit price, and total. Never create separate entries for SKU lines or price lines alone.'
+    this.optimizedPrompt = 'You are StockIt AI, a purchase-order extraction engine. Always respond by calling the extract_purchase_order function. Populate every field you can find, use null when data is missing, and include every line item without truncation. IMPORTANT: Products may span multiple text lines (description on one line, SKU on next line, pricing on another). Group these lines into a single line item. Each product should have ONE entry with description, SKU, quantity, and prices combined.\n\nCRITICAL QUANTITY RULES:\n1. The "quantity" field MUST be the total units ordered (e.g., "Case of 12" means quantity=12, NOT 1)\n2. Extract case/pack quantities: "Case of 24"→24, "18 ct"→18, "Pack of 6"→6, "12-Pack"→12\n3. Keep full product name (including "Case of 12") in description field\n4. Only use quantity=1 if no pack/case quantity is mentioned'
+    this.chunkLineItemPrompt = 'You extract purchase-order line items. Each product may span 2-4 text lines (e.g., product name, then SKU line, then quantity/price line). Combine these lines into ONE line item entry. Only call extract_po_line_items once per distinct product, not once per text line. A product is complete when it has description, SKU (if present), quantity, unit price, and total. Never create separate entries for SKU lines or price lines alone.\n\nCRITICAL QUANTITY RULES:\n1. Extract the TOTAL units from pack quantities: "Case of 12"→12, "24 ct"→24, "6-Pack"→6\n2. Keep full product description including the pack info\n3. Default to quantity=1 only if no pack/case/count is mentioned'
     this.defaultPrompt = this.optimizedPrompt
     this.chunkingConfig = {
       maxChunkChars: 4200,
@@ -49,16 +49,16 @@ export class EnhancedAIService {
         },
         lineItems: [
           {
-            description: 'Widget A',
-            quantity: '4',
+            description: 'Widget A - Case of 12',
+            quantity: 12,
             unitPrice: '3.25',
-            total: '13.00'
+            total: '39.00'
           }
         ],
         totals: {
-          subtotal: '13.00',
-          tax: '1.17',
-          total: '14.17'
+          subtotal: '39.00',
+          tax: '3.51',
+          total: '42.51'
         },
         dates: {
           orderDate: '2025-02-18'
@@ -85,16 +85,16 @@ export class EnhancedAIService {
         },
         lineItems: [
           {
-            description: 'Organic Kale',
-            quantity: '8',
+            description: 'Organic Kale - 24 ct',
+            quantity: 24,
             unitPrice: '2.10',
-            total: '16.80'
+            total: '50.40'
           }
         ],
         totals: {
-          subtotal: '16.80',
+          subtotal: '50.40',
           shipping: '5.00',
-          total: '21.80'
+          total: '55.40'
         },
         dates: {
           orderDate: '2025-01-19',
@@ -230,8 +230,14 @@ export class EnhancedAIService {
                   additionalProperties: true,
                   properties: {
                     productCode: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-                    description: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-                    quantity: { anyOf: [{ type: 'number' }, { type: 'string' }, { type: 'null' }] },
+                    description: { 
+                      anyOf: [{ type: 'string' }, { type: 'null' }],
+                      description: 'Full product name including pack/case info (e.g., "Product Name - Case of 12")'
+                    },
+                    quantity: { 
+                      anyOf: [{ type: 'number' }, { type: 'string' }, { type: 'null' }],
+                      description: 'TOTAL units ordered. Extract from patterns: "Case of 12"→12, "24 ct"→24, "6-Pack"→6. Only use 1 if no pack quantity mentioned.'
+                    },
                     unitPrice: { anyOf: [{ type: 'number' }, { type: 'string' }, { type: 'null' }] },
                     total: { anyOf: [{ type: 'number' }, { type: 'string' }, { type: 'null' }] },
                     sku: { anyOf: [{ type: 'string' }, { type: 'null' }] }
@@ -304,8 +310,14 @@ export class EnhancedAIService {
               additionalProperties: true,
               properties: {
                 productCode: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-                description: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-                quantity: { anyOf: [{ type: 'number' }, { type: 'string' }, { type: 'null' }] },
+                description: { 
+                  anyOf: [{ type: 'string' }, { type: 'null' }],
+                  description: 'Full product description with pack info intact'
+                },
+                quantity: { 
+                  anyOf: [{ type: 'number' }, { type: 'string' }, { type: 'null' }],
+                  description: 'TOTAL units: extract from "Case of 12"→12, "18 ct"→18, etc.'
+                },
                 unitPrice: { anyOf: [{ type: 'number' }, { type: 'string' }, { type: 'null' }] },
                 total: { anyOf: [{ type: 'number' }, { type: 'string' }, { type: 'null' }] }
               }
