@@ -17,7 +17,7 @@ const openai = new OpenAI({
 
 export class EnhancedAIService {
   constructor() {
-    this.optimizedPrompt = 'You are StockIt AI, a purchase-order extraction engine. Always respond by calling the extract_purchase_order function. Populate every field you can find, use null when data is missing, and include every line item without truncation. IMPORTANT: Products may span multiple text lines (description on one line, SKU on next line, pricing on another). Group these lines into a single line item. Each product should have ONE entry with description, SKU, quantity, and prices combined.\n\nCRITICAL QUANTITY RULES:\n1. The "quantity" field MUST be the total units ordered (e.g., "Case of 12" means quantity=12, NOT 1)\n2. Extract case/pack quantities: "Case of 24"→24, "18 ct"→18, "Pack of 6"→6, "12-Pack"→12\n3. Keep full product name (including "Case of 12") in description field\n4. Only use quantity=1 if no pack/case quantity is mentioned\n\nCRITICAL SUPPLIER vs CUSTOMER RULES:\n1. SUPPLIER = Vendor/Seller (company issuing the invoice) - found in HEADER/LETTERHEAD (top of page, largest text, return address)\n2. CUSTOMER = Buyer/Recipient - found in "SHIP TO" or "BILL TO" sections (middle of page, recipient address)\n3. NEVER confuse these: if you see "SHIP TO: ABC Company", ABC is the CUSTOMER, NOT the supplier\n4. Look for supplier in: company logo area, top-left corner, "From:" section, email domain\n5. Validate: supplier email domain should match supplier company name (e.g., info@candyville.ca → candyville.ca)'
+    this.optimizedPrompt = 'You are StockIt AI, a purchase-order extraction engine. Always respond by calling the extract_purchase_order function. Populate every field you can find, use null when data is missing, and include every line item without truncation. IMPORTANT: Products may span multiple text lines (description on one line, SKU on next line, pricing on another). Group these lines into a single line item. Each product should have ONE entry with description, SKU, quantity, and prices combined.\n\nCRITICAL QUANTITY RULES:\n1. The "quantity" field MUST be the total units ordered (e.g., "Case of 12" means quantity=12, NOT 1)\n2. Extract case/pack quantities: "Case of 24"→24, "18 ct"→18, "Pack of 6"→6, "12-Pack"→12\n3. Keep full product name (including "Case of 12") in description field\n4. Only use quantity=1 if no pack/case quantity is mentioned\n\nCRITICAL SUPPLIER vs CUSTOMER RULES:\n1. SUPPLIER = Vendor/Seller (company issuing the invoice) - extract from the TOP of the document BEFORE any "SHIP TO" or "BILL TO" labels\n2. CUSTOMER = Buyer/Recipient - extract from lines AFTER "SHIP TO" or "BILL TO" labels\n3. IGNORE any company name that appears after "SHIP TO:" or "BILL TO:" - those are ALWAYS the customer, NEVER the supplier\n4. Supplier contact info (email, phone, address) must come from the TOP section, NOT from SHIP TO/BILL TO sections\n5. VALIDATE: If supplier email domain doesn\'t match supplier company name, you extracted the wrong company (example: if company is "candyville.ca" but email is "someone@gmail.com", you picked the customer by mistake)\n6. Common pattern: Line 1-5 of invoice = supplier info, Lines after "SHIP TO"/"BILL TO" = customer info'
     this.chunkLineItemPrompt = 'You extract purchase-order line items. Each product may span 2-4 text lines (e.g., product name, then SKU line, then quantity/price line). Combine these lines into ONE line item entry. Only call extract_po_line_items once per distinct product, not once per text line. A product is complete when it has description, SKU (if present), quantity, unit price, and total. Never create separate entries for SKU lines or price lines alone.\n\nCRITICAL QUANTITY RULES:\n1. Extract the TOTAL units from pack quantities: "Case of 12"→12, "24 ct"→24, "6-Pack"→6\n2. Keep full product description including the pack info\n3. Default to quantity=1 only if no pack/case/count is mentioned'
     this.defaultPrompt = this.optimizedPrompt
     this.chunkingConfig = {
@@ -120,7 +120,7 @@ export class EnhancedAIService {
     this.fewShotMessages = [
       {
         role: 'user',
-        content: 'Sample invoice:\n\nAcme Industrial Supply\n500 Warehouse Blvd, Chicago IL\n(312) 555-0100 | sales@acmeindustrial.com\n\nINVOICE #12345\nDate: 2025-02-18\n\nSHIP TO:\nTech Solutions Inc\n123 Main St\nSpringfield\n\nLine Items:\nWidget A - Case of 12 | 12 | 3.25 | 39.00\n\nTotals:\nSubtotal: 39.00\nTax: 3.51\nTotal: 42.51'
+        content: 'Sample invoice:\n\nAcme Industrial Supply\n500 Warehouse Blvd, Chicago IL\n(312) 555-0100\nsales@acmeindustrial.com\n\nINVOICE #12345\nDate: 2025-02-18\n\nSHIP TO\nTech Solutions Inc\n123 Main St\nSpringfield\ntechsupport@gmail.com\n\nLine Items:\nWidget A - Case of 12 | 12 | 3.25 | 39.00\n\nTotals:\nSubtotal: 39.00\nTax: 3.51\nTotal: 42.51'
       },
       {
         role: 'assistant',
@@ -133,7 +133,7 @@ export class EnhancedAIService {
       },
       {
         role: 'user',
-        content: 'Sample invoice:\n\nGreenGrocer Collective\n221B Market St, Springfield\ncontact@greengrocer.co | (555) 123-4567\n\nINVOICE PO-A55\nDate: 2025-01-19\n\nBILL TO:\nRestaurant ABC\n789 Chef Ave\nCulinary City\n\nLine Items:\nOrganic Kale - 24 ct | 24 | 2.10 | 50.40\n\nTotals:\nSubtotal: 50.40\nShipping: 5.00\nTotal: 55.40'
+        content: 'Sample invoice:\n\nGreenGrocer Collective\n221B Market St, Springfield\ncontact@greengrocer.co\n(555) 123-4567\n\nINVOICE PO-A55\nDate: 2025-01-19\n\nBILL TO\nRestaurant ABC\n789 Chef Ave\nCulinary City\nchef@restaurantabc.com\n\nLine Items:\nOrganic Kale - 24 ct | 24 | 2.10 | 50.40\n\nTotals:\nSubtotal: 50.40\nShipping: 5.00\nTotal: 55.40'
       },
       {
         role: 'assistant',
@@ -219,7 +219,7 @@ export class EnhancedAIService {
               poNumber: { anyOf: [{ type: 'string' }, { type: 'null' }] },
               supplier: {
                 type: 'object',
-                description: 'VENDOR/SELLER information (the company issuing this invoice/PO). CRITICAL: Extract from HEADER/LETTERHEAD area (top of document, company logo, return address), NOT from "SHIP TO" or "BILL TO" sections (those are the CUSTOMER). Look for: company name in largest font, return address, "From:" label, email domain matching company name. NEVER use recipient/buyer/customer details.',
+                description: 'VENDOR/SELLER information (company issuing this invoice/PO). Extract from TOP of document (first 1-5 lines) BEFORE any "SHIP TO" or "BILL TO" labels appear. Any company name AFTER "SHIP TO"/"BILL TO" is the CUSTOMER, not supplier. Validate: supplier email domain should match supplier company name (e.g., info@candyville.ca means supplier is candyville.ca, NOT a gmail.com or customer email).',
                 additionalProperties: true,
                 properties: {
                   name: { anyOf: [{ type: 'string' }, { type: 'null' }] },
