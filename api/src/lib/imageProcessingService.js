@@ -28,7 +28,7 @@ export class ImageProcessingService {
     this.imagesBucket = 'product-images-staging'
     this.maxImageSize = 2048 // Shopify optimal size
     this.supportedFormats = ['jpg', 'jpeg', 'png', 'webp']
-    this.googleImageSearchTimeoutMs = 12000
+    this.googleImageSearchTimeoutMs = 25000 // Increased to 25s to reduce timeouts (was 12s)
     
     // Initialize the reference-based image service
     this.productImageReferenceService = new ProductImageReferenceService()
@@ -301,54 +301,14 @@ export class ImageProcessingService {
       } else {
         console.log(`   ❌ No relevant product images found`)
 
-        // Fallback: Use Google Custom Search API if scraping failed or yielded nothing
-        try {
-          console.log('   🔄 Falling back to Google Custom Search API...')
-          const fallbackResults = await this.productImageReferenceService.executeImageSearch(query, { maxResults: 6 })
-          if (fallbackResults && fallbackResults.length) {
-            let scoredResults = []
-
-            if (typeof this.productImageReferenceService.scoreAndValidateResults === 'function') {
-              scoredResults = await this.productImageReferenceService.scoreAndValidateResults(fallbackResults, {
-                productName: item.productName,
-                sku: item.sku || '',
-                description: item.productName
-              })
-            } else {
-              scoredResults = fallbackResults.map(result => ({
-                ...result,
-                confidence: this.calculateImageConfidenceFromUrl(result.url, item)
-              }))
-            }
-
-            sortedImages = scoredResults
-              .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
-              .slice(0, 3)
-              .map(result => ({
-                url: result.url,
-                title: result.title || result.name || item.productName,
-                snippet: result.snippet || '',
-                contextLink: result.contextLink || '',
-                thumbnailUrl: result.thumbnailUrl || result.url,
-                width: result.width || result.image?.width || 800,
-                height: result.height || result.image?.height || 600,
-                source: result.source || 'google_custom_search',
-                type: 'product_photo',
-                confidence: result.confidence || this.calculateImageConfidenceFromUrl(result.url, item),
-                searchQuery: query
-              }))
-
-            if (sortedImages.length > 0) {
-              console.log(`   ✅ Fallback search returned ${sortedImages.length} images`)
-            } else {
-              console.log('   ⚠️ Fallback search did not return usable images')
-            }
-          } else {
-            console.log('   ⚠️ Fallback search returned no results')
-          }
-        } catch (fallbackError) {
-          console.log(`   ⚠️ Fallback search failed: ${fallbackError.message}`)
-        }
+        // DISABLED: Google Custom Search API fallback (rate limits exceeded)
+        // System now relies only on free web scraping. When scraping fails,
+        // processing continues without images rather than hitting API limits.
+        console.log('   ℹ️ Google API fallback disabled to avoid rate limits')
+        console.log('   ⚠️ No images found for:', item.productName)
+        
+        // Return empty array - allow processing to continue without images
+        sortedImages = []
       }
 
       // Rate limiting: Add delay to avoid being blocked
