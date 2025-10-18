@@ -707,9 +707,11 @@ export function PurchaseOrderDetails({ orderId, onBack }: PurchaseOrderDetailsPr
   }
 
   const getConfidenceColor = (confidence: number) => {
-    if (confidence >= 95) return 'text-success'
-    if (confidence >= 85) return 'text-accent'
-    if (confidence >= 75) return 'text-warning'
+    // Convert 0-1 to 0-100 for comparison
+    const confidencePercent = confidence * 100
+    if (confidencePercent >= 95) return 'text-success'
+    if (confidencePercent >= 85) return 'text-accent'
+    if (confidencePercent >= 75) return 'text-warning'
     return 'text-destructive'
   }
 
@@ -746,7 +748,7 @@ export function PurchaseOrderDetails({ orderId, onBack }: PurchaseOrderDetailsPr
               {purchaseOrder.currency} {purchaseOrder.totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
             </div>
             <div className={`text-xs ${getConfidenceColor(purchaseOrder.confidence)}`}>
-              {purchaseOrder.confidence}% confidence
+              {Math.round(purchaseOrder.confidence * 100)}% confidence
             </div>
           </div>
         </div>
@@ -861,11 +863,11 @@ export function PurchaseOrderDetails({ orderId, onBack }: PurchaseOrderDetailsPr
                   <div className="flex justify-between text-sm">
                     <span>Confidence</span>
                     <span className={getConfidenceColor(purchaseOrder.confidence)}>
-                      {purchaseOrder.confidence}%
+                      {Math.round(purchaseOrder.confidence * 100)}%
                     </span>
                   </div>
                   <Progress 
-                    value={purchaseOrder.confidence} 
+                    value={purchaseOrder.confidence * 100} 
                     className="h-2"
                   />
                 </div>
@@ -1388,7 +1390,7 @@ export function PurchaseOrderDetails({ orderId, onBack }: PurchaseOrderDetailsPr
                           variant="outline" 
                           className={`text-xs ${getConfidenceColor(item.confidence)}`}
                         >
-                          {item.confidence}%
+                          {Math.round(item.confidence * 100)}%
                         </Badge>
                       </td>
                       <td className="px-4 py-3 text-center">

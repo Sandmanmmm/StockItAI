@@ -143,8 +143,8 @@ export function ProductRefinementDialog({
       priority: 'medium' as const,
       
       // AI Processing
-      confidence: item.confidence / 100,
-      aiNotes: `Extracted from PO line item with ${item.confidence}% confidence`,
+      confidence: item.confidence, // Already in 0-1 format from database
+      aiNotes: `Extracted from PO line item with ${Math.round(item.confidence * 100)}% confidence`,
       
       // Images
       images: []

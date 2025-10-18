@@ -148,20 +148,24 @@ export default function MerchantReviewInterface({
   }
 
   const getConfidenceColor = (confidence: number) => {
-    if (confidence >= 90) return 'bg-green-100 text-green-800'
-    if (confidence >= 75) return 'bg-blue-100 text-blue-800'
-    if (confidence >= 60) return 'bg-yellow-100 text-yellow-800'
+    // Convert 0-1 to 0-100 for comparison
+    const confidencePercent = confidence * 100
+    if (confidencePercent >= 90) return 'bg-green-100 text-green-800'
+    if (confidencePercent >= 75) return 'bg-blue-100 text-blue-800'
+    if (confidencePercent >= 60) return 'bg-yellow-100 text-yellow-800'
     return 'bg-red-100 text-red-800'
   }
 
   const getConfidenceBadgeColor = (confidence: number) => {
-    if (confidence >= 90) return 'default'
-    if (confidence >= 75) return 'secondary'
+    // Convert 0-1 to 0-100 for comparison
+    const confidencePercent = confidence * 100
+    if (confidencePercent >= 90) return 'default'
+    if (confidencePercent >= 75) return 'secondary'
     return 'destructive'
   }
 
-  const lowConfidenceItems = purchaseOrder.lineItems.filter(item => item.confidence < 75)
-  const hasIssues = lowConfidenceItems.length > 0 || purchaseOrder.confidence < 80
+  const lowConfidenceItems = purchaseOrder.lineItems.filter(item => (item.confidence * 100) < 75)
+  const hasIssues = lowConfidenceItems.length > 0 || (purchaseOrder.confidence * 100) < 80
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -179,7 +183,7 @@ export default function MerchantReviewInterface({
               </CardDescription>
             </div>
             <Badge className={getConfidenceColor(purchaseOrder.confidence)} variant="outline">
-              {purchaseOrder.confidence}% Confidence
+              {Math.round(purchaseOrder.confidence * 100)}% Confidence
             </Badge>
           </div>
         </CardHeader>
@@ -302,7 +306,7 @@ export default function MerchantReviewInterface({
                         variant={getConfidenceBadgeColor(item.confidence)}
                         className="text-xs"
                       >
-                        {item.confidence}%
+                        {Math.round(item.confidence * 100)}%
                       </Badge>
                     </TableCell>
                   </TableRow>

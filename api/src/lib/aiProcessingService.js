@@ -764,6 +764,77 @@ Use the same JSON structure as specified in the system prompt. Pay special atten
    * Calculate confidence for a set of fields
    */
   calculateFieldConfidence(fieldObject) {
+    // FIXED: Calculate confidence based on field completeness, not non-existent *Confidence fields
+    
+    // If this is a line item, calculate based on product fields
+    if (fieldObject.description || fieldObject.productCode || fieldObject.quantity) {
+      let score = 0
+      let maxScore = 100
+      
+      // Description/Product Name (25 points)
+      if (fieldObject.description && fieldObject.description.trim().length > 0) {
+        score += 25
+      }
+      
+      // SKU/Product Code (20 points)
+      if (fieldObject.sku || fieldObject.productCode) {
+        score += 20
+      }
+      
+      // Quantity (25 points)
+      if (fieldObject.quantity && parseFloat(fieldObject.quantity) > 0) {
+        score += 25
+      }
+      
+      // Unit Price (25 points)
+      if (fieldObject.unitPrice && parseFloat(fieldObject.unitPrice) > 0) {
+        score += 25
+      }
+      
+      // Total Price validation bonus (5 points)
+      const qty = parseFloat(fieldObject.quantity) || 0
+      const unitPrice = parseFloat(fieldObject.unitPrice) || 0
+      const total = parseFloat(fieldObject.total || fieldObject.totalPrice) || 0
+      
+      if (qty > 0 && unitPrice > 0 && total > 0) {
+        const calculatedTotal = qty * unitPrice
+        const difference = Math.abs(calculatedTotal - total) / total
+        if (difference < 0.05) { // Within 5% tolerance
+          score += 5
+        }
+      }
+      
+      return score / 100 // Return as 0.0 - 1.0
+    }
+    
+    // If this is a PO header, calculate based on PO fields
+    if (fieldObject.poNumber || fieldObject.supplier) {
+      let score = 0
+      
+      // PO Number (30 points)
+      if (fieldObject.poNumber && fieldObject.poNumber.trim().length > 0) {
+        score += 30
+      }
+      
+      // Supplier (30 points)
+      if (fieldObject.supplier && (fieldObject.supplier.name || fieldObject.supplierName)) {
+        score += 30
+      }
+      
+      // Dates (20 points)
+      if (fieldObject.orderDate || fieldObject.invoiceDate) {
+        score += 20
+      }
+      
+      // Totals (20 points)
+      if (fieldObject.totalAmount || fieldObject.total || fieldObject.grandTotal) {
+        score += 20
+      }
+      
+      return score / 100
+    }
+    
+    // Fallback for unknown structure - check for *Confidence fields (legacy)
     const confidenceFields = Object.keys(fieldObject).filter(key => key.endsWith('Confidence'))
     if (confidenceFields.length === 0) return 0.5
     
