@@ -1756,9 +1756,9 @@ export class ImageProcessingService {
   /**
    * Implement enhanced fallback hierarchy for image sourcing
    */
-  async sourceImagesWithHierarchy(lineItems, vendorImages) {
+  async sourceImagesWithHierarchy(lineItems, vendorImages, supplierInfo = null) {
     console.log('📋 Step 2: Implementing enhanced image source hierarchy...')
-    console.log('   Priority: Vendor → Google Images → Reference-Based AI → Basic AI (last resort)')
+    console.log('   Priority: Vendor → Intelligent Supplier Search → Google Images → Placeholder')
     
     const imageResults = []
     
@@ -1795,13 +1795,47 @@ export class ImageProcessingService {
             priority: 1 
           })))
           
-          // Skip Google search if we have vendor images
-          console.log(`   🎯 Using vendor images, skipping Google search`)
+          // Skip intelligent search and Google if we have vendor images
+          console.log(`   🎯 Using vendor images, skipping supplier & Google search`)
         } else {
-          console.log(`   ⚠️ No vendor images found`)
+          console.log(`   ⚠️ No embedded vendor images found`)
         }
 
-        // 2. PRIMARY FALLBACK: Comprehensive Google Images search for real product photos
+        // 2. INTELLIGENT SUPPLIER SEARCH: Search supplier websites for product-specific images
+        if (itemImages.vendorImages.length === 0 && supplierInfo) {
+          console.log(`   🧠 Attempting intelligent supplier search...`)
+          const supplierImages = await this.intelligentSupplierSearch(item, supplierInfo)
+          
+          if (supplierImages && supplierImages.length > 0) {
+            console.log(`   ✅ Found ${supplierImages.length} images via supplier search`)
+            
+            // Add to vendor images pool (they're high quality)
+            itemImages.vendorImages = supplierImages
+            
+            const bestSupplierImage = supplierImages[0]
+            itemImages.recommended = {
+              source: 'supplier_website',
+              image: bestSupplierImage,
+              confidence: bestSupplierImage.confidence >= 0.7 ? 'high' : 
+                        bestSupplierImage.confidence >= 0.5 ? 'medium' : 'low',
+              reason: 'intelligent_supplier_search'
+            }
+            
+            itemImages.allOptions.push(...supplierImages.map(img => ({ 
+              ...img, 
+              source: 'supplier_website', 
+              priority: 1.5 
+            })))
+            
+            console.log(`   🎯 Using supplier website images (confidence: ${(bestSupplierImage.confidence * 100).toFixed(1)}%)`)
+          } else {
+            console.log(`   ⚠️ No supplier images found via intelligent search`)
+          }
+        } else if (itemImages.vendorImages.length === 0 && !supplierInfo) {
+          console.log(`   ⚠️ Supplier info not available for intelligent search`)
+        }
+
+        // 3. GOOGLE IMAGES FALLBACK: Comprehensive Google Images search for real product photos
         if (itemImages.vendorImages.length === 0) {
           console.log(`   🔍 Searching Google Images with comprehensive strategy...`)
           itemImages.googleImages = await this.searchGoogleProductImages(item)
@@ -1828,15 +1862,15 @@ export class ImageProcessingService {
               priority: 2 
             })))
             
-            console.log(`   🎯 Using Google product images as primary source`)
+            console.log(`   🎯 Using Google product images as fallback`)
           } else {
             console.log(`   ⚠️ No relevant Google images found with any search strategy`)
           }
         } else {
-          console.log(`   ⏭️ Skipping Google image search (vendor images available)`)
+          console.log(`   ⏭️ Skipping Google image search (supplier images available)`)
         }
 
-        // 3. LAST RESORT: Placeholder if absolutely no images found
+        // 4. LAST RESORT: Placeholder if absolutely no images found
         if (!itemImages.recommended) {
           console.log(`   📦 No images found - using generic placeholder`)
           itemImages.placeholder = {

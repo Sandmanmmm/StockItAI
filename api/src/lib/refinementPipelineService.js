@@ -114,6 +114,8 @@ export class RefinementPipelineService {
     try {
       // Step 1: Extract vendor images from original PO content
       let vendorImages = []
+      let supplierInfo = null
+      
       if (purchaseOrderData?.originalContent) {
         console.log('📸 Extracting vendor images from PO content...')
         const extractedImages = await imageProcessingService.extractVendorImages(
@@ -125,13 +127,20 @@ export class RefinementPipelineService {
           ...extractedImages.vendorImages
         ]
         console.log(`✅ Extracted ${vendorImages.length} vendor images from PO`)
+        
+        // Extract supplier info for intelligent search
+        if (purchaseOrderData.parsedData?.supplier) {
+          supplierInfo = purchaseOrderData.parsedData.supplier
+          console.log(`📋 Supplier info available: ${supplierInfo.name || supplierInfo.website || 'Unknown'}`)
+        }
       }
 
-      // Step 2: Source images for all line items using hierarchy
+      // Step 2: Source images for all line items using hierarchy (with intelligent supplier search)
       console.log('🔍 Sourcing images using fallback hierarchy...')
       const imageResults = await imageProcessingService.sourceImagesWithHierarchy(
         lineItems,
-        vendorImages
+        vendorImages,
+        supplierInfo // Pass supplier info to enable intelligent search
       )
 
       // Step 3: Process and enhance images for Shopify
